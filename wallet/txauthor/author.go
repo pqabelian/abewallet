@@ -1,6 +1,7 @@
 package txauthor
 
 import (
+	"errors"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abec/txscript"
@@ -177,6 +178,7 @@ func (tx *AuthoredTx) RandomizeChangePosition() {
 // This would remove the ChainParams requirement of the interface and could
 // avoid unnecessary conversions from previous output scripts to Addresses.
 // This can not be done without modifications to the txscript package.
+//TODO(abe): this SecretSource  would be remake
 type SecretsSource interface {
 	txscript.KeyDB
 	txscript.ScriptDB
