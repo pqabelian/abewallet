@@ -3,9 +3,8 @@ module github.com/abesuite/abewallet
 go 1.14
 
 require (
-	github.com/abesuite/abec v0.0.0-20200730020952-3bb31543c26d
+	github.com/abesuite/abec v0.0.0-20200730061200-65ae04636fee
 	github.com/abesuite/go-spew v1.1.1
-	github.com/btcsuite/btcutil v1.0.2
 	github.com/envoyproxy/go-control-plane v0.9.6 // indirect
 	github.com/golang/protobuf v1.4.2
 	github.com/gorilla/websocket v1.4.2

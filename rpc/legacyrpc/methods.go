@@ -845,7 +845,8 @@ func getTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 			outputTotal += abeutil.Amount(output.Value)
 		}
 		fee = debitTotal - outputTotal
-		feeF64 = fee.ToBTC()
+		//feeF64 = fee.ToBTC()
+		feeF64 = fee.ToABE()
 	}
 
 	if len(details.Debits) == 0 {
@@ -1044,7 +1045,8 @@ func listAccounts(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 		return nil, err
 	}
 	for _, result := range results {
-		accountBalances[result.AccountName] = result.AccountBalance.ToBTC()
+		//accountBalances[result.AccountName] = result.AccountBalance.ToBTC()
+		accountBalances[result.AccountName] = result.AccountBalance.ToABE()
 	}
 	// Return the map.  This will be marshaled into a JSON object.
 	return accountBalances, nil
