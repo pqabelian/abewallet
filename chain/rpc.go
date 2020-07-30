@@ -7,8 +7,6 @@ import (
 
 	"github.com/abesuite/abec/abejson"
 	"github.com/abesuite/abec/abeutil"
-	"github.com/abesuite/abec/abeutil/gcs"
-	"github.com/abesuite/abec/abeutil/gcs/builder"
 	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/rpcclient"
@@ -199,85 +197,86 @@ func (c *RPCClient) BlockStamp() (*waddrmgr.BlockStamp, error) {
 // fetched and filtered. This method returns a FilterBlocksReponse for the first
 // block containing a matching address. If no matches are found in the range of
 // blocks requested, the returned response will be nil.
-func (c *RPCClient) FilterBlocks(
-	req *FilterBlocksRequest) (*FilterBlocksResponse, error) {
-
-	blockFilterer := NewBlockFilterer(c.chainParams, req)
-
-	// Construct the watchlist using the addresses and outpoints contained
-	// in the filter blocks request.
-	watchList, err := buildFilterBlocksWatchList(req)
-	if err != nil {
-		return nil, err
-	}
-
-	// Iterate over the requested blocks, fetching the compact filter for
-	// each one, and matching it against the watchlist generated above. If
-	// the filter returns a positive match, the full block is then requested
-	// and scanned for addresses using the block filterer.
-	for i, blk := range req.Blocks {
-		rawFilter, err := c.GetCFilter(&blk.Hash, wire.GCSFilterRegular)
-		if err != nil {
-			return nil, err
-		}
-
-		// Ensure the filter is large enough to be deserialized.
-		if len(rawFilter.Data) < 4 {
-			continue
-		}
-
-		filter, err := gcs.FromNBytes(
-			builder.DefaultP, builder.DefaultM, rawFilter.Data,
-		)
-		if err != nil {
-			return nil, err
-		}
-
-		// Skip any empty filters.
-		if filter.N() == 0 {
-			continue
-		}
-
-		key := builder.DeriveKey(&blk.Hash)
-		matched, err := filter.MatchAny(key, watchList)
-		if err != nil {
-			return nil, err
-		} else if !matched {
-			continue
-		}
-
-		log.Infof("Fetching block height=%d hash=%v",
-			blk.Height, blk.Hash)
-
-		rawBlock, err := c.GetBlock(&blk.Hash)
-		if err != nil {
-			return nil, err
-		}
-
-		if !blockFilterer.FilterBlock(rawBlock) {
-			continue
-		}
-
-		// If any external or internal addresses were detected in this
-		// block, we return them to the caller so that the rescan
-		// windows can widened with subsequent addresses. The
-		// `BatchIndex` is returned so that the caller can compute the
-		// *next* block from which to begin again.
-		resp := &FilterBlocksResponse{
-			BatchIndex:         uint32(i),
-			BlockMeta:          blk,
-			FoundExternalAddrs: blockFilterer.FoundExternal,
-			FoundInternalAddrs: blockFilterer.FoundInternal,
-			FoundOutPoints:     blockFilterer.FoundOutPoints,
-			RelevantTxns:       blockFilterer.RelevantTxns,
-		}
-
-		return resp, nil
-	}
-
-	// No addresses were found for this range.
-	return nil, nil
-}
+// TODO(abe): we don't need the block filter
+//func (c *RPCClient) FilterBlocks(
+//	req *FilterBlocksRequest) (*FilterBlocksResponse, error) {
+//
+//	blockFilterer := NewBlockFilterer(c.chainParams, req)
+//
+//	// Construct the watchlist using the addresses and outpoints contained
+//	// in the filter blocks request.
+//	watchList, err := buildFilterBlocksWatchList(req)
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	// Iterate over the requested blocks, fetching the compact filter for
+//	// each one, and matching it against the watchlist generated above. If
+//	// the filter returns a positive match, the full block is then requested
+//	// and scanned for addresses using the block filterer.
+//	for i, blk := range req.Blocks {
+//		rawFilter, err := c.GetCFilter(&blk.Hash, wire.GCSFilterRegular)
+//		if err != nil {
+//			return nil, err
+//		}
+//
+//		// Ensure the filter is large enough to be deserialized.
+//		if len(rawFilter.Data) < 4 {
+//			continue
+//		}
+//
+//		filter, err := gcs.FromNBytes(
+//			builder.DefaultP, builder.DefaultM, rawFilter.Data,
+//		)
+//		if err != nil {
+//			return nil, err
+//		}
+//
+//		// Skip any empty filters.
+//		if filter.N() == 0 {
+//			continue
+//		}
+//
+//		key := builder.DeriveKey(&blk.Hash)
+//		matched, err := filter.MatchAny(key, watchList)
+//		if err != nil {
+//			return nil, err
+//		} else if !matched {
+//			continue
+//		}
+//
+//		log.Infof("Fetching block height=%d hash=%v",
+//			blk.Height, blk.Hash)
+//
+//		rawBlock, err := c.GetBlock(&blk.Hash)
+//		if err != nil {
+//			return nil, err
+//		}
+//
+//		if !blockFilterer.FilterBlock(rawBlock) {
+//			continue
+//		}
+//
+//		// If any external or internal addresses were detected in this
+//		// block, we return them to the caller so that the rescan
+//		// windows can widened with subsequent addresses. The
+//		// `BatchIndex` is returned so that the caller can compute the
+//		// *next* block from which to begin again.
+//		resp := &FilterBlocksResponse{
+//			BatchIndex:         uint32(i),
+//			BlockMeta:          blk,
+//			FoundExternalAddrs: blockFilterer.FoundExternal,
+//			FoundInternalAddrs: blockFilterer.FoundInternal,
+//			FoundOutPoints:     blockFilterer.FoundOutPoints,
+//			RelevantTxns:       blockFilterer.RelevantTxns,
+//		}
+//
+//		return resp, nil
+//	}
+//
+//	// No addresses were found for this range.
+//	return nil, nil
+//}
 
 // parseBlock parses a btcws definition of the block a tx is mined it to the
 // Block structure of the wtxmgr package, and the block index.  This is done
