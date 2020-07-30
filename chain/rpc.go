@@ -197,7 +197,11 @@ func (c *RPCClient) BlockStamp() (*waddrmgr.BlockStamp, error) {
 // fetched and filtered. This method returns a FilterBlocksReponse for the first
 // block containing a matching address. If no matches are found in the range of
 // blocks requested, the returned response will be nil.
-// TODO(abe): we don't need the block filter
+// TODO(abe): we don't need the block filter, but for the interface.Interface, use a nil to replace it
+func (c *RPCClient) FilterBlocks(
+	req *FilterBlocksRequest) (*FilterBlocksResponse, error) {
+	return nil,nil
+}
 //func (c *RPCClient) FilterBlocks(
 //	req *FilterBlocksRequest) (*FilterBlocksResponse, error) {
 //
