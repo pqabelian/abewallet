@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 )
 
 // openRPCKeyPair creates or loads the RPC TLS keypair specified by the
@@ -103,48 +102,53 @@ func startRPCServers(walletLoader *wallet.Loader) (*grpc.Server, *legacyrpc.Serv
 		server       *grpc.Server
 		legacyServer *legacyrpc.Server
 		legacyListen = net.Listen
-		keyPair      tls.Certificate
-		err          error
+		/*		keyPair      tls.Certificate
+				err          error*/
 	)
 	if cfg.DisableServerTLS {
 		log.Info("Server TLS is disabled.  Only legacy RPC may be used")
 	} else {
-		keyPair, err = openRPCKeyPair()
-		if err != nil {
-			return nil, nil, err
-		}
+		//	todo(ABE): At this moment, ABE wallet supports legacy RPC only.
+		cfg.DisableServerTLS = true
+		log.Info("At this moment, ABE wallet supports legacy RPC only.")
 
-		// Change the standard net.Listen function to the tls one.
-		tlsConfig := &tls.Config{
-			Certificates: []tls.Certificate{keyPair},
-			MinVersion:   tls.VersionTLS12,
-			NextProtos:   []string{"h2"}, // HTTP/2 over TLS
-		}
-		legacyListen = func(net string, laddr string) (net.Listener, error) {
-			return tls.Listen(net, laddr, tlsConfig)
-		}
+		/*		keyPair, err = openRPCKeyPair()
+				if err != nil {
+					return nil, nil, err
+				}
 
-		if len(cfg.ExperimentalRPCListeners) != 0 {
-			listeners := makeListeners(cfg.ExperimentalRPCListeners, net.Listen)
-			if len(listeners) == 0 {
-				err := errors.New("failed to create listeners for RPC server")
-				return nil, nil, err
-			}
-			creds := credentials.NewServerTLSFromCert(&keyPair)
-			server = grpc.NewServer(grpc.Creds(creds))
-			rpcserver.StartVersionService(server)
-			rpcserver.StartWalletLoaderService(server, walletLoader, activeNet)
-			for _, lis := range listeners {
-				lis := lis
-				go func() {
-					log.Infof("Experimental RPC server listening on %s",
-						lis.Addr())
-					err := server.Serve(lis)
-					log.Tracef("Finished serving expimental RPC: %v",
-						err)
-				}()
-			}
-		}
+				// Change the standard net.Listen function to the tls one.
+				tlsConfig := &tls.Config{
+					Certificates: []tls.Certificate{keyPair},
+					MinVersion:   tls.VersionTLS12,
+					NextProtos:   []string{"h2"}, // HTTP/2 over TLS
+				}
+				//	todo(ABE): legacyListen returns a tls.Listen
+				legacyListen = func(net string, laddr string) (net.Listener, error) {
+					return tls.Listen(net, laddr, tlsConfig)
+				}
+
+				if len(cfg.ExperimentalRPCListeners) != 0 {
+					listeners := makeListeners(cfg.ExperimentalRPCListeners, net.Listen)
+					if len(listeners) == 0 {
+						err := errors.New("failed to create listeners for RPC server")
+						return nil, nil, err
+					}
+					creds := credentials.NewServerTLSFromCert(&keyPair)
+					server = grpc.NewServer(grpc.Creds(creds))
+					rpcserver.StartVersionService(server)
+					rpcserver.StartWalletLoaderService(server, walletLoader, activeNet)
+					for _, lis := range listeners {
+						lis := lis
+						go func() {
+							log.Infof("Experimental RPC server listening on %s",
+								lis.Addr())
+							err := server.Serve(lis)
+							log.Tracef("Finished serving expimental RPC: %v",
+								err)
+						}()
+					}
+				}*/
 	}
 
 	if cfg.Username == "" || cfg.Password == "" {

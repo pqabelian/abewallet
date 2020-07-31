@@ -65,7 +65,6 @@ func walletMain() error {
 	// Create and start HTTP server to serve wallet client connections.
 	// This will be updated with the wallet and chain server RPC client
 	// created below after each is created.
-	//	todo(ABE): shall remove the legacyRPCServer
 	rpcs, legacyRPCServer, err := startRPCServers(loader)
 	if err != nil {
 		log.Errorf("Unable to create RPC servers: %v", err)
@@ -75,7 +74,6 @@ func walletMain() error {
 	// Create and start chain RPC client so it's ready to connect to
 	// the wallet when loaded later.
 	if !cfg.NoInitialLoad {
-		//	todo(ABE): legacyRPCServer is optional, ABE will remove it.
 		go rpcClientConnectLoop(legacyRPCServer, loader)
 	}
 
@@ -148,7 +146,7 @@ func rpcClientConnectLoop(legacyRPCServer *legacyrpc.Server, loader *wallet.Load
 		)
 
 		if cfg.UseSPV {
-			//	todo (ABE): ABE does not support SPV at his moment.
+			//	todo (ABE): ABE does not support SPV at this moment.
 			log.Errorf("Does not suppport SPV at this moment.")
 
 			//var (

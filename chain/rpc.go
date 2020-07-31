@@ -65,6 +65,7 @@ func NewRPCClient(chainParams *chaincfg.Params, connect, user, pass string, cert
 		quit:                make(chan struct{}),
 	}
 	ntfnCallbacks := &rpcclient.NotificationHandlers{
+		//	todo(ABE): some are not supported, and should be removed.
 		OnClientConnected:   client.onClientConnect,
 		OnBlockConnected:    client.onBlockConnected,
 		OnBlockDisconnected: client.onBlockDisconnected,
@@ -200,8 +201,9 @@ func (c *RPCClient) BlockStamp() (*waddrmgr.BlockStamp, error) {
 // TODO(abe): we don't need the block filter, but for the interface.Interface, use a nil to replace it
 func (c *RPCClient) FilterBlocks(
 	req *FilterBlocksRequest) (*FilterBlocksResponse, error) {
-	return nil,nil
+	return nil, nil
 }
+
 //func (c *RPCClient) FilterBlocks(
 //	req *FilterBlocksRequest) (*FilterBlocksResponse, error) {
 //

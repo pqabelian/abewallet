@@ -458,7 +458,7 @@ out:
 			switch req.Method {
 			case "stop":
 				resp := makeResponse(req.ID,
-					"btcwallet stopping.", nil)
+					"abewallet stopping.", nil)
 				mresp, err := json.Marshal(resp)
 				// Expected to never fail.
 				if err != nil {
@@ -602,7 +602,7 @@ func (s *Server) postClientRPC(w http.ResponseWriter, r *http.Request) {
 		return
 	case "stop":
 		stop = true
-		res = "btcwallet stopping"
+		res = "abewallet stopping"
 	default:
 		res, jsonErr = s.handlerClosure(&req)()
 	}
