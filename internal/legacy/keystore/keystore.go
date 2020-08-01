@@ -470,7 +470,7 @@ func (net *netParams) ReadFrom(r io.Reader) (int64, error) {
 		return n64, err
 	}
 
-	switch wire.BitcoinNet(binary.LittleEndian.Uint32(uint32Bytes)) {
+	switch wire.AbelianNet(binary.LittleEndian.Uint32(uint32Bytes)) {
 	case wire.MainNet:
 		*net = (netParams)(chaincfg.MainNetParams)
 	case wire.TestNet3:

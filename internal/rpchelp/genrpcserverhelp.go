@@ -1,4 +1,3 @@
-
 //+build generate
 
 package main
@@ -9,8 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/btcsuite/abec/abejson"
-	"github.com/btcsuite/abewallet/internal/rpchelp"
+	"github.com/abesuite/abewallet/internal/rpchelp"
 )
 
 var outputFile = func() *os.File {

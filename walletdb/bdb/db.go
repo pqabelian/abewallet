@@ -2,6 +2,7 @@ package bdb
 
 import (
 	"github.com/abesuite/abewallet/walletdb"
+	"go.etcd.io/bbolt"
 	"io"
 	"os"
 )

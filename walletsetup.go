@@ -3,6 +3,10 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/btcec"
 	"github.com/abesuite/abec/chaincfg"
@@ -12,9 +16,7 @@ import (
 	"github.com/abesuite/abewallet/waddrmgr"
 	"github.com/abesuite/abewallet/wallet"
 	"github.com/abesuite/abewallet/walletdb"
-	"os"
-	"path/filepath"
-	"time"
+	_ "github.com/abesuite/abewallet/walletdb/bdb"
 )
 
 // networkDir returns the directory name of a network directory to hold wallet
