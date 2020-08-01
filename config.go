@@ -415,7 +415,7 @@ func loadConfig() (*config, []string, error) {
 	dbPath := filepath.Join(netDir, walletDbName)
 
 	//	todo(ABE):
-	cfg.Create = true //	todo(ABE): to be removed
+	//	cfg.Create = true //	todo(ABE): to be removed
 
 	if cfg.CreateTemp && cfg.Create {
 		err := fmt.Errorf("The flags --create and --createtemp can not " +
