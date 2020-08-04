@@ -733,6 +733,36 @@ func (s *loaderServer) CreateWallet(ctx context.Context, req *pb.CreateWalletReq
 
 	return &pb.CreateWalletResponse{}, nil
 }
+//TODO(abe):
+func (s *loaderServer) CreateWalletAbe(ctx context.Context, req *pb.CreateWalletRequest) (
+	*pb.CreateWalletResponse, error) {
+
+	defer func() {
+		zero.Bytes(req.PrivatePassphrase)
+		zero.Bytes(req.Seed)
+	}()
+
+	// Use an insecure public passphrase when the request's is empty.
+	pubPassphrase := req.PublicPassphrase
+	if len(pubPassphrase) == 0 {
+		pubPassphrase = []byte(wallet.InsecurePubPassphrase)
+	}
+
+	wallet, err := s.loader.CreateNewWalletAbe(
+		pubPassphrase, req.PrivatePassphrase, req.Seed, time.Now(),
+	)
+	if err != nil {
+		return nil, translateError(err)
+	}
+
+	s.mu.Lock()
+	if s.rpcClient != nil {
+		wallet.SynchronizeRPC(s.rpcClient)
+	}
+	s.mu.Unlock()
+
+	return &pb.CreateWalletResponse{}, nil
+}
 
 func (s *loaderServer) OpenWallet(ctx context.Context, req *pb.OpenWalletRequest) (
 	*pb.OpenWalletResponse, error) {

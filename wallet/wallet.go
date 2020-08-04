@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/abejson"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/abeutil/hdkeychain"
@@ -3711,6 +3712,14 @@ func Create(db walletdb.DB, pubPass, privPass, seed []byte,
 		db, pubPass, privPass, seed, params, birthday, false,
 	)
 }
+// TODO(abe):
+func CreateAbe(db walletdb.DB, pubPass, privPass, seed []byte,
+	params *chaincfg.Params, birthday time.Time) error {
+
+	return createAbe(
+		db, pubPass, privPass, seed, params, birthday, false,
+	)
+}
 
 // CreateWatchingOnly creates an new watch-only wallet, writing it to
 // an empty database. No seed can be provided as this wallet will be
@@ -3720,6 +3729,14 @@ func CreateWatchingOnly(db walletdb.DB, pubPass []byte,
 	params *chaincfg.Params, birthday time.Time) error {
 
 	return create(
+		db, pubPass, nil, nil, params, birthday, true,
+	)
+}
+//TODO(abe):
+func CreateWatchingOnlyAbe(db walletdb.DB, pubPass []byte,
+	params *chaincfg.Params, birthday time.Time) error {
+
+	return createAbe(
 		db, pubPass, nil, nil, params, birthday, true,
 	)
 }
@@ -3759,6 +3776,51 @@ func create(db walletdb.DB, pubPass, privPass, seed []byte,
 		}
 
 		err = waddrmgr.Create(
+			addrmgrNs, seed, pubPass, privPass, params, nil, birthday,
+		)
+		if err != nil {
+			return err
+		}
+		return wtxmgr.Create(txmgrNs)
+	})
+}
+// TODO(abe):
+func createAbe(db walletdb.DB, pubPass, privPass, seed []byte,
+	params *chaincfg.Params, birthday time.Time, isWatchingOnly bool) error {
+
+	if !isWatchingOnly {
+		// If a seed was provided, ensure that it is of valid length. Otherwise,
+		// we generate a random seed for the wallet with the recommended seed
+		// length.
+		if seed == nil {
+			//	todo(ABE.MUST): the generation of the seed
+			//	How does ABE generates the seed? By outputting the seed in the process of generating MPK.
+			//	Or generating
+			//hdSeed, err := hdkeychain.GenerateSeed(
+			//	hdkeychain.RecommendedSeedLen)
+			salrsSeed,err:= abesalrs.GenerateSeed(abesalrs.RecommendedSeedLen)
+			if err != nil {
+				return err
+			}
+			seed = salrsSeed
+		}
+		if len(seed) < abesalrs.MinSeedBytes || len(seed) > abesalrs.MaxSeedBytes {
+			return abesalrs.ErrInvalidSeedLen
+		}
+
+	}
+
+	return walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
+		addrmgrNs, err := tx.CreateTopLevelBucket(waddrmgrNamespaceKey)
+		if err != nil {
+			return err
+		}
+		txmgrNs, err := tx.CreateTopLevelBucket(wtxmgrNamespaceKey)
+		if err != nil {
+			return err
+		}
+
+		err = waddrmgr.CreateAbe(
 			addrmgrNs, seed, pubPass, privPass, params, nil, birthday,
 		)
 		if err != nil {
