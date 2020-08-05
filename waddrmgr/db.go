@@ -231,12 +231,13 @@ var (
 	// private key. This key is encrypted with the master private crypto
 	// encryption key. This resides under the main bucket.
 	masterHDPrivName = []byte("mhdpriv")
-
+	masterSecretSignName = []byte("mssk")
 	// masterHDPubName is the name of the key that stores the master HD
 	// public key. This key is encrypted with the master public crypto
 	// encryption key. This reside under the main bucket.
 	masterHDPubName = []byte("mhdpub")
-
+	masterSecretViewName = []byte("msvk")
+	masterPubName = []byte("mpk")
 	// syncBucketName is the name of the bucket that stores the current
 	// sync state of the root manager.
 	syncBucketName = []byte("sync")
@@ -553,6 +554,41 @@ func putMasterHDKeys(ns walletdb.ReadWriteBucket, masterHDPrivEnc, masterHDPubEn
 
 	if masterHDPubEnc != nil {
 		err := bucket.Put(masterHDPubName, masterHDPubEnc)
+		if err != nil {
+			str := "failed to store encrypted master HD public key"
+			return managerError(ErrDatabase, str, err)
+		}
+	}
+
+	return nil
+}
+//TODO(abe):
+func putMasterKeysAbe(ns walletdb.ReadWriteBucket, masterSecretSignKeyEnc,
+	masterSecretViewKeyEnc, masterPubKeyEnc []byte) error {
+	// As this is the key for the root manager, we don't need to fetch any
+	// particular scope, and can insert directly within the main bucket.
+	bucket := ns.NestedReadWriteBucket(mainBucketName)
+
+	// Now that we have the main bucket, we can directly store each of the
+	// relevant keys. If we're in watch only mode, then some or all of
+	// these keys might not be available.
+	if masterSecretSignKeyEnc != nil {
+		err := bucket.Put(masterSecretSignName, masterSecretSignKeyEnc)
+		if err != nil {
+			str := "failed to store encrypted master private signing key"
+			return managerError(ErrDatabase, str, err)
+		}
+	}
+	if masterSecretViewKeyEnc != nil {
+		err := bucket.Put(masterSecretSignName, masterSecretViewKeyEnc)
+		if err != nil {
+			str := "failed to store encrypted master private signing key"
+			return managerError(ErrDatabase, str, err)
+		}
+	}
+
+	if masterPubKeyEnc != nil {
+		err := bucket.Put(masterPubName, masterPubKeyEnc)
 		if err != nil {
 			str := "failed to store encrypted master HD public key"
 			return managerError(ErrDatabase, str, err)

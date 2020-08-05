@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha512"
 	"fmt"
+	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/abeutil/hdkeychain"
 	"github.com/abesuite/abec/chaincfg"
@@ -1871,6 +1872,231 @@ func Create(ns walletdb.ReadWriteBucket,
 			return maybeConvertDbError(err)
 		}
 		err = putMasterHDKeys(ns, masterHDPrivKeyEnc, masterHDPubKeyEnc)
+		if err != nil {
+			return maybeConvertDbError(err)
+		}
+
+		privParams = masterKeyPriv.Marshal()
+	}
+
+	// Save the master key params to the database.
+	err = putMasterKeyParams(ns, pubParams, privParams)
+	if err != nil {
+		return maybeConvertDbError(err)
+	}
+
+	// Save the encrypted crypto keys to the database.
+	err = putCryptoKeys(ns, cryptoKeyPubEnc, cryptoKeyPrivEnc,
+		cryptoKeyScriptEnc)
+	if err != nil {
+		return maybeConvertDbError(err)
+	}
+
+	// Save the watching-only mode of the address manager to the
+	// database.
+	err = putWatchingOnly(ns, isWatchingOnly)
+	if err != nil {
+		return maybeConvertDbError(err)
+	}
+
+	// Save the initial synced to state.
+	err = PutSyncedTo(ns, &syncInfo.syncedTo)
+	if err != nil {
+		return maybeConvertDbError(err)
+	}
+	err = putStartBlock(ns, &syncInfo.startBlock)
+	if err != nil {
+		return maybeConvertDbError(err)
+	}
+
+	// Use 48 hours as margin of safety for wallet birthday.
+	return putBirthday(ns, birthday.Add(-48*time.Hour))
+}
+
+func CreateAbe(ns walletdb.ReadWriteBucket,
+	seed, pubPassphrase, privPassphrase []byte,
+	chainParams *chaincfg.Params, config *ScryptOptions,
+	birthday time.Time) error {
+
+	// If the seed argument is nil we create in watchingOnly mode.
+	isWatchingOnly := seed == nil
+
+	// Return an error if the manager has already been created in
+	// the given database namespace.
+	exists := managerExists(ns)
+	if exists {
+		return managerError(ErrAlreadyExists, errAlreadyExists, nil)
+	}
+
+	// Ensure the private passphrase is not empty.
+	if !isWatchingOnly && len(privPassphrase) == 0 {
+		str := "private passphrase may not be empty"
+		return managerError(ErrEmptyPassphrase, str, nil)
+	}
+
+	// TODO(abe):this scope will be removed because we do not support it
+	// Perform the initial bucket creation and database namespace setup.
+	defaultScopes := map[KeyScope]ScopeAddrSchema{}
+	if !isWatchingOnly {
+		defaultScopes = ScopeAddrMap
+	}
+	if err := createManagerNS(ns, defaultScopes); err != nil {
+		return maybeConvertDbError(err)
+	}
+
+	if config == nil {
+		config = &DefaultScryptOptions
+	}
+
+	// Generate new master keys.  These master keys are used to protect the
+	// crypto keys that will be generated next.
+	masterKeyPub, err := newSecretKey(&pubPassphrase, config)
+	if err != nil {
+		str := "failed to master public key"
+		return managerError(ErrCrypto, str, err)
+	}
+
+	// Generate new crypto public, private, and script keys.  These keys are
+	// used to protect the actual public and private data such as addresses,
+	// extended keys, and scripts.
+	cryptoKeyPub, err := newCryptoKey()
+	if err != nil {
+		str := "failed to generate crypto public key"
+		return managerError(ErrCrypto, str, err)
+	}
+
+	// Encrypt the crypto keys with the associated master keys.
+	cryptoKeyPubEnc, err := masterKeyPub.Encrypt(cryptoKeyPub.Bytes())
+	if err != nil {
+		str := "failed to encrypt crypto public key"
+		return managerError(ErrCrypto, str, err)
+	}
+
+	// Use the genesis block for the passed chain as the created at block
+	// for the default.
+	createdAt := &BlockStamp{
+		Hash:      *chainParams.GenesisHash,
+		Height:    0,
+		Timestamp: chainParams.GenesisBlock.Header.Timestamp,
+	}
+
+	// Create the initial sync state.
+	syncInfo := newSyncState(createdAt, createdAt)
+
+	pubParams := masterKeyPub.Marshal()
+
+	var privParams []byte = nil
+	var masterKeyPriv *snacl.SecretKey
+	var cryptoKeyPrivEnc []byte = nil
+	var cryptoKeyScriptEnc []byte = nil
+	if !isWatchingOnly {
+		masterKeyPriv, err = newSecretKey(&privPassphrase, config)
+		if err != nil {
+			str := "failed to master private key"
+			return managerError(ErrCrypto, str, err)
+		}
+		defer masterKeyPriv.Zero()
+
+		// Generate the private passphrase salt.  This is used when
+		// hashing passwords to detect whether an unlock can be
+		// avoided when the manager is already unlocked.
+		var privPassphraseSalt [saltSize]byte
+		_, err = rand.Read(privPassphraseSalt[:])
+		if err != nil {
+			str := "failed to read random source for passphrase salt"
+			return managerError(ErrCrypto, str, err)
+		}
+
+		cryptoKeyPriv, err := newCryptoKey()
+		if err != nil {
+			str := "failed to generate crypto private key"
+			return managerError(ErrCrypto, str, err)
+		}
+		defer cryptoKeyPriv.Zero()
+		cryptoKeyScript, err := newCryptoKey()
+		if err != nil {
+			str := "failed to generate crypto script key"
+			return managerError(ErrCrypto, str, err)
+		}
+		defer cryptoKeyScript.Zero()
+
+		cryptoKeyPrivEnc, err =
+			masterKeyPriv.Encrypt(cryptoKeyPriv.Bytes())
+		if err != nil {
+			str := "failed to encrypt crypto private key"
+			return managerError(ErrCrypto, str, err)
+		}
+		cryptoKeyScriptEnc, err =
+			masterKeyPriv.Encrypt(cryptoKeyScript.Bytes())
+		if err != nil {
+			str := "failed to encrypt crypto script key"
+			return managerError(ErrCrypto, str, err)
+		}
+
+		// Generate the BIP0044 HD key structure to ensure the
+		// provided seed can generate the required structure with no
+		// issues.
+
+		// Derive the master extended key from the seed.
+		//	todo(ABE): generate the master public key, master secret view key, and master secret spend key.
+		//rootKey, err := hdkeychain.NewMaster(seed, chainParams)
+		//if err != nil {
+		//	str := "failed to derive master extended key"
+		//	return managerError(ErrKeyChain, str, err)
+		//}
+		//rootPubKey, err := rootKey.Neuter()
+		//if err != nil {
+		//	str := "failed to neuter master extended key"
+		//	return managerError(ErrKeyChain, str, err)
+		//}
+		mpk, msvk, mssk, _, err := abesalrs.GenerateMasterKey(seed)
+		if err!=nil {
+			return fmt.Errorf("failed to generate master key")
+		}
+		// Next, for each registers default manager scope, we'll
+		// create the hardened cointype key for it, as well as the
+		// first default account.
+		//	todo(ABE): ABE does not support key scope
+		//for _, defaultScope := range DefaultKeyScopes {
+		//	err := createManagerKeyScope(
+		//		ns, defaultScope, rootKey, cryptoKeyPub, cryptoKeyPriv,
+		//	)
+		//	if err != nil {
+		//		return maybeConvertDbError(err)
+		//	}
+		//}
+
+		// Before we proceed, we'll also store the root master private
+		// key within the database in an encrypted format. This is
+		// required as in the future, we may need to create additional
+		// scoped key managers.
+		//masterHDPrivKeyEnc, err :=
+		//	cryptoKeyPriv.Encrypt([]byte(rootKey.String()))
+		//if err != nil {
+		//	return maybeConvertDbError(err)
+		//}
+		//masterHDPubKeyEnc, err :=
+		//	cryptoKeyPub.Encrypt([]byte(rootPubKey.String()))
+		//if err != nil {
+		//	return maybeConvertDbError(err)
+		//}
+		masterSecretSignKeyEnc, err :=
+			cryptoKeyPriv.Encrypt(mssk.Serialize())
+		if err != nil {
+			return maybeConvertDbError(err)
+		}
+		masterSecretViewKeyEnc, err :=
+			cryptoKeyPub.Encrypt(msvk.Serialize())
+		if err != nil {
+			return maybeConvertDbError(err)
+		}
+		masterPubKeyEnc, err :=
+			cryptoKeyPub.Encrypt(mpk.Serialize())
+		if err != nil {
+			return maybeConvertDbError(err)
+		}
+		err = putMasterKeysAbe(ns, masterSecretSignKeyEnc,
+			masterSecretViewKeyEnc,masterPubKeyEnc)
 		if err != nil {
 			return maybeConvertDbError(err)
 		}

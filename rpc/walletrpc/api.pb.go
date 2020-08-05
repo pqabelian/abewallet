@@ -2352,11 +2352,14 @@ func (c *walletLoaderServiceClient) StartConsensusRpc(ctx context.Context, in *S
 
 type WalletLoaderServiceServer interface {
 	WalletExists(context.Context, *WalletExistsRequest) (*WalletExistsResponse, error)
-	CreateWallet(context.Context, *CreateWalletRequest) (*CreateWalletResponse, error)
+	//TODO(abe):
+	//CreateWallet(context.Context, *CreateWalletRequest) (*CreateWalletResponse, error)
+	CreateWalletAbe(context.Context, *CreateWalletRequest) (*CreateWalletResponse, error)
 	OpenWallet(context.Context, *OpenWalletRequest) (*OpenWalletResponse, error)
 	CloseWallet(context.Context, *CloseWalletRequest) (*CloseWalletResponse, error)
 	StartConsensusRpc(context.Context, *StartConsensusRpcRequest) (*StartConsensusRpcResponse, error)
 }
+
 
 func RegisterWalletLoaderServiceServer(s *grpc.Server, srv WalletLoaderServiceServer) {
 	s.RegisterService(&_WalletLoaderService_serviceDesc, srv)
@@ -2386,14 +2389,16 @@ func _WalletLoaderService_CreateWallet_Handler(srv interface{}, ctx context.Cont
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(WalletLoaderServiceServer).CreateWallet(ctx, in)
+		//TODO(abe):
+		//return srv.(WalletLoaderServiceServer).CreateWallet(ctx, in)
+		return srv.(WalletLoaderServiceServer).CreateWalletAbe(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
 		FullMethod: "/walletrpc.WalletLoaderService/CreateWallet",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(WalletLoaderServiceServer).CreateWallet(ctx, req.(*CreateWalletRequest))
+		return srv.(WalletLoaderServiceServer).CreateWalletAbe(ctx, req.(*CreateWalletRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
