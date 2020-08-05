@@ -69,10 +69,11 @@ func NewRPCClient(chainParams *chaincfg.Params, connect, user, pass string, cert
 		OnClientConnected:   client.onClientConnect,
 		OnBlockConnected:    client.onBlockConnected,
 		OnBlockDisconnected: client.onBlockDisconnected,
-		OnRecvTx:            client.onRecvTx,
-		OnRedeemingTx:       client.onRedeemingTx,
-		OnRescanFinished:    client.onRescanFinished,
-		OnRescanProgress:    client.onRescanProgress,
+		//	todo(ABE): ABE does not support OutPointSpent and addressReceive notifications.
+		//		OnRecvTx:            client.onRecvTx,
+		//		OnRedeemingTx:       client.onRedeemingTx,
+		OnRescanFinished: client.onRescanFinished,
+		OnRescanProgress: client.onRescanProgress,
 	}
 	rpcClient, err := rpcclient.New(client.connConfig, ntfnCallbacks)
 	if err != nil {
@@ -85,7 +86,8 @@ func NewRPCClient(chainParams *chaincfg.Params, connect, user, pass string, cert
 // BackEnd returns the name of the driver.
 func (c *RPCClient) BackEnd() string {
 	//	todo(ABE.MUST)
-	return "btcd"
+	//	return "btcd"
+	return "abec"
 }
 
 // Start attempts to establish a client connection with the remote server.
@@ -305,6 +307,7 @@ func parseBlock(block *abejson.BlockDetails) (*wtxmgr.BlockMeta, error) {
 	return blk, nil
 }
 
+//	todo(ABE):
 func (c *RPCClient) onClientConnect() {
 	select {
 	case c.enqueueNotification <- ClientConnected{}:
@@ -338,6 +341,7 @@ func (c *RPCClient) onBlockDisconnected(hash *chainhash.Hash, height int32, time
 	}
 }
 
+//	todo(ABE): ABE does not support OutPointSpent and addressReceive notifications.
 func (c *RPCClient) onRecvTx(tx *abeutil.Tx, block *abejson.BlockDetails) {
 	blk, err := parseBlock(block)
 	if err != nil {
@@ -378,6 +382,7 @@ func (c *RPCClient) onRescanFinished(hash *chainhash.Hash, height int32, blkTime
 
 }
 
+//	todo(ABE): the notification handlers such as OnBlockConnected send messages to c.enqueueNotification and trigger this handler
 // handler maintains a queue of notifications and the current state (best
 // block) of the chain.
 func (c *RPCClient) handler() {

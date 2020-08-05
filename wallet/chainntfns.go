@@ -121,11 +121,15 @@ func (w *Wallet) handleChainNotifications() {
 					return w.disconnectBlock(tx, wtxmgr.BlockMeta(n))
 				})
 				notificationName = "block disconnected"
+
+				//	todo(ABE): ABE does not support OutPointSpent and addressReceive notifications.
 			case chain.RelevantTx:
 				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 					return w.addRelevantTx(tx, n.TxRecord, n.Block)
 				})
 				notificationName = "relevant transaction"
+
+				//	todo(ABE): ABE does not support filter.
 			case chain.FilteredBlockConnected:
 				// Atomically update for the whole block.
 				if len(n.RelevantTxs) > 0 {
@@ -266,6 +270,7 @@ func (w *Wallet) disconnectBlock(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 	return nil
 }
 
+//	todo(ABE): Wallet adds transactions to wallet db.
 func (w *Wallet) addRelevantTx(dbtx walletdb.ReadWriteTx, rec *wtxmgr.TxRecord, block *wtxmgr.BlockMeta) error {
 	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)

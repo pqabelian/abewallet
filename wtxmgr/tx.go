@@ -521,6 +521,7 @@ func (s *Store) Rollback(ns walletdb.ReadWriteBucket, height int32) error {
 	return s.rollback(ns, height)
 }
 
+//	todo(ABE):
 func (s *Store) rollback(ns walletdb.ReadWriteBucket, height int32) error {
 	minedBalance, err := fetchMinedBalance(ns)
 	if err != nil {

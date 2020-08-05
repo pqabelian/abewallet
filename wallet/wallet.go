@@ -354,15 +354,17 @@ func (w *Wallet) syncWithChain(birthdayStamp *waddrmgr.BlockStamp) error {
 	// make sure it's synced before we start scanning for addresses,
 	// otherwise we might miss some if we only scan up to its current sync
 	// point.
-	neutrinoRecovery := chainClient.BackEnd() == "neutrino" &&
-		w.recoveryWindow > 0
+	//	Todo(ABE): ABE does not support neutrino client
+	//neutrinoRecovery := chainClient.BackEnd() == "neutrino" &&
+	//	w.recoveryWindow > 0
 
 	// We'll wait until the backend is synced to ensure we get the latest
 	// MaxReorgDepth blocks to store. We don't do this for development
 	// environments as we can't guarantee a lively chain, except for
 	// Neutrino, where the cfheader server tells us what it believes the
 	// chain tip is.
-	if !w.isDevEnv() || neutrinoRecovery {
+	//if !w.isDevEnv() || neutrinoRecovery {
+	if !w.isDevEnv() {
 		log.Debug("Waiting for chain backend to sync to tip")
 		if err := w.waitUntilBackendSynced(chainClient); err != nil {
 			return err
@@ -509,6 +511,7 @@ func (w *Wallet) syncWithChain(birthdayStamp *waddrmgr.BlockStamp) error {
 	// Finally, we'll trigger a wallet rescan and request notifications for
 	// transactions sending to all wallet addresses and spending all wallet
 	// UTXOs.
+	//	todo(ABE): ABE needs to get each block and checks the transactions to see whether they should be put into wallet.
 	var (
 		addrs   []abeutil.Address
 		unspent []wtxmgr.Credit
