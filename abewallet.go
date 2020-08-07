@@ -60,6 +60,7 @@ func walletMain() error {
 	}
 
 	dbDir := networkDir(cfg.AppDataDir.Value, activeNet.Params)
+	//	todo(ABE): Note that here the recoveryWindow is set > 0, it will cause the walletRecovery
 	loader := wallet.NewLoader(activeNet.Params, dbDir, true, 250)
 
 	// Create and start HTTP server to serve wallet client connections.

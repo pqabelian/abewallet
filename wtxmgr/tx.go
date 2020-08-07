@@ -347,6 +347,9 @@ func (s *Store) deleteUnminedTx(ns walletdb.ReadWriteBucket, rec *TxRecord) erro
 // transaction's index must be unset.
 func (s *Store) InsertTx(ns walletdb.ReadWriteBucket, rec *TxRecord, block *BlockMeta) error {
 	if block == nil {
+		//	todo(ABE): Does ABE wallet need to care the transactions in mempool?
+		//	minds: ABE can spend TXOs of transactions confirmed by blocks, so that the transactions in memoopl do not provide any useful information.
+		//
 		return s.insertMemPoolTx(ns, rec)
 	}
 	return s.insertMinedTx(ns, rec, block)
@@ -599,7 +602,9 @@ func (s *Store) rollback(ns walletdb.ReadWriteBucket, height int32) error {
 				continue
 			}
 
-			err = putRawUnmined(ns, txHash[:], recVal)
+			err = putRawUnmined(ns, txHash[:], recVal) //	todo(ABE): The wallet maintains the transactions that are in mempool but not mined. Does ABE need this?
+			//	todo(ABE): As ABE cannot support filter or AddressReceiveNotifiction, or OutPointSpent notification, it will have to be notified for all transactions received by mempool.
+			//	 Thus, ABE may not need to maintain the unmined Tx.
 			if err != nil {
 				return err
 			}
@@ -651,6 +656,7 @@ func (s *Store) rollback(ns walletdb.ReadWriteBucket, height int32) error {
 				// rollback, the credit amount is zero.  Only
 				// mark the previously spent credit as unspent
 				// if it still exists.
+				//	todo(ABE): Why 'removed' by 'amount being zero'?
 				if amt == 0 {
 					continue
 				}
@@ -770,6 +776,7 @@ func (s *Store) UnspentOutputs(ns walletdb.ReadBucket) ([]Credit, error) {
 	var op wire.OutPoint
 	var block Block
 	err := ns.NestedReadBucket(bucketUnspent).ForEach(func(k, v []byte) error {
+		//	todo(ABE): k is for Outpoint (TxHash||Index), and b is for block (height||hash)
 		err := readCanonicalOutPoint(k, &op)
 		if err != nil {
 			return err
@@ -781,6 +788,7 @@ func (s *Store) UnspentOutputs(ns walletdb.ReadBucket) ([]Credit, error) {
 			return nil
 		}
 
+		//	todo(ABE): what happens when a TXO is spent and confirmed by a block?
 		if existsRawUnminedInput(ns, k) != nil {
 			// Output is spent by an unmined transaction.
 			// Skip this k/v pair.
@@ -799,6 +807,8 @@ func (s *Store) UnspentOutputs(ns walletdb.ReadBucket) ([]Credit, error) {
 		// TODO(jrick): reading the entire transaction should
 		// be avoidable.  Creating the credit only requires the
 		// output amount and pkScript.
+		//	todo(ABE): Agreed on that Creating the credit only requires the output amount and pkScript.
+		//	todo(ABE): The wallet database should be TXO-centric.
 		rec, err := fetchTxRecord(ns, &op.Hash, &block)
 		if err != nil {
 			return fmt.Errorf("unable to retrieve transaction %v: "+

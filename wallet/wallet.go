@@ -683,6 +683,8 @@ func (w *Wallet) recovery(chainClient chain.Interface,
 		return err
 	}
 
+	//	todo (ABE): Wallet Recovery first read the credits from database, then scan and catch up the chain.
+
 	// Now we can begin scanning the chain from the wallet's current tip to
 	// ensure we properly handle restarts. Since the recovery process itself
 	// acts as rescan, we'll also update our wallet's synced state along the
@@ -3715,6 +3717,7 @@ func Create(db walletdb.DB, pubPass, privPass, seed []byte,
 		db, pubPass, privPass, seed, params, birthday, false,
 	)
 }
+
 // TODO(abe):
 func CreateAbe(db walletdb.DB, pubPass, privPass, seed []byte,
 	params *chaincfg.Params, birthday time.Time) error {
@@ -3735,6 +3738,7 @@ func CreateWatchingOnly(db walletdb.DB, pubPass []byte,
 		db, pubPass, nil, nil, params, birthday, true,
 	)
 }
+
 //TODO(abe):
 func CreateWatchingOnlyAbe(db walletdb.DB, pubPass []byte,
 	params *chaincfg.Params, birthday time.Time) error {
@@ -3787,6 +3791,7 @@ func create(db walletdb.DB, pubPass, privPass, seed []byte,
 		return wtxmgr.Create(txmgrNs)
 	})
 }
+
 // TODO(abe):
 func createAbe(db walletdb.DB, pubPass, privPass, seed []byte,
 	params *chaincfg.Params, birthday time.Time, isWatchingOnly bool) error {
@@ -3801,7 +3806,7 @@ func createAbe(db walletdb.DB, pubPass, privPass, seed []byte,
 			//	Or generating
 			//hdSeed, err := hdkeychain.GenerateSeed(
 			//	hdkeychain.RecommendedSeedLen)
-			salrsSeed,err:= abesalrs.GenerateSeed(abesalrs.RecommendedSeedLen)
+			salrsSeed, err := abesalrs.GenerateSeed(abesalrs.RecommendedSeedLen)
 			if err != nil {
 				return err
 			}

@@ -1,9 +1,5 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/abesuite/abec v0.0.0-20200801085407-0233fd2d3db3 h1:J++HvTvco2QPW/ldf438pqM26Nqoas9pD44vyrYx7t4=
-github.com/abesuite/abec v0.0.0-20200801085407-0233fd2d3db3/go.mod h1:9hm5gzy1XB+jqTd2pVpH4/uHuIebg0vWYCUeJEd1+mc=
-github.com/abesuite/abec v0.0.0-20200803141545-f7471f9100a3 h1:wBFxanXb16Sne6ttCPPFX0AGEnvVGN2QM0cM/SGo1y0=
-github.com/abesuite/abec v0.0.0-20200803141545-f7471f9100a3/go.mod h1:9hm5gzy1XB+jqTd2pVpH4/uHuIebg0vWYCUeJEd1+mc=
 github.com/abesuite/abec v0.0.0-20200804023530-8221a22bc311 h1:rDX4Nhpml3111WOdOs5nqUw3qGogfr1GRxMrv1+r2ug=
 github.com/abesuite/abec v0.0.0-20200804023530-8221a22bc311/go.mod h1:YTypPGGiTDWtpo3njSp1Hkj+Suznpdw3BuT5YhE3inU=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd h1:BNI2MkhhtofxM0sTP8WmdcT4chaAKZOsyhspB58DSrM=
@@ -17,8 +13,6 @@ github.com/client9/misspell v0.3.4/go.mod h1:qj6jICC3Q7zFZvVWo7KLAzC3yx5G7kyvSDk
 github.com/cncf/udpa/go v0.0.0-20191209042840-269d4d468f6f/go.mod h1:M8M6+tZqaGXZJjfX53e64911xZQV5JYwmTeXPW+k8Sc=
 github.com/cryptosuite/kyber-go v0.0.0-20200701012546-a87ecb4b2ce3 h1:/7ZIZCf4WE/Sgq309oTJzepaeRvWkf5AOaieC7YVujs=
 github.com/cryptosuite/kyber-go v0.0.0-20200701012546-a87ecb4b2ce3/go.mod h1:1G0Jh7bXJGSUCTrC6ZB9lFpmCF+VFQehDqIwm9dJU3s=
-github.com/cryptosuite/salrs-go v0.0.0-20200711120347-3da7a58a2621 h1:IL/wIQXUtuah3IplutTEGcruIjWYiVZj/q3XBex7BRQ=
-github.com/cryptosuite/salrs-go v0.0.0-20200711120347-3da7a58a2621/go.mod h1:mJeCa86eOqj3kCJO+O4245Wnq5U07P9K9RfJplI8bQ4=
 github.com/cryptosuite/salrs-go v0.0.0-20200804021228-bff30b5fa6e8 h1:8driSRR/h0D2KfjbMXCuV8PI04jrkY0L6pwbpe5Na44=
 github.com/cryptosuite/salrs-go v0.0.0-20200804021228-bff30b5fa6e8/go.mod h1:mJeCa86eOqj3kCJO+O4245Wnq5U07P9K9RfJplI8bQ4=
 github.com/davecgh/go-spew v1.1.0 h1:ZDRjVQ15GmhC3fiQ8ni8+OwkZQO4DARzQgrnXU1Liz8=

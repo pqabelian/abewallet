@@ -52,6 +52,7 @@ var byteOrder = binary.BigEndian
 // assumption holds true.
 var _ [32]byte = chainhash.Hash{}
 
+//	todo(ABE): wallet buckets
 // Bucket names
 var (
 	bucketBlocks         = []byte("b")
@@ -136,6 +137,7 @@ func readCanonicalOutPoint(k []byte, op *wire.OutPoint) error {
 //   [44:]   For each transaction hash:
 //             Hash (32 bytes)
 
+//	todo(ABE): use only the height as the key, is it secure? Maybe OK, as the value contains the hash
 func keyBlockRecord(height int32) []byte {
 	k := make([]byte, 4)
 	byteOrder.PutUint32(k, uint32(height))
@@ -790,6 +792,7 @@ func putRawUnspent(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	return nil
 }
 
+//	todo(ABE): v=(blockheight || blockhash)
 func readUnspentBlock(v []byte, block *Block) error {
 	if len(v) < 36 {
 		str := "short unspent value"
