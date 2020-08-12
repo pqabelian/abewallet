@@ -1143,10 +1143,10 @@ type (
 )
 
 // txCreator is responsible for the input selection and creation of
-// transactions.  These functions are the responsibility of this method
+// transactions. These functions are the responsibility of this method
 // (designed to be run as its own goroutine) since input selection must be
 // serialized, or else it is possible to create double spends by choosing the
-// same inputs for multiple transactions.  Along with input selection, this
+// same inputs for multiple transactions. Along with input selection, this
 // method is also responsible for the signing of transactions, since we don't
 // want to end up in a situation where we run out of inputs as multiple
 // transactions are being created.  In this situation, it would then be possible
@@ -1409,6 +1409,7 @@ func (w *Wallet) ChangePublicPassphrase(old, new []byte) error {
 
 // ChangePassphrases modifies the public and private passphrase of the wallet
 // atomically.
+//	todo(ABE): This function is never used yet.
 func (w *Wallet) ChangePassphrases(publicOld, publicNew, privateOld,
 	privateNew []byte) error {
 

@@ -112,6 +112,8 @@ func (w *Wallet) handleChainNotifications() {
 						"wallet to chain: %v", err))
 				}
 			case chain.BlockConnected:
+				//	todo(ABE): Maybe here we do not call walletdb.Update(). Instead, we call w.connectBlock(), and in connectBlock() we call
+				//	walletdb.Update() at appropriate position.
 				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 					return w.connectBlock(tx, wtxmgr.BlockMeta(n))
 				})

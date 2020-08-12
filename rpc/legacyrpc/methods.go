@@ -67,6 +67,7 @@ var rpcHandlers = map[string]struct {
 	// handler function.
 	noHelp bool
 }{
+	//	todo(ABE): The supported RPC requests are here. We need to remove some that are not supported any more.
 	// Reference implementation wallet methods (implemented)
 	"addmultisigaddress":     {handler: addMultiSigAddress},
 	"createmultisig":         {handler: createMultiSig},

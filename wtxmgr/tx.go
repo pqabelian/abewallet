@@ -837,6 +837,7 @@ func (s *Store) UnspentOutputs(ns walletdb.ReadBucket) ([]Credit, error) {
 		return nil, storeError(ErrDatabase, str, err)
 	}
 
+	//	todo(ABE): For ABE, only the Txos confirmed by blocks and contained in some ring are spentable.
 	err = ns.NestedReadBucket(bucketUnminedCredits).ForEach(func(k, v []byte) error {
 		if err := readCanonicalOutPoint(k, &op); err != nil {
 			return err

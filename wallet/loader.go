@@ -172,6 +172,7 @@ func (l *Loader) createNewWallet(pubPassphrase, privPassphrase,
 	l.onLoaded(w, db)
 	return w, nil
 }
+
 //TODO(abe):
 func (l *Loader) createNewWalletAbe(pubPassphrase, privPassphrase,
 	seed []byte, bday time.Time, isWatchingOnly bool) (*Wallet, error) {
@@ -253,6 +254,7 @@ func (l *Loader) OpenExistingWallet(pubPassphrase []byte, canConsolePrompt bool)
 
 	// Open the database using the boltdb backend.
 	dbPath := filepath.Join(l.dbDirPath, walletDbName)
+	//	todo(ABE): Here the dbType is hardcoded as 'bdb'. Maybe need to define a global const.
 	db, err := walletdb.Open("bdb", dbPath, l.noFreelistSync)
 	if err != nil {
 		log.Errorf("Failed to open database: %v", err)

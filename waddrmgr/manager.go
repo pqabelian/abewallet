@@ -678,6 +678,7 @@ func (m *Manager) MarkUsed(ns walletdb.ReadWriteBucket, address abeutil.Address)
 
 // AddrAccount returns the account to which the given address belongs. We also
 // return the scoped manager that owns the addr+account combo.
+//	todo(ABE): what is the mechanism for that "addresses belong to an account."
 func (m *Manager) AddrAccount(ns walletdb.ReadBucket,
 	address abeutil.Address) (*ScopedKeyManager, uint32, error) {
 
@@ -2050,7 +2051,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 		//	return managerError(ErrKeyChain, str, err)
 		//}
 		mpk, msvk, mssk, _, err := abesalrs.GenerateMasterKey(seed)
-		if err!=nil {
+		if err != nil {
 			return fmt.Errorf("failed to generate master key")
 		}
 		// Next, for each registers default manager scope, we'll
@@ -2096,7 +2097,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 			return maybeConvertDbError(err)
 		}
 		err = putMasterKeysAbe(ns, masterSecretSignKeyEnc,
-			masterSecretViewKeyEnc,masterPubKeyEnc)
+			masterSecretViewKeyEnc, masterPubKeyEnc)
 		if err != nil {
 			return maybeConvertDbError(err)
 		}

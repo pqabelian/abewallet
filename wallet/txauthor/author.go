@@ -73,7 +73,7 @@ type ChangeSource func() ([]byte, error)
 //
 // If successful, the transaction, total input value spent, and all previous
 // output scripts are returned.  If the input source was unable to provide
-// enough input value to pay for every output any any necessary fees, an
+// enough input value to pay for every output and any necessary fees, an
 // InputSourceError is returned.
 //
 // BUGS: Fee estimation may be off when redeeming non-compressed P2PKH outputs.
@@ -185,7 +185,7 @@ type SecretsSource interface {
 	ChainParams() *chaincfg.Params
 }
 
-// AddAllInputScripts modifies transaction a transaction by adding inputs
+// AddAllInputScripts modifies a transaction by adding inputs
 // scripts for each input.  Previous output scripts being redeemed by each input
 // are passed in prevPkScripts and the slice length must match the number of
 // inputs.  Private keys and redeem scripts are looked up using a SecretsSource
