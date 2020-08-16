@@ -1,13 +1,13 @@
 //+build generate
-
+// TODO(abe): this package need to modify to match our method
 package main
 
 import (
 	"fmt"
+	"github.com/abesuite/abec/abejson"
 	"log"
 	"os"
 	"strings"
-
 	"github.com/abesuite/abewallet/internal/rpchelp"
 )
 
@@ -36,7 +36,7 @@ func writeLocaleHelp(locale, goLocale string, descs map[string]string) {
 	writefln("return map[string]string{")
 	for i := range rpchelp.Methods {
 		m := &rpchelp.Methods[i]
-		helpText, err := btcjson.GenerateHelp(m.Method, descs, m.ResultTypes...)
+		helpText, err := abejson.GenerateHelp(m.Method, descs, m.ResultTypes...)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -58,7 +58,7 @@ func writeUsage() {
 	usageStrs := make([]string, len(rpchelp.Methods))
 	var err error
 	for i := range rpchelp.Methods {
-		usageStrs[i], err = btcjson.MethodUsageText(rpchelp.Methods[i].Method)
+		usageStrs[i], err = abejson.MethodUsageText(rpchelp.Methods[i].Method)
 		if err != nil {
 			log.Fatal(err)
 		}

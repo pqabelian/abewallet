@@ -546,12 +546,12 @@ func loadConfig() (*config, []string, error) {
 				return nil, nil, err
 			}
 		} else {
-			// If CAFile is unset, choose either the copy or local btcd cert.
+			// If CAFile is unset, choose either the copy or local abec cert.
 			if !cfg.CAFile.ExplicitlySet() {
 				cfg.CAFile.Value = filepath.Join(cfg.AppDataDir.Value, defaultCAFilename)
 
 				// If the CA copy does not exist, check if we're connecting to
-				// a local btcd and switch to its RPC cert if it exists.
+				// a local abec and switch to its RPC cert if it exists.
 				certExists, err := cfgutil.FileExists(cfg.CAFile.Value)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
@@ -574,6 +574,7 @@ func loadConfig() (*config, []string, error) {
 		}
 	}
 
+	// TODO(abe): this section have something we must to do?
 	// Only set default RPC listeners when there are no listeners set for
 	// the experimental RPC server.  This is required to prevent the old RPC
 	// server from sharing listen addresses, since it is impossible to
@@ -658,6 +659,7 @@ func loadConfig() (*config, []string, error) {
 	cfg.RPCCert.Value = cleanAndExpandPath(cfg.RPCCert.Value)
 	cfg.RPCKey.Value = cleanAndExpandPath(cfg.RPCKey.Value)
 
+	// TODO(Abe): this part maybe can redesign.
 	// If the btcd username or password are unset, use the same auth as for
 	// the client.  The two settings were previously shared for btcd and
 	// client auth, so this avoids breaking backwards compatibility while

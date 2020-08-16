@@ -28,6 +28,7 @@ import (
 )
 
 const (
+	// TODO(abe) : if the legacy key store is delete, this value also
 	Filename = "wallet.bin"
 
 	// Length in bytes of KDF output.

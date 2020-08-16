@@ -105,6 +105,9 @@ func createWallet(cfg *config) error {
 	// entering a bunch of information.
 	netDir := networkDir(cfg.AppDataDir.Value, activeNet.Params)
 	keystorePath := filepath.Join(netDir, keystore.Filename)
+	// TODO(abe): the legacy key store may be can cancel for abe, it should be used
+	//  to compatible to old version of bitcoin core...
+	//  we just have one version at least now
 	var legacyKeyStore *keystore.Store
 	_, err := os.Stat(keystorePath)
 	if err != nil && !os.IsNotExist(err) {
@@ -132,6 +135,8 @@ func createWallet(cfg *config) error {
 	// callback to import all keystore keys into the new walletdb
 	// wallet
 	if legacyKeyStore != nil {
+		//TODO(abe): privpass should be input by user ... not holding in the memory
+		// Anyway, the keystore would be deleted
 		err = legacyKeyStore.Unlock(privPass)
 		if err != nil {
 			return err

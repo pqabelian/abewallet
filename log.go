@@ -47,13 +47,13 @@ var (
 	// is written to by the Write method of the logWriter type.
 	logRotatorPipe *io.PipeWriter
 
-	log          = backendLog.Logger("BTCW")
+	log          = backendLog.Logger("ABEW")
 	walletLog    = backendLog.Logger("WLLT")
 	txmgrLog     = backendLog.Logger("TMGR")
 	chainLog     = backendLog.Logger("CHNS")
 	grpcLog      = backendLog.Logger("GRPC")
 	legacyRPCLog = backendLog.Logger("RPCS")
-	btcnLog      = backendLog.Logger("BTCN")
+	//btcnLog      = backendLog.Logger("BTCN")
 )
 
 // Initialize package-global logger variables.
@@ -70,13 +70,13 @@ func init() {
 
 // subsystemLoggers maps each subsystem identifier to its associated logger.
 var subsystemLoggers = map[string]abelog.Logger{
-	"BTCW": log,
+	"ABEW": log,
 	"WLLT": walletLog,
 	"TMGR": txmgrLog,
 	"CHNS": chainLog,
 	"GRPC": grpcLog,
 	"RPCS": legacyRPCLog,
-	"BTCN": btcnLog,
+	//"BTCN": btcnLog,
 }
 
 // initLogRotator initializes the logging rotater to write logs to logFile and

@@ -5,6 +5,7 @@ import (
 	"github.com/abesuite/abewallet/walletdb/migration"
 )
 
+// TODO(abe): this slice should be re-design, we just have one version
 // versions is a list of the different database versions. The last entry should
 // reflect the latest database state. If the database happens to be at a version
 // number lower than the latest, migrations will be performed in order to catch

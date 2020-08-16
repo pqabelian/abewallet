@@ -43,6 +43,7 @@ func newNotificationServer(wallet *Wallet) *NotificationServer {
 	}
 }
 
+// lookupInputAccount look up the account which contain the address in the output the debit pointing to
 func lookupInputAccount(dbtx walletdb.ReadTx, w *Wallet, details *wtxmgr.TxDetails, deb wtxmgr.DebitRecord) uint32 {
 	addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
 	txmgrNs := dbtx.ReadBucket(wtxmgrNamespaceKey)
@@ -71,7 +72,7 @@ func lookupInputAccount(dbtx walletdb.ReadTx, w *Wallet, details *wtxmgr.TxDetai
 	}
 	return inputAcct
 }
-
+//lookupOutputChain look up the address chain which idetifies the address which is contained in the credit
 func lookupOutputChain(dbtx walletdb.ReadTx, w *Wallet, details *wtxmgr.TxDetails,
 	cred wtxmgr.CreditRecord) (account uint32, internal bool) {
 
