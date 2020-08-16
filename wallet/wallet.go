@@ -528,6 +528,190 @@ func (w *Wallet) syncWithChain(birthdayStamp *waddrmgr.BlockStamp) error {
 	return w.rescanWithTarget(addrs, unspent, nil)
 }
 
+func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
+	chainClient, err := w.requireChainClient()
+	if err != nil {
+		return err
+	}
+
+	// Neutrino relies on the information given to it by the cfheader server
+	// so it knows exactly whether it's synced up to the server's state or
+	// not, even on dev chains. To recover a Neutrino wallet, we need to
+	// make sure it's synced before we start scanning for addresses,
+	// otherwise we might miss some if we only scan up to its current sync
+	// point.
+	//	Todo(ABE): ABE does not support neutrino client
+	//neutrinoRecovery := chainClient.BackEnd() == "neutrino" &&
+	//	w.recoveryWindow > 0
+
+	// We'll wait until the backend is synced to ensure we get the latest
+	// MaxReorgDepth blocks to store. We don't do this for development
+	// environments as we can't guarantee a lively chain, except for
+	// Neutrino, where the cfheader server tells us what it believes the
+	// chain tip is.
+	//if !w.isDevEnv() || neutrinoRecovery {
+	if !w.isDevEnv() {
+		log.Debug("Waiting for chain backend to sync to tip")
+		if err := w.waitUntilBackendSynced(chainClient); err != nil {
+			return err
+		}
+		log.Debug("Chain backend synced to tip!")
+	}
+
+	// If we've yet to find our birthday block, we'll do so now.
+	if birthdayStamp == nil {
+		var err error
+		birthdayStamp, err = locateBirthdayBlock(
+			chainClient, w.Manager.Birthday(),
+		)
+		if err != nil {
+			return fmt.Errorf("unable to locate birthday block: %v",
+				err)
+		}
+
+		// We'll also determine our initial sync starting height. This
+		// is needed as the wallet can now begin storing blocks from an
+		// arbitrary height, rather than all the blocks from genesis, so
+		// we persist this height to ensure we don't store any blocks
+		// before it.
+		startHeight := birthdayStamp.Height
+
+		// With the starting height obtained, get the remaining block
+		// details required by the wallet.
+		startHash, err := chainClient.GetBlockHash(int64(startHeight))
+		if err != nil {
+			return err
+		}
+		startHeader, err := chainClient.GetBlockHeader(startHash)
+		if err != nil {
+			return err
+		}
+
+		err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+			ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+			err := w.Manager.SetSyncedTo(ns, &waddrmgr.BlockStamp{
+				Hash:      *startHash,
+				Height:    startHeight,
+				Timestamp: startHeader.Timestamp,
+			})
+			if err != nil {
+				return err
+			}
+			return w.Manager.SetBirthdayBlock(ns, *birthdayStamp, true)
+		})
+		if err != nil {
+			return fmt.Errorf("unable to persist initial sync "+
+				"data: %v", err)
+		}
+	}
+
+	// If the wallet requested an on-chain recovery of its funds, we'll do
+	// so now.
+	if w.recoveryWindow > 0 {
+		if err := w.recovery(chainClient, birthdayStamp); err != nil {
+			return fmt.Errorf("unable to perform wallet recovery: "+
+				"%v", err)
+		}
+	}
+
+	// Compare previously-seen blocks against the current chain. If any of
+	// these blocks no longer exist, rollback all of the missing blocks
+	// before catching up with the rescan.
+	rollback := false
+	rollbackStamp := w.Manager.SyncedTo()
+	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+		addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
+
+		for height := rollbackStamp.Height; true; height-- {
+			hash, err := w.Manager.BlockHash(addrmgrNs, height)
+			if err != nil {
+				return err
+			}
+			chainHash, err := chainClient.GetBlockHash(int64(height))
+			if err != nil {
+				return err
+			}
+			header, err := chainClient.GetBlockHeader(chainHash)
+			if err != nil {
+				return err
+			}
+
+			rollbackStamp.Hash = *chainHash
+			rollbackStamp.Height = height
+			rollbackStamp.Timestamp = header.Timestamp
+
+			if bytes.Equal(hash[:], chainHash[:]) {
+				break
+			}
+			rollback = true
+		}
+
+		// If a rollback did not happen, we can proceed safely.
+		if !rollback {
+			return nil
+		}
+
+		// Otherwise, we'll mark this as our new synced height.
+		err := w.Manager.SetSyncedTo(addrmgrNs, &rollbackStamp)
+		if err != nil {
+			return err
+		}
+
+		// If the rollback happened to go beyond our birthday stamp,
+		// we'll need to find a new one by syncing with the chain again
+		// until finding one.
+		if rollbackStamp.Height <= birthdayStamp.Height &&
+			rollbackStamp.Hash != birthdayStamp.Hash {
+
+			err := w.Manager.SetBirthdayBlock(
+				addrmgrNs, rollbackStamp, true,
+			)
+			if err != nil {
+				return err
+			}
+		}
+
+		// Finally, we'll roll back our transaction store to reflect the
+		// stale state. `Rollback` unconfirms transactions at and beyond
+		// the passed height, so add one to the new synced-to height to
+		// prevent unconfirming transactions in the synced-to block.
+		return w.TxStore.RollbackAbe(txmgrNs, rollbackStamp.Height+1)
+	})
+	if err != nil {
+		return err
+	}
+
+	// Request notifications for connected and disconnected blocks.
+	//
+	// TODO(jrick): Either request this notification only once, or when
+	// rpcclient is modified to allow some notification request to not
+	// automatically resent on reconnect, include the notifyblocks request
+	// as well.  I am leaning towards allowing off all rpcclient
+	// notification re-registrations, in which case the code here should be
+	// left as is.
+	if err := chainClient.NotifyBlocks(); err != nil {
+		return err
+	}
+
+	// Finally, we'll trigger a wallet rescan and request notifications for
+	// transactions sending to all wallet addresses and spending all wallet
+	// UTXOs.
+	//	todo(ABE): ABE needs to get each block and checks the transactions to see whether they should be put into wallet.
+	var (
+		addrs   []abeutil.Address
+		unspent []wtxmgr.Credit
+	)
+	err = walletdb.Update(w.db, func(dbtx walletdb.ReadWriteTx) error {
+		addrs, unspent, err = w.activeData(dbtx)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+
+	return w.rescanWithTarget(addrs, unspent, nil)
+}
 // isDevEnv determines whether the wallet is currently under a local developer
 // environment, e.g. simnet or regtest.
 func (w *Wallet) isDevEnv() bool {
@@ -3862,6 +4046,7 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 			return errors.New("missing transaction manager namespace")
 		}
 
+		// TODO(abe): the upgrade can discard now
 		addrMgrUpgrader := waddrmgr.NewMigrationManager(addrMgrBucket)
 		txMgrUpgrader := wtxmgr.NewMigrationManager(txMgrBucket)
 		err := migration.Upgrade(txMgrUpgrader, addrMgrUpgrader)

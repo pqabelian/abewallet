@@ -61,6 +61,7 @@ type (
 	// BlockConnected is a notification for a newly-attached block to the
 	// best chain.
 	BlockConnected wtxmgr.BlockMeta
+	BlockAbeConnected wtxmgr.BlockMeta
 
 	// FilteredBlockConnected is an alternate notification that contains
 	// both block and relevant transaction information in one struct, which
@@ -100,7 +101,7 @@ type (
 	// BlockDisconnected is a notifcation that the block described by the
 	// BlockStamp was reorganized out of the best chain.
 	BlockDisconnected wtxmgr.BlockMeta
-
+	BlockAbeDisconnected wtxmgr.BlockMeta
 	// RelevantTx is a notification for a transaction which spends wallet
 	// inputs or pays to a watched address.
 	RelevantTx struct {

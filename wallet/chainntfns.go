@@ -3,6 +3,7 @@ package wallet
 import (
 	"bytes"
 	"fmt"
+	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abec/wire"
@@ -105,7 +106,8 @@ func (w *Wallet) handleChainNotifications() {
 						"check wallet birthday block: %v",
 						err))
 				}
-
+				// TODO(abe): when the wallet has connected to the full node, it need
+				//  to sync with the chain
 				err = w.syncWithChain(birthdayBlock)
 				if err != nil && !w.ShuttingDown() {
 					panic(fmt.Errorf("Unable to synchronize "+
@@ -118,19 +120,27 @@ func (w *Wallet) handleChainNotifications() {
 					return w.connectBlock(tx, wtxmgr.BlockMeta(n))
 				})
 				notificationName = "block connected"
+			case chain.BlockAbeConnected:
+				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+					return w.connectBlockAbe(tx, wtxmgr.BlockMeta(n))
+				})
+				notificationName = "block connected"
 			case chain.BlockDisconnected:
 				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 					return w.disconnectBlock(tx, wtxmgr.BlockMeta(n))
 				})
 				notificationName = "block disconnected"
-
+			case chain.BlockAbeDisconnected:
+				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+					return w.disconnectBlockAbe(tx, wtxmgr.BlockMeta(n))
+				})
+				notificationName = "block disconnected"
 				//	todo(ABE): ABE does not support OutPointSpent and addressReceive notifications.
 			case chain.RelevantTx:
 				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 					return w.addRelevantTx(tx, n.TxRecord, n.Block)
 				})
 				notificationName = "relevant transaction"
-
 				//	todo(ABE): ABE does not support filter.
 			case chain.FilteredBlockConnected:
 				// Atomically update for the whole block.
@@ -219,6 +229,59 @@ func (w *Wallet) connectBlock(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) err
 	return nil
 }
 
+// TODO(abe): this function is used to notify the client
+func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) error {
+	// actually we just used the addrmgrNS to manage the sync state, other content will be deleted
+	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
+	mpkEnc, msvkEnc, _, err := w.Manager.FetchMasterKeyEncAbe(addrmgrNs)
+	if err != nil {
+		return err
+	}
+	serializedMPK, err := w.Manager.Decrypt(waddrmgr.CKTPublic, mpkEnc)
+	if err != nil {
+		return err
+	}
+	serializedMSVK, err := w.Manager.Decrypt(waddrmgr.CKTPublic, msvkEnc)
+	if err != nil {
+		return err
+	}
+	mpk, err := abesalrs.DeseralizeMasterPubKey(serializedMPK)
+	if err != nil {
+		return err
+	}
+	msvk, err :=abesalrs.DeseralizeMasterSecretViewKey(serializedMSVK)
+	if err != nil {
+		return err
+	}
+	bs := waddrmgr.BlockStamp{
+		Height:    b.Height,
+		Hash:      b.Hash,
+		Timestamp: b.Time,
+	}
+	err = w.Manager.SetSyncedTo(addrmgrNs, &bs)
+	if err != nil {
+		return err
+	}
+	block, err := w.chainClient.GetBlockAbe(&b.Hash)
+	br, err := wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(block.MsgBlock())
+	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
+
+	// At the moment all notified transactions are assumed to actually be
+	// relevant.  This assumption will not hold true when SPV support is
+	// added, but until then, simply insert the transaction because there
+	// should either be one or more relevant inputs or outputs.
+	err = w.TxStore.InsertBlockAbe(txmgrNs, br,mpk,msvk)
+	if err != nil {
+		return err
+	}
+	return nil
+	// Notify interested clients of the connected block.
+	//
+	// TODO: move all notifications outside of the database transaction.
+	w.NtfnServer.notifyAttachedBlock(dbtx, &b)
+	return nil
+}
+
 // disconnectBlock handles a chain server reorganize by rolling back all
 // block history from the reorged block for a wallet in-sync with the chain
 // server.
@@ -260,6 +323,57 @@ func (w *Wallet) disconnectBlock(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 			}
 
 			err = w.TxStore.Rollback(txmgrNs, b.Height)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	// Notify interested clients of the disconnected block.
+	w.NtfnServer.notifyDetachedBlock(&b.Hash)
+
+	return nil
+}
+
+// TODO(abe): the logic of this function woule be redesigned.
+func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) error {
+	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
+	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
+
+	if !w.ChainSynced() {
+		return nil
+	}
+
+	// Disconnect the removed block and all blocks after it if we know about
+	// the disconnected block. Otherwise, the block is in the future.
+	if b.Height <= w.Manager.SyncedTo().Height {
+		hash, err := w.Manager.BlockHash(addrmgrNs, b.Height)
+		if err != nil {
+			return err
+		}
+		if bytes.Equal(hash[:], b.Hash[:]) {
+			bs := waddrmgr.BlockStamp{
+				Height: b.Height - 1,
+			}
+			hash, err = w.Manager.BlockHash(addrmgrNs, bs.Height)
+			if err != nil {
+				return err
+			}
+			b.Hash = *hash
+
+			client := w.ChainClient()
+			header, err := client.GetBlockHeader(hash)
+			if err != nil {
+				return err
+			}
+
+			bs.Timestamp = header.Timestamp
+			err = w.Manager.SetSyncedTo(addrmgrNs, &bs)
+			if err != nil {
+				return err
+			}
+
+			err = w.TxStore.RollbackAbe(txmgrNs, b.Height)
 			if err != nil {
 				return err
 			}
@@ -355,6 +469,19 @@ func (w *Wallet) addRelevantTx(dbtx walletdb.ReadWriteTx, rec *wtxmgr.TxRecord, 
 		}
 	}
 
+	return nil
+}
+func (w *Wallet) addRelevantTxAbe(dbtx walletdb.ReadWriteTx, rec *wtxmgr.TxRecordAbe, block *wtxmgr.BlockAbeMeta) error {
+	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
+
+	// At the moment all notified transactions are assumed to actually be
+	// relevant.  This assumption will not hold true when SPV support is
+	// added, but until then, simply insert the transaction because there
+	// should either be one or more relevant inputs or outputs.
+	err := w.TxStore.InsertTxAbe(txmgrNs, rec, block)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -67,6 +67,8 @@ func NewRPCClient(chainParams *chaincfg.Params, connect, user, pass string, cert
 	ntfnCallbacks := &rpcclient.NotificationHandlers{
 		//	todo(ABE): some are not supported, and should be removed.
 		OnClientConnected:   client.onClientConnect,
+		OnBlockConnectedAbe: client.onBlockConnectedAbe,
+		OnBlockDisconnectedAbe: client.onBlockDisconnectedAbe,
 		OnBlockConnected:    client.onBlockConnected,
 		OnBlockDisconnected: client.onBlockDisconnected,
 		//	todo(ABE): ABE does not support OutPointSpent and addressReceive notifications.
@@ -205,7 +207,7 @@ func (c *RPCClient) FilterBlocks(
 	req *FilterBlocksRequest) (*FilterBlocksResponse, error) {
 	return nil, nil
 }
-
+//TODO(osy): whether use it to request block...
 //func (c *RPCClient) FilterBlocks(
 //	req *FilterBlocksRequest) (*FilterBlocksResponse, error) {
 //
@@ -327,7 +329,19 @@ func (c *RPCClient) onBlockConnected(hash *chainhash.Hash, height int32, time ti
 	case <-c.quit:
 	}
 }
-
+//TODO(abe)
+func (c *RPCClient) onBlockConnectedAbe(hash *chainhash.Hash, height int32, time time.Time) {
+	select {
+	case c.enqueueNotification <- BlockAbeConnected{
+		Block: wtxmgr.Block{
+			Hash:   *hash,
+			Height: height,
+		},
+		Time: time,
+	}:
+	case <-c.quit:
+	}
+}
 func (c *RPCClient) onBlockDisconnected(hash *chainhash.Hash, height int32, time time.Time) {
 	select {
 	case c.enqueueNotification <- BlockDisconnected{
@@ -340,7 +354,19 @@ func (c *RPCClient) onBlockDisconnected(hash *chainhash.Hash, height int32, time
 	case <-c.quit:
 	}
 }
-
+//TODO(abe)
+func (c *RPCClient) onBlockDisconnectedAbe(hash *chainhash.Hash, height int32, time time.Time) {
+	select {
+	case c.enqueueNotification <- BlockAbeDisconnected{
+		Block: wtxmgr.Block{
+			Hash:   *hash,
+			Height: height,
+		},
+		Time: time,
+	}:
+	case <-c.quit:
+	}
+}
 //	todo(ABE): ABE does not support OutPointSpent and addressReceive notifications.
 func (c *RPCClient) onRecvTx(tx *abeutil.Tx, block *abejson.BlockDetails) {
 	blk, err := parseBlock(block)
