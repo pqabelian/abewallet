@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/abeutil/hdkeychain"
 	"github.com/abesuite/abewallet/internal/legacy/keystore"
 	"golang.org/x/crypto/ssh/terminal"
@@ -263,7 +264,9 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 		return nil, err
 	}
 	if !useUserSeed {
-		seed, err := hdkeychain.GenerateSeed(hdkeychain.RecommendedSeedLen)
+		// TODO(abe): use abesarls to replace the hdkeychain
+		//seed, err := hdkeychain.GenerateSeed(hdkeychain.RecommendedSeedLen)
+		seed, err := abesalrs.GenerateSeed(abesalrs.RecommendedSeedLen)
 		if err != nil {
 			return nil, err
 		}
@@ -303,8 +306,10 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 		seedStr = strings.TrimSpace(strings.ToLower(seedStr))
 
 		seed, err := hex.DecodeString(seedStr)
-		if err != nil || len(seed) < hdkeychain.MinSeedBytes ||
-			len(seed) > hdkeychain.MaxSeedBytes {
+		if err!=nil || len(seed) <abesalrs.MinSeedBytes ||
+			len(seed) > abesalrs.MaxSeedBytes {
+		//if err != nil || len(seed) < hdkeychain.MinSeedBytes ||
+		//	len(seed) > hdkeychain.MaxSeedBytes {
 
 			fmt.Printf("Invalid seed specified.  Must be a "+
 				"hexadecimal value that is at least %d bits and "+

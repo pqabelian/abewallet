@@ -129,7 +129,8 @@ type dbScriptAddressRow struct {
 	encryptedHash   []byte
 	encryptedScript []byte
 }
-
+// TODO(abe):actually we just used the addrmgrNS to manage the sync state,
+//  other content will be deleted
 // Key names for various database fields.
 var (
 	// nullVall is null byte used as a flag value in a bucket entry
@@ -580,7 +581,7 @@ func putMasterKeysAbe(ns walletdb.ReadWriteBucket, masterSecretSignKeyEnc,
 		}
 	}
 	if masterSecretViewKeyEnc != nil {
-		err := bucket.Put(masterSecretSignName, masterSecretViewKeyEnc)
+		err := bucket.Put(masterSecretViewName, masterSecretViewKeyEnc)
 		if err != nil {
 			str := "failed to store encrypted master private signing key"
 			return managerError(ErrDatabase, str, err)
@@ -590,7 +591,7 @@ func putMasterKeysAbe(ns walletdb.ReadWriteBucket, masterSecretSignKeyEnc,
 	if masterPubKeyEnc != nil {
 		err := bucket.Put(masterPubName, masterPubKeyEnc)
 		if err != nil {
-			str := "failed to store encrypted master HD public key"
+			str := "failed to store encrypted master public key"
 			return managerError(ErrDatabase, str, err)
 		}
 	}
@@ -623,6 +624,33 @@ func fetchMasterHDKeys(ns walletdb.ReadBucket) ([]byte, []byte, error) {
 
 	return masterHDPrivEnc, masterHDPubEnc, nil
 }
+func fetchMasterKeyEncsAbe(ns walletdb.ReadBucket) ([]byte, []byte,[]byte, error) {
+	bucket := ns.NestedReadBucket(mainBucketName)
+
+	var masterPubKeyEnc, masterSecretViewKeyEnc, masterSecretSignKeyEnc []byte
+
+	// First, we'll try to fetch the master private key. If this database
+	// is watch only, or the master has been neutered, then this won't be
+	// found on disk.
+	key := bucket.Get(masterPubName)
+	if key != nil {
+		masterPubKeyEnc = make([]byte, len(key))
+		copy(masterPubKeyEnc[:], key)
+	}
+	key = bucket.Get(masterSecretViewName)
+	if key != nil {
+		masterSecretViewKeyEnc = make([]byte, len(key))
+		copy(masterSecretViewKeyEnc[:], key)
+	}
+	key = bucket.Get(masterSecretSignName)
+	if key != nil {
+		masterSecretSignKeyEnc = make([]byte, len(key))
+		copy(masterSecretSignKeyEnc[:], key)
+	}
+
+	return masterPubKeyEnc, masterSecretViewKeyEnc, masterSecretSignKeyEnc, nil
+}
+
 
 // fetchCryptoKeys loads the encrypted crypto keys which are in turn used to
 // protect the extended keys, imported keys, and scripts.  Any of the returned

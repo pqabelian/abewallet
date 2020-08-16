@@ -621,6 +621,11 @@ func (m *Manager) NeuterRootKey(ns walletdb.ReadWriteBucket) error {
 	// encrypted master HD key from the database.
 	return ns.NestedReadWriteBucket(mainBucketName).Delete(masterHDPrivName)
 }
+func (m *Manager) FetchMasterKeyEncAbe(ns walletdb.ReadWriteBucket) ([]byte,[]byte,[]byte,error) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	return fetchMasterKeyEncsAbe(ns)
+}
 
 // Address returns a managed address given the passed address if it is known to
 // the address manager. A managed address differs from the passed address in
@@ -1511,6 +1516,140 @@ func loadManager(ns walletdb.ReadBucket, pubPassphrase []byte,
 	syncInfo := newSyncState(startBlock, syncedTo)
 
 	// Generate private passphrase salt.
+	// TODO(abe) why generate a new salt?
+	var privPassphraseSalt [saltSize]byte
+	_, err = rand.Read(privPassphraseSalt[:])
+	if err != nil {
+		str := "failed to read random source for passphrase salt"
+		return nil, managerError(ErrCrypto, str, err)
+	}
+
+	// Next, we'll need to load all known manager scopes from disk. Each
+	// scope is on a distinct top-level path within our HD key chain.
+	scopedManagers := make(map[KeyScope]*ScopedKeyManager)
+	err = forEachKeyScope(ns, func(scope KeyScope) error {
+		scopeSchema, err := fetchScopeAddrSchema(ns, &scope)
+		if err != nil {
+			return err
+		}
+
+		scopedManagers[scope] = &ScopedKeyManager{
+			scope:      scope,
+			addrSchema: *scopeSchema,
+			addrs:      make(map[addrKey]ManagedAddress),
+			acctInfo:   make(map[uint32]*accountInfo),
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Create new address manager with the given parameters.  Also,
+	// override the defaults for the additional fields which are not
+	// specified in the call to new with the values loaded from the
+	// database.
+	mgr := newManager(
+		chainParams, &masterKeyPub, &masterKeyPriv,
+		cryptoKeyPub, cryptoKeyPrivEnc, cryptoKeyScriptEnc, syncInfo,
+		birthday, privPassphraseSalt, scopedManagers, watchingOnly,
+	)
+
+	for _, scopedManager := range scopedManagers {
+		scopedManager.rootManager = mgr
+	}
+
+	return mgr, nil
+}
+func loadManagerAbe(ns walletdb.ReadBucket, pubPassphrase []byte,
+	chainParams *chaincfg.Params) (*Manager, error) {
+
+	// Verify the version is neither too old or too new.
+	version, err := fetchManagerVersion(ns)
+	if err != nil {
+		str := "failed to fetch version for update"
+		return nil, managerError(ErrDatabase, str, err)
+	}
+	if version < latestMgrVersion {
+		str := "database upgrade required"
+		return nil, managerError(ErrUpgrade, str, nil)
+	} else if version > latestMgrVersion {
+		str := "database version is greater than latest understood version"
+		return nil, managerError(ErrUpgrade, str, nil)
+	}
+
+	// Load whether or not the manager is watching-only from the db.
+	watchingOnly, err := fetchWatchingOnly(ns)
+	if err != nil {
+		return nil, maybeConvertDbError(err)
+	}
+
+	// Load the master key params from the db.
+	masterKeyPubParams, masterKeyPrivParams, err := fetchMasterKeyParams(ns)
+	if err != nil {
+		return nil, maybeConvertDbError(err)
+	}
+
+	// Load the crypto keys from the db.
+	cryptoKeyPubEnc, cryptoKeyPrivEnc, cryptoKeyScriptEnc, err :=
+		fetchCryptoKeys(ns)
+	if err != nil {
+		return nil, maybeConvertDbError(err)
+	}
+
+	// Load the sync state from the db.
+	syncedTo, err := fetchSyncedTo(ns)
+	if err != nil {
+		return nil, maybeConvertDbError(err)
+	}
+	startBlock, err := FetchStartBlock(ns)
+	if err != nil {
+		return nil, maybeConvertDbError(err)
+	}
+	birthday, err := fetchBirthday(ns)
+	if err != nil {
+		return nil, maybeConvertDbError(err)
+	}
+
+	// When not a watching-only manager, set the master private key params,
+	// but don't derive it now since the manager starts off locked.
+	var masterKeyPriv snacl.SecretKey
+	if !watchingOnly {
+		err := masterKeyPriv.Unmarshal(masterKeyPrivParams)
+		if err != nil {
+			str := "failed to unmarshal master private key"
+			return nil, managerError(ErrCrypto, str, err)
+		}
+	}
+
+	// Derive the master public key using the serialized params and provided
+	// passphrase.
+	var masterKeyPub snacl.SecretKey
+	if err := masterKeyPub.Unmarshal(masterKeyPubParams); err != nil {
+		str := "failed to unmarshal master public key"
+		return nil, managerError(ErrCrypto, str, err)
+	}
+	if err := masterKeyPub.DeriveKey(&pubPassphrase); err != nil {
+		str := "invalid passphrase for master public key"
+		return nil, managerError(ErrWrongPassphrase, str, nil)
+	}
+
+	// Use the master public key to decrypt the crypto public key.
+	cryptoKeyPub := &cryptoKey{snacl.CryptoKey{}}
+	cryptoKeyPubCT, err := masterKeyPub.Decrypt(cryptoKeyPubEnc)
+	if err != nil {
+		str := "failed to decrypt crypto public key"
+		return nil, managerError(ErrCrypto, str, err)
+	}
+	cryptoKeyPub.CopyBytes(cryptoKeyPubCT)
+	zero.Bytes(cryptoKeyPubCT)
+
+	// Create the sync state struct.
+	syncInfo := newSyncState(startBlock, syncedTo)
+
+	// Generate private passphrase salt.
+	// TODO(abe) why generate a new salt?
 	var privPassphraseSalt [saltSize]byte
 	_, err = rand.Read(privPassphraseSalt[:])
 	if err != nil {
