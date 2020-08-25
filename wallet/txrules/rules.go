@@ -92,3 +92,18 @@ func FeeForSerializeSize(relayFeePerKb abeutil.Amount, txSerializeSize int) abeu
 
 	return fee
 }
+// TODO(abe):about the transaction fee we should design.
+func FeeForSerializeSizeAbe(relayFeePerKb abeutil.Amount, txSerializeSize int) abeutil.Amount {
+	fee := relayFeePerKb * abeutil.Amount(txSerializeSize) / 1000
+
+	if fee == 0 && relayFeePerKb > 0 {
+		fee = relayFeePerKb
+	}
+
+	if fee < 0 || fee > abeutil.MaxSatoshi {
+		fee = abeutil.MaxSatoshi
+	}
+
+	return fee
+}
+

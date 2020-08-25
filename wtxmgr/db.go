@@ -74,7 +74,7 @@ var (
 	bucketSpentButUnmined = []byte("spentbutumined")
 	bucketSpentConfirmed  = []byte("spentconfirmed")
 	bucketUTXORing        = []byte("utxoring")
-	bucketRingDetails     = []byte("utxoringdetails")
+	bucketRingDetails     = []byte("utxoringdetails") //TODO(abe):we should add a block height in database, meaning that the txo in ring had consumed completely .
 )
 
 // Root (namespace) bucket keys
@@ -1118,10 +1118,12 @@ func deleteBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) error {
 //UnspentTXO: store the relevant output which is unspent by current wallet
 // its key is transaction hash with the output index
 // its value is relevant information : From coinbase,amount,generation time, rinhash
-func valueUnspentTXO(fromCoinBase bool, amount int64, generationTime time.Time, ringHash chainhash.Hash) []byte {
-	size := 1 + 8 + 8 + 32
+func valueUnspentTXO(fromCoinBase bool,height int32, amount int64, generationTime time.Time, ringHash chainhash.Hash) []byte {
+	size := 4+ 1 + 8 + 8 + 32
 	v := make([]byte, size)
 	offset := 0
+	byteOrder.PutUint32(v[offset:offset+4], uint32(height))
+	offset+=4
 	if fromCoinBase {
 		v[offset] = byte(1)
 	} else {
@@ -1163,7 +1165,9 @@ func fetchUnspentTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, index uin
 	op.TxOutput.TxHash = hash
 	op.TxOutput.Index = index
 	offset := 0
-	t := v[0]
+	op.Height= int32(byteOrder.Uint32(v[offset : offset+4]))
+	offset+=4
+	t := v[offset]
 	offset += 1
 	if t == 0 {
 		op.FromCoinBase = false
@@ -1390,7 +1394,7 @@ func existsRingDetails(ns walletdb.ReadBucket, hash chainhash.Hash) (k, v []byte
 	v = ns.NestedReadBucket(bucketRingDetails).Get(k)
 	return
 }
-func fetchRingDetails(ns walletdb.ReadWriteBucket, k []byte) (*Ring, error) {
+func fetchRingDetails(ns walletdb.ReadBucket, k []byte) (*Ring, error) {
 	v := ns.NestedReadBucket(bucketRingDetails).Get(k)
 	if v == nil {
 		return nil, fmt.Errorf("the pair is not exist")
@@ -1398,6 +1402,9 @@ func fetchRingDetails(ns walletdb.ReadWriteBucket, k []byte) (*Ring, error) {
 	res := new(Ring)
 	res.Deserialize(v)
 	return res, nil
+}
+func FetchRingDetails(ns walletdb.ReadBucket, k []byte) (*Ring, error) {
+	return fetchRingDetails(ns,k)
 }
 func deleteRingDetails(ns walletdb.ReadWriteBucket, k []byte) error {
 	err := ns.NestedReadWriteBucket(bucketRingDetails).Delete(k)
@@ -1437,6 +1444,9 @@ func fetchUTXORing(ns walletdb.ReadWriteBucket, k []byte) (*UTXORingAbe, error) 
 	tmp := append(k, v...)
 	res.Deserialize(tmp)
 	return res, nil
+}
+func FetchUTXORing(ns walletdb.ReadWriteBucket, k []byte) (*UTXORingAbe, error) {
+	return fetchUTXORing(ns,k)
 }
 func deleteUTXORing(ns walletdb.ReadWriteBucket, k []byte) error {
 	err := ns.NestedReadWriteBucket(bucketUTXORing).Delete(k)

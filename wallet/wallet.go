@@ -83,6 +83,7 @@ type Wallet struct {
 	// Data stores
 	db      walletdb.DB
 	Manager *waddrmgr.Manager
+	ManagerAbe *waddrmgr.ManagerAbe
 	TxStore *wtxmgr.Store
 
 	chainClient        chain.Interface
@@ -105,6 +106,7 @@ type Wallet struct {
 
 	// Channel for transaction creation requests.
 	createTxRequests chan createTxRequest
+	createTxAbeRequests chan createTxAbeRequest
 
 	// Channels for the manager locker.
 	unlockRequests     chan unlockRequest
@@ -148,7 +150,8 @@ func (w *Wallet) Start() {
 	w.quitMu.Unlock()
 
 	w.wg.Add(2)
-	go w.txCreator()
+	//go w.txCreator()
+	go w.txAbeCreator()
 	go w.walletLocker()
 }
 
@@ -338,7 +341,34 @@ func (w *Wallet) activeData(dbtx walletdb.ReadWriteTx) ([]abeutil.Address, []wtx
 	unspent, err := w.TxStore.UnspentOutputs(txmgrNs)
 	return addrs, unspent, err
 }
+//TODO(abe):we just provide unspent txo
+func (w *Wallet) activeDataAbe(dbtx walletdb.ReadWriteTx) ([]wtxmgr.UnspentUTXO ,error) {
+	//addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
+	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
 
+	//var addrs []abeutil.Address
+	//err := w.Manager.ForEachRelevantActiveAddress(
+	//	addrmgrNs, func(addr abeutil.Address) error {
+	//		addrs = append(addrs, addr)
+	//		return nil
+	//	},
+	//)
+	//if err != nil {
+	//	return nil, nil, err
+	//}
+
+	// Before requesting the list of spendable UTXOs, we'll delete any
+	// expired output locks.
+	//err = w.TxStore.DeleteExpiredLockedOutputs(
+	//	dbtx.ReadWriteBucket(wtxmgrNamespaceKey),
+	//)
+	//if err != nil {
+	//	return nil, nil, err
+	//}
+
+	unspent, err := w.TxStore.UnspentOutputsAbe(txmgrNs)
+	return unspent, err
+}
 // syncWithChain brings the wallet up to date with the current chain server
 // connection. It creates a rescan request and blocks until the rescan has
 // finished. The birthday block can be passed in, if set, to ensure we can
@@ -699,18 +729,20 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 	// UTXOs.
 	//	todo(ABE): ABE needs to get each block and checks the transactions to see whether they should be put into wallet.
 	var (
-		addrs   []abeutil.Address
-		unspent []wtxmgr.Credit
+		//addrs   []abeutil.Address
+		//unspent []wtxmgr.Credit
+		unspent []wtxmgr.UnspentUTXO
 	)
 	err = walletdb.Update(w.db, func(dbtx walletdb.ReadWriteTx) error {
-		addrs, unspent, err = w.activeData(dbtx)
+		unspent, err = w.activeDataAbe(dbtx)
 		return err
 	})
 	if err != nil {
 		return err
 	}
 
-	return w.rescanWithTarget(addrs, unspent, nil)
+	//return w.rescanWithTarget(addrs, unspent, nil)
+	return w.rescanWithTargetAbe(unspent, nil)
 }
 // isDevEnv determines whether the wallet is currently under a local developer
 // environment, e.g. simnet or regtest.
@@ -1320,8 +1352,20 @@ type (
 		dryRun      bool
 		resp        chan createTxResponse
 	}
+	createTxAbeRequest struct {
+		account     uint32
+		outputs     []*wire.TxOutAbe
+		minconf     int32
+		feeSatPerKB abeutil.Amount
+		dryRun      bool
+		resp        chan createTxAbeResponse
+	}
 	createTxResponse struct {
 		tx  *txauthor.AuthoredTx
+		err error
+	}
+	createTxAbeResponse struct {
+		tx  *txauthor.AuthoredTxAbe
 		err error
 	}
 )
@@ -1357,7 +1401,27 @@ out:
 	}
 	w.wg.Done()
 }
-
+func (w *Wallet) txAbeCreator() {
+	quit := w.quitChan()
+out:
+	for {
+		select {
+		case txr := <-w.createTxAbeRequests:
+			heldUnlock, err := w.holdUnlock()
+			if err != nil {
+				txr.resp <- createTxAbeResponse{nil, err}
+				continue
+			}
+			tx, err := w.txAbeToOutputs(txr.outputs, txr.account,
+				txr.minconf, txr.feeSatPerKB, txr.dryRun)
+			heldUnlock.release()
+			txr.resp <- createTxAbeResponse{tx, err}
+		case <-quit:
+			break out
+		}
+	}
+	w.wg.Done()
+}
 // CreateSimpleTx creates a new signed transaction spending unspent P2PKH
 // outputs with at least minconf confirmations spending to any number of
 // address/amount pairs.  Change and an appropriate transaction fee are
@@ -1612,31 +1676,34 @@ func (w *Wallet) ChangePassphrases(publicOld, publicNew, privateOld,
 // a given account. It returns true if atleast one address in the account was
 // used and false if no address in the account was used.
 func (w *Wallet) accountUsed(addrmgrNs walletdb.ReadWriteBucket, account uint32) (bool, error) {
-	var used bool
-	err := w.Manager.ForEachAccountAddress(addrmgrNs, account,
-		func(maddr waddrmgr.ManagedAddress) error {
-			used = maddr.Used(addrmgrNs)
-			if used {
-				return waddrmgr.Break
-			}
-			return nil
-		})
-	if err == waddrmgr.Break {
-		err = nil
-	}
-	return used, err
+	//var used bool
+	//err := w.Manager.ForEachAccountAddress(addrmgrNs, account,
+	//	func(maddr waddrmgr.ManagedAddress) error {
+	//		used = maddr.Used(addrmgrNs)
+	//		if used {
+	//			return waddrmgr.Break
+	//		}
+	//		return nil
+	//	})
+	//if err == waddrmgr.Break {
+	//	err = nil
+	//}
+	//return used, err
+	// TODO(abe): we do not support the account
+	return false,nil
 }
 
 // AccountAddresses returns the addresses for every created address for an
 // account.
 func (w *Wallet) AccountAddresses(account uint32) (addrs []abeutil.Address, err error) {
-	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		return w.Manager.ForEachAccountAddress(addrmgrNs, account, func(maddr waddrmgr.ManagedAddress) error {
-			addrs = append(addrs, maddr.Address())
-			return nil
-		})
-	})
+	//err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+	//	addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+	//	return w.Manager.ForEachAccountAddress(addrmgrNs, account, func(maddr waddrmgr.ManagedAddress) error {
+	//		addrs = append(addrs, maddr.Address())
+	//		return nil
+	//	})
+	//})
+	// TODO(abe): we do not support the account
 	return
 }
 
@@ -3245,6 +3312,21 @@ func (w *Wallet) newChangeAddress(addrmgrNs walletdb.ReadWriteBucket,
 
 	return addrs[0].Address(), nil
 }
+//func (w *Wallet) newChangeAddressAbe(addrmgrNs walletdb.ReadWriteBucket) (abeutil.Address, error) {
+//
+//	manager, err := w.Manager.FetchScopedKeyManager(scope)
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	// Get next chained change address from wallet for account.
+//	addrs, err := manager.NextInternalAddresses(addrmgrNs, account, 1)
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	return addrs[0].Address(), nil
+//}
 
 // confirmed checks whether a transaction at height txHeight has met minconf
 // confirmations for a blockchain at height curHeight.

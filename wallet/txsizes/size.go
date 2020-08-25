@@ -119,6 +119,12 @@ func SumOutputSerializeSizes(outputs []*wire.TxOut) (serializeSize int) {
 	}
 	return serializeSize
 }
+func SumOutputSerializeSizesAbe(outputs []*wire.TxOutAbe) (serializeSize int) {
+	for _, txOut := range outputs {
+		serializeSize += txOut.SerializeSize()
+	}
+	return serializeSize
+}
 
 // EstimateSerializeSize returns a worst case serialize size estimate for a
 // signed transaction that spends inputCount number of compressed P2PKH outputs
@@ -183,4 +189,24 @@ func EstimateVirtualSize(numP2PKHIns, numP2WPKHIns, numNestedP2WPKHIns int,
 	// We add 3 to the witness weight to make sure the result is
 	// always rounded up.
 	return baseSize + (witnessWeight+3)/blockchain.WitnessScaleFactor
+}
+//TODO(abe): the size should be compute accurately... and add the size of tx inputs
+func EstimateVirtualSizeAbe(txIns []*wire.TxInAbe,txOuts []*wire.TxOutAbe, addChangeOutput bool) int {
+	changeSize := 0
+	outputCount := len(txOuts)
+	if addChangeOutput {
+		// TODO(abe):we use the derived address as a change address. the size in salrs is 4608, when the crypto scheme changed, we must change the one
+		// TODO(abe): provide a interface to abstract a size of address
+		changeSize = 4608
+		outputCount++
+	}
+
+	// Version 4 bytes + LockTime 4 bytes + Serialized var int size for the
+	// number of transaction inputs and outputs + size of redeem scripts +
+	// the size out the serialized outputs and change.
+	// TODO(abe): there should be add the input size
+	baseSize := SumOutputSerializeSizesAbe(txOuts) + changeSize
+
+	//In abe, the witness size is not contain into the size of transaction
+	return baseSize
 }

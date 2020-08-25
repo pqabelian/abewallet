@@ -267,7 +267,7 @@ type Credit struct {
 	FromCoinBase bool
 }
 type UnspentUTXO struct {
-	//Height         int32
+	Height int32
 	//BlockHash      chainhash.Hash
 	TxOutput     wire.OutPointAbe
 	FromCoinBase bool
@@ -309,6 +309,7 @@ type Ring struct {
 	Index       []uint8
 	ValueScript []int64
 	AddrScript  [][]byte
+	blockHeight int32
 }
 
 type sortTxo struct {
@@ -357,7 +358,7 @@ func (r Ring) Serialize() []byte {
 		addrScriptAllSize += addrSize[i]
 	}
 
-	total := 32*bLen + 2 + (32+2+8)*txLen + 2*txLen + addrScriptAllSize
+	total := 32*bLen + 2 + (32+2+8)*txLen + 2*txLen + addrScriptAllSize + 4
 	res := make([]byte, total)
 	offset := 0
 	for i := 0; i < bLen; i++ {
@@ -380,6 +381,8 @@ func (r Ring) Serialize() []byte {
 		copy(res[offset+2:offset+2+addrSize[i]], r.AddrScript[i])
 		offset += addrSize[i]
 	}
+	byteOrder.PutUint32(res[offset:offset+4], uint32(r.blockHeight))
+	offset += 4
 	return res
 }
 func (r *Ring) Deserialize(b []byte) error {
@@ -407,6 +410,8 @@ func (r *Ring) Deserialize(b []byte) error {
 		copy(r.AddrScript[i][:], b[offset:offset+addrSize[i]])
 		offset += addrSize[i]
 	}
+	r.blockHeight = int32(byteOrder.Uint32(b[offset : offset+4]))
+	offset += 4
 	return nil
 }
 
@@ -783,6 +788,8 @@ func (s *Store) InsertTx(ns walletdb.ReadWriteBucket, rec *TxRecord, block *Bloc
 func (s *Store) InsertTxAbe(ns walletdb.ReadWriteBucket, rec *TxRecordAbe, block *BlockAbeMeta) error {
 	return fmt.Errorf("we do not support inserting a single transaction")
 }
+
+// TODO(abe): abstract the check function, it is relevant to the ns
 func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecord, mpk *abesalrs.MasterPubKey, msvk *abesalrs.MasterSecretViewKey) error {
 	err := putBlockAbeRecord(ns, block)
 	if err != nil {
@@ -796,7 +803,11 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 	var blockOutputs map[Block][]wire.OutPointAbe
 	var blockInputs map[Block]*RingHashSerialNumbers
 	coinbaseTx := block.TxRecordAbes[0].MsgTx
-	dpk := txscript.ExtractAddressFromScriptAbe(coinbaseTx.TxOuts[0].AddressScript).DerivedPubKey()
+	addr, err := txscript.ExtractAddressFromScriptAbe(coinbaseTx.TxOuts[0].AddressScript)
+	if err != nil {
+		return err
+	}
+	dpk := addr.DerivedPubKey()
 	isMy := abesalrs.CheckDerivedPubKeyAttribute(dpk, mpk, msvk)
 	if isMy {
 		//k := canonicalOutPointAbe(block.MsgBlockAbe.Transactions[0].TxHash(), 0)
@@ -815,7 +826,7 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 			TxHash: coinbaseTx.TxHash(),
 			Index:  0,
 		}
-		v := valueUnspentTXO(true, coinbaseTx.TxOuts[0].ValueScript, block.RecvTime, chainhash.ZeroHash)
+		v := valueUnspentTXO(true, block.Height, coinbaseTx.TxOuts[0].ValueScript, block.RecvTime, chainhash.ZeroHash)
 		myUnspetTXO[k] = v
 		blockOutputs[b] = append(blockOutputs[b], k)
 	}
@@ -930,10 +941,14 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 			TxHash: txi.TxHash(),
 		}
 		for j := 0; j < len(txi.TxOuts); j++ {
-			dpk := txscript.ExtractAddressFromScriptAbe(txi.TxOuts[j].AddressScript).DerivedPubKey()
+			addr, err := txscript.ExtractAddressFromScriptAbe(coinbaseTx.TxOuts[0].AddressScript)
+			if err != nil {
+				return err
+			}
+			dpk := addr.DerivedPubKey()
 			isMy := abesalrs.CheckDerivedPubKeyAttribute(dpk, mpk, msvk)
 			if isMy {
-				v := valueUnspentTXO(true, txi.TxOuts[j].ValueScript, block.RecvTime, chainhash.ZeroHash)
+				v := valueUnspentTXO(true, block.Height, txi.TxOuts[j].ValueScript, block.RecvTime, chainhash.ZeroHash)
 				k.Index = uint8(j)
 				myUnspetTXO[k] = v
 				blockOutputs[b] = append(blockOutputs[b], k)
@@ -1008,8 +1023,8 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 			for j := 0; j < len(block0Outputs); j++ {
 				k := canonicalOutPointAbe(block0Outputs[j].TxHash, block0Outputs[j].Index)
 				v := ns.NestedReadBucket(bucketUnspentTXO).Get(k)
-				myUnspetTXO[*block0Outputs[k]] = v
-				blockOutputs[bBlock0] = append(blockOutputs[bBlock0], *block0Outputs[k])
+				myUnspetTXO[*block0Outputs[j]] = v
+				blockOutputs[bBlock0] = append(blockOutputs[bBlock0], *block0Outputs[j])
 			}
 
 			block0 := abeutil.NewBlockAbe(msgBlock0)
@@ -1082,8 +1097,6 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 				cRingHash2Ring, cTxOut2RingHash, err = generateRing(allCoinBaseRmTxos, blockHashs)
 
 			}
-			//TODO：然后将相关的ring插入到RingBucket和UTXORingBucket中
-			// 同时需要更新BlockOutputs中的最后一个字段
 			var willAddUTXORing map[chainhash.Hash]*UTXORingAbe
 			for k, v := range myUnspetTXO {
 				if hash, ok := (*tTxOut2RingHash)[k]; ok {
@@ -1921,6 +1934,93 @@ func (s *Store) UnspentOutputs(ns walletdb.ReadBucket) ([]Credit, error) {
 		return nil, storeError(ErrDatabase, str, err)
 	}
 
+	return unspent, nil
+}
+
+func (s *Store) UnspentOutputsAbe(ns walletdb.ReadBucket) ([]UnspentUTXO, error) {
+	var unspent []UnspentUTXO
+
+	var op wire.OutPointAbe
+	//var block BlockAbe
+	err := ns.NestedReadBucket(bucketUnspentTXO).ForEach(func(k, v []byte) error {
+		//	todo(ABE): k is for Outpoint (TxHash||Index), and b is for block (height||hash)
+		err := readCanonicalOutPointAbe(k, &op)
+		if err != nil {
+			return err
+		}
+
+		// Skip the output if it's locked.
+		//_, _, isLocked := isLockedOutput(ns, op, s.clock.Now())
+		//if isLocked {
+		//	return nil
+		//}
+
+		//	todo(ABE): what happens when a TXO is spent and confirmed by a block?
+		//if existsRawUnminedInput(ns, k) != nil {
+		//	// Output is spent by an unmined transaction.
+		//	// Skip this k/v pair.
+		//	return nil
+		//}
+
+		//err = readCanonicalBlockAbe(k, &block)
+		//if err != nil {
+		//	return err
+		//}
+
+		//blockTime, err := fetchBlockTime(ns, block.Height)
+		//if err != nil {
+		//	return err
+		//}
+		// TODO(jrick): reading the entire transaction should
+		// be avoidable.  Creating the credit only requires the
+		// output amount and pkScript.
+		//	todo(ABE): Agreed on that Creating the credit only requires the output amount and pkScript.
+		//	todo(ABE): The wallet database should be TXO-centric.
+		//rec, err := fetchTxRecord(ns, &op.TxHash, &block)
+		//if err != nil {
+		//	return fmt.Errorf("unable to retrieve transaction %v: "+
+		//		"%v", op.Hash, err)
+		//}
+		//txOut := rec.MsgTx.TxOut[op.Index]
+		ust := UnspentUTXO{
+			Height:         -1,
+			TxOutput:       op,
+			FromCoinBase:   false,
+			Amount:         0,
+			GenerationTime: time.Time{},
+			RingHash:       chainhash.Hash{},
+		}
+		//TODO(abe): provided a function to deserialize the unspent output
+		offset := 0
+		ust.Height = int32(byteOrder.Uint32(v[offset : offset+4]))
+		offset += 4
+		t := v[offset]
+		offset += 1
+		if t == 0 {
+			ust.FromCoinBase = false
+		} else {
+			ust.FromCoinBase = true
+		}
+		ust.Amount = int64(byteOrder.Uint64(v[offset : offset+8]))
+		offset += 8
+		ust.GenerationTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
+		offset += 8
+		copy(ust.RingHash[:], v[offset:offset+32])
+		offset += 32
+		if !ust.RingHash.IsEqual(&chainhash.ZeroHash) {
+			unspent = append(unspent, ust)
+		}
+		return nil
+	})
+	if err != nil {
+		if _, ok := err.(Error); ok {
+			return nil, err
+		}
+		str := "failed iterating unspent bucket"
+		return nil, storeError(ErrDatabase, str, err)
+	}
+
+	//	todo(ABE): For ABE, only the Txos confirmed by blocks and contained in some ring are spentable.
 	return unspent, nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/btcec"
+	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abec/wire"
 	"github.com/abesuite/abewallet/waddrmgr"
@@ -21,6 +22,11 @@ func (s byAmount) Len() int           { return len(s) }
 func (s byAmount) Less(i, j int) bool { return s[i].Amount < s[j].Amount }
 func (s byAmount) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
+type byAmountAbe []wtxmgr.UnspentUTXO
+
+func (s byAmountAbe) Len() int           { return len(s) }
+func (s byAmountAbe) Less(i, j int) bool { return s[i].Amount < s[j].Amount }
+func (s byAmountAbe) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 func makeInputSource(eligible []wtxmgr.Credit) txauthor.InputSource {
 	// Pick largest outputs first.  This is only done for compatibility with
 	// previous tx creation code, not because it's a good idea.
@@ -48,7 +54,47 @@ func makeInputSource(eligible []wtxmgr.Credit) txauthor.InputSource {
 		return currentTotal, currentInputs, currentInputValues, currentScripts, nil
 	}
 }
+func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO,rings map[chainhash.Hash]*wtxmgr.Ring) txauthor.InputSourceAbe {
+	// Pick largest outputs first.  This is only done for compatibility with
+	// previous tx creation code, not because it's a good idea.
+	sort.Sort(sort.Reverse(byAmountAbe(eligible)))
 
+	// Current inputs and their total value.  These are closed over by the
+	// returned input source and reused across multiple calls.
+	currentTotal := abeutil.Amount(0)
+	currentInputs := make([]*wire.TxInAbe, 0, len(eligible))
+	currentScripts := make([][]byte, 0, len(eligible))
+	currentInputValues := make([]abeutil.Amount, 0, len(eligible))
+
+	return func(target abeutil.Amount) (abeutil.Amount, []*wire.TxInAbe,
+		[]abeutil.Amount,[][]byte, error) {
+		//TODO(abe): Add a serialNumber to NewTXInAbe
+		for currentTotal < target && len(eligible) != 0 {
+			nextUTXO := &eligible[0]
+			eligible = eligible[1:]
+
+			nextInput := wire.NewTxInAbe(nil,&wire.OutPointRing{
+				BlockHashs: []*chainhash.Hash{},
+				OutPoints: []*wire.OutPointAbe{}  ,
+			})
+			for i:=0;i<len(rings[nextUTXO.RingHash].BlockHashes);i++{
+				nextInput.PreviousOutPointRing.BlockHashs=append(nextInput.PreviousOutPointRing.BlockHashs,&rings[nextUTXO.RingHash].BlockHashes[i])
+			}
+			for i:=0;i<len(rings[nextUTXO.RingHash].TxHashes);i++{
+				nextInput.PreviousOutPointRing.OutPoints=append(nextInput.PreviousOutPointRing.OutPoints,&wire.OutPointAbe{
+					TxHash: rings[nextUTXO.RingHash].TxHashes[i],
+					Index:  rings[nextUTXO.RingHash].Index[i],
+				})
+				currentScripts = append(currentScripts, rings[nextUTXO.RingHash].AddrScript[i])
+			}
+			currentTotal += abeutil.Amount(nextUTXO.Amount)
+			currentInputs = append(currentInputs, nextInput)
+			amount, _ := abeutil.NewAmount(float64(nextUTXO.Amount))
+			currentInputValues = append(currentInputValues, amount)
+		}
+		return currentTotal, currentInputs, currentInputValues, currentScripts,nil
+	}
+}
 // secretSource is an implementation of txauthor.SecretSource for the wallet's
 // address manager.
 type secretSource struct {
@@ -89,6 +135,43 @@ func (s secretSource) GetScript(addr abeutil.Address) ([]byte, error) {
 	}
 	return msa.Script()
 }
+//type secretSourceAbe struct {
+//	*waddrmgr.ManagerAbe
+//	addrmgrNs walletdb.ReadBucket
+//}
+//func (s secretSourceAbe) GetKey(addr abeutil.Address) (*btcec.PrivateKey, bool, error) {
+//	ma, err := s.Address(s.addrmgrNs, addr)
+//	if err != nil {
+//		return nil, false, err
+//	}
+//
+//	mpka, ok := ma.(waddrmgr.ManagedPubKeyAddress)
+//	if !ok {
+//		e := fmt.Errorf("managed address type for %v is `%T` but "+
+//			"want waddrmgr.ManagedPubKeyAddress", addr, ma)
+//		return nil, false, e
+//	}
+//	privKey, err := mpka.PrivKey()
+//	if err != nil {
+//		return nil, false, err
+//	}
+//	return privKey, ma.Compressed(), nil
+//}
+
+//func (s secretSourceAbe) GetScript(addr abeutil.Address) ([]byte, error) {
+//	ma, err := s.Address(s.addrmgrNs, addr)
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	msa, ok := ma.(waddrmgr.ManagedScriptAddress)
+//	if !ok {
+//		e := fmt.Errorf("managed address type for %v is `%T` but "+
+//			"want waddrmgr.ManagedScriptAddress", addr, ma)
+//		return nil, e
+//	}
+//	return msa.Script()
+//}
 
 // txToOutputs creates a signed transaction which includes each output from
 // outputs.  Previous outputs to reedeem are chosen from the passed account's
@@ -172,7 +255,7 @@ func (w *Wallet) txToOutputs(outputs []*wire.TxOut, account uint32,
 		return tx, nil
 	}
 
-	err = tx.AddAllInputScripts(secretSource{w.Manager, addrmgrNs})
+	err = tx.AddAllInputScripts(secretSource{w.Manager,addrmgrNs})
 	if err != nil {
 		return nil, err
 	}
@@ -197,6 +280,108 @@ func (w *Wallet) txToOutputs(outputs []*wire.TxOut, account uint32,
 	// that pays to the change address, if there is one, when it confirms.
 	if tx.ChangeIndex >= 0 {
 		changePkScript := tx.Tx.TxOut[tx.ChangeIndex].PkScript
+		_, addrs, _, err := txscript.ExtractPkScriptAddrs(
+			changePkScript, w.chainParams,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if err := chainClient.NotifyReceived(addrs); err != nil {
+			return nil, err
+		}
+	}
+
+	return tx, nil
+}
+// TODO(abe): compute the transaction fee
+func (w *Wallet) txAbeToOutputs(outputs []*wire.TxOutAbe, account uint32,
+	minconf int32, feeSatPerKb abeutil.Amount, dryRun bool) (
+	tx *txauthor.AuthoredTxAbe, err error) {
+
+	chainClient, err := w.requireChainClient()
+	if err != nil {
+		return nil, err
+	}
+
+	dbtx, err := w.db.BeginReadWriteTx()
+	if err != nil {
+		return nil, err
+	}
+	defer dbtx.Rollback()
+
+	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
+	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
+
+	// Get current block's height and hash.
+	bs, err := chainClient.BlockStamp()
+	if err != nil {
+		return nil, err
+	}
+
+	// get the unspent transaction output
+	eligible,rings, err := w.findEligibleOutputsAbe(dbtx, minconf, bs)
+	if err != nil {
+		return nil, err
+	}
+	inputSource := makeInputSourceAbe(eligible,rings)
+	changeSource := func() ([]byte, error) {
+		// Derive the change output script. We'll use the default key
+		// scope responsible for P2WPKH addresses to do so. As a hack to
+		// allow spending from the imported account, change addresses
+		// are created from account 0.
+		changeAddr, err := w.ManagerAbe.NewChangeAddress(addrmgrNs)
+		if err!=nil{
+			return nil,err
+		}
+		return changeAddr.Serialize(),nil
+	}
+	tx, err = txauthor.NewUnsignedTransactionAbe(outputs, feeSatPerKb,
+		inputSource, changeSource)
+	if err != nil {
+		return nil, err
+	}
+
+	// Randomize change position, if change exists, before signing.  This
+	// doesn't affect the serialize size, so the change amount will still
+	// be valid.
+	if tx.ChangeIndex >= 0 {
+		tx.RandomizeChangePosition()
+	}
+
+	// If a dry run was requested, we return now before adding the input
+	// scripts, and don't commit the database transaction. The DB will be
+	// rolled back when this method returns to ensure the dry run didn't
+	// alter the DB in any way.
+	if dryRun {
+		return tx, nil
+	}
+	// TODO(abe):need to get serialNumber and signature for all input in new transaction
+	err = tx.AddAllInputScripts([]byte("this is a test"),w.ManagerAbe,addrmgrNs,txmgrNs)
+	if err != nil {
+		return nil, err
+	}
+
+	//	todo(ABE): Is this necessary?
+	// TODO(osy): temporary ignore it
+	//err = validateMsgTx(tx.Tx, tx.PrevScripts, tx.PrevInputValues)
+	//if err != nil {
+	//	return nil, err
+	//}
+
+	if err := dbtx.Commit(); err != nil {
+		return nil, err
+	}
+
+	if tx.ChangeIndex >= 0 && account == waddrmgr.ImportedAddrAccount {
+		changeAmount := abeutil.Amount(tx.Tx.TxOuts[tx.ChangeIndex].ValueScript)
+		log.Warnf("Spend from imported account produced change: moving"+
+			" %v from imported account into default account.", changeAmount)
+	}
+
+	// Finally, we'll request the backend to notify us of the transaction
+	// that pays to the change address, if there is one, when it confirms.
+	if tx.ChangeIndex >= 0 {
+		changePkScript := tx.Tx.TxOuts[tx.ChangeIndex].AddressScript
 		_, addrs, _, err := txscript.ExtractPkScriptAddrs(
 			changePkScript, w.chainParams,
 		)
@@ -264,6 +449,52 @@ func (w *Wallet) findEligibleOutputs(dbtx walletdb.ReadTx, account uint32, minco
 		eligible = append(eligible, *output)
 	}
 	return eligible, nil
+}
+// TODO(abe):we should request the unspent transaction output from tx manager
+func (w *Wallet) findEligibleOutputsAbe(dbtx walletdb.ReadTx, minconf int32, bs *waddrmgr.BlockStamp) ([]wtxmgr.UnspentUTXO, map[chainhash.Hash]*wtxmgr.Ring,error) {
+	//addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
+	txmgrNs := dbtx.ReadBucket(wtxmgrNamespaceKey)
+
+	unspent, err := w.TxStore.UnspentOutputsAbe(txmgrNs)
+	rings:=*new(map[chainhash.Hash]*wtxmgr.Ring)
+	for i:=0;i<len(unspent);i++{
+		if chainhash.ZeroHash.IsEqual(&unspent[i].RingHash) {
+			unspent = append(unspent[:i], unspent[i+1:]...)
+		}
+		_,ok:=rings[unspent[i].RingHash]
+		if !ok{
+			ring, _ := wtxmgr.FetchRingDetails(txmgrNs, unspent[i].RingHash[:])
+			rings[unspent[i].RingHash]=ring
+		}
+	}
+	if err != nil {
+		return nil,nil, err
+	}
+
+	// TODO: Eventually all of these filters (except perhaps output locking)
+	// should be handled by the call to UnspentOutputs (or similar).
+	// Because one of these filters requires matching the output script to
+	// the desired account, this change depends on making wtxmgr a waddrmgr
+	// dependancy and requesting unspent outputs for a single account.
+	eligible := make([]wtxmgr.UnspentUTXO, 0, len(unspent))
+	for i := range unspent {
+		output := &unspent[i]
+
+		// Only include this output if it meets the required number of
+		// confirmations.  Coinbase transactions must have have reached
+		// maturity before their outputs may be spent.
+		if !confirmed(minconf, output.Height, bs.Height) {
+			continue
+		}
+		if output.FromCoinBase {
+			target := int32(w.chainParams.CoinbaseMaturity)
+			if !confirmed(target, output.Height, bs.Height) {
+				continue
+			}
+		}
+		eligible = append(eligible, *output)
+	}
+	return eligible, rings,nil
 }
 
 // validateMsgTx verifies transaction input scripts for tx.  All previous output

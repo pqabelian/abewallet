@@ -30,6 +30,9 @@ func (m *mockChainClient) GetBestBlock() (*chainhash.Hash, int32, error) {
 func (m *mockChainClient) GetBlock(*chainhash.Hash) (*wire.MsgBlock, error) {
 	return nil, nil
 }
+func (m *mockChainClient) GetBlockAbe(blockHash *chainhash.Hash) (*wire.MsgBlockAbe, error) {
+	return nil, nil
+}
 
 func (m *mockChainClient) GetBlockHash(int64) (*chainhash.Hash, error) {
 	return nil, nil
@@ -66,6 +69,11 @@ func (m *mockChainClient) Rescan(*chainhash.Hash, []abeutil.Address,
 	map[wire.OutPoint]abeutil.Address) error {
 	return nil
 }
+
+func (m *mockChainClient) RescanAbe(hash *chainhash.Hash) error {
+	return nil
+}
+
 
 func (m *mockChainClient) NotifyReceived([]abeutil.Address) error {
 	return nil
