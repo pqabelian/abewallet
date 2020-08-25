@@ -63,12 +63,37 @@ func (m *Manager) SetSyncedTo(ns walletdb.ReadWriteBucket, bs *BlockStamp) error
 	m.syncState.syncedTo = *bs
 	return nil
 }
+func (m *ManagerAbe) SetSyncedTo(ns walletdb.ReadWriteBucket, bs *BlockStamp) error {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
 
+	// Use the stored start blockstamp and reset recent hashes and height
+	// when the provided blockstamp is nil.
+	if bs == nil {
+		bs = &m.syncState.startBlock
+	}
+
+	// Update the database.
+	err := PutSyncedTo(ns, bs)
+	if err != nil {
+		return err
+	}
+
+	// Update memory now that the database is updated.
+	m.syncState.syncedTo = *bs
+	return nil
+}
 // SyncedTo returns details about the block height and hash that the address
 // manager is synced through at the very least.  The intention is that callers
 // can use this information for intelligently initiating rescans to sync back to
 // the best chain from the last known good block.
 func (m *Manager) SyncedTo() BlockStamp {
+	m.mtx.RLock()
+	defer m.mtx.RUnlock()
+
+	return m.syncState.syncedTo
+}
+func (m *ManagerAbe) SyncedTo() BlockStamp {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
@@ -83,6 +108,11 @@ func (m *Manager) BlockHash(ns walletdb.ReadBucket, height int32) (
 
 	return fetchBlockHash(ns, height)
 }
+func (m *ManagerAbe) BlockHash(ns walletdb.ReadBucket, height int32) (
+	*chainhash.Hash, error) {
+
+	return fetchBlockHash(ns, height)
+}
 
 // Birthday returns the birthday, or earliest time a key could have been used,
 // for the manager.
@@ -92,10 +122,23 @@ func (m *Manager) Birthday() time.Time {
 
 	return m.birthday
 }
+func (m *ManagerAbe) Birthday() time.Time {
+	m.mtx.RLock()
+	defer m.mtx.RUnlock()
 
+	return m.birthday
+}
 // SetBirthday sets the birthday, or earliest time a key could have been used,
 // for the manager.
 func (m *Manager) SetBirthday(ns walletdb.ReadWriteBucket,
+	birthday time.Time) error {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	m.birthday = birthday
+	return putBirthday(ns, birthday)
+}
+func (m *ManagerAbe) SetBirthday(ns walletdb.ReadWriteBucket,
 	birthday time.Time) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
@@ -115,12 +158,27 @@ func (m *Manager) BirthdayBlock(ns walletdb.ReadBucket) (BlockStamp, bool, error
 
 	return birthdayBlock, fetchBirthdayBlockVerification(ns), nil
 }
+func (m *ManagerAbe) BirthdayBlock(ns walletdb.ReadBucket) (BlockStamp, bool, error) {
+	birthdayBlock, err := FetchBirthdayBlock(ns)
+	if err != nil {
+		return BlockStamp{}, false, err
+	}
 
+	return birthdayBlock, fetchBirthdayBlockVerification(ns), nil
+}
 // SetBirthdayBlock sets the birthday block, or earliest time a key could have
 // been used, for the manager. The verified boolean can be used to specify
 // whether this birthday block should be sanity checked to determine if there
 // exists a better candidate to prevent less block fetching.
 func (m *Manager) SetBirthdayBlock(ns walletdb.ReadWriteBucket,
+	block BlockStamp, verified bool) error {
+
+	if err := PutBirthdayBlock(ns, block); err != nil {
+		return err
+	}
+	return putBirthdayBlockVerification(ns, verified)
+}
+func (m *ManagerAbe) SetBirthdayBlock(ns walletdb.ReadWriteBucket,
 	block BlockStamp, verified bool) error {
 
 	if err := PutBirthdayBlock(ns, block); err != nil {

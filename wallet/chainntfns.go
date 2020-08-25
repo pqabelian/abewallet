@@ -97,6 +97,7 @@ func (w *Wallet) handleChainNotifications() {
 				birthdayStore := &walletBirthdayStore{
 					db:      w.db,
 					manager: w.Manager,
+					managerAbe: w.ManagerAbe,
 				}
 				birthdayBlock, err := birthdaySanityCheck(
 					chainClient, birthdayStore,
@@ -136,29 +137,34 @@ func (w *Wallet) handleChainNotifications() {
 				})
 				notificationName = "block disconnected"
 				//	todo(ABE): ABE does not support OutPointSpent and addressReceive notifications.
-			case chain.RelevantTx:
+			//case chain.RelevantTx:
+			//	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+			//		return w.addRelevantTx(tx, n.TxRecord, n.Block)
+			//	})
+			//	notificationName = "relevant transaction"
+			case chain.RelevantTxAbe:
 				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-					return w.addRelevantTx(tx, n.TxRecord, n.Block)
+					return w.addRelevantTxAbe(tx, n.TxRecord, n.Block)
 				})
 				notificationName = "relevant transaction"
 				//	todo(ABE): ABE does not support filter.
-			case chain.FilteredBlockConnected:
-				// Atomically update for the whole block.
-				if len(n.RelevantTxs) > 0 {
-					err = walletdb.Update(w.db, func(
-						tx walletdb.ReadWriteTx) error {
-						var err error
-						for _, rec := range n.RelevantTxs {
-							err = w.addRelevantTx(tx, rec,
-								n.Block)
-							if err != nil {
-								return err
-							}
-						}
-						return nil
-					})
-				}
-				notificationName = "filtered block connected"
+			//case chain.FilteredBlockConnected:
+			//	// Atomically update for the whole block.
+			//	if len(n.RelevantTxs) > 0 {
+			//		err = walletdb.Update(w.db, func(
+			//			tx walletdb.ReadWriteTx) error {
+			//			var err error
+			//			for _, rec := range n.RelevantTxs {
+			//				err = w.addRelevantTx(tx, rec,
+			//					n.Block)
+			//				if err != nil {
+			//					return err
+			//				}
+			//			}
+			//			return nil
+			//		})
+			//	}
+			//	notificationName = "filtered block connected"
 
 			// The following require some database maintenance, but also
 			// need to be reported to the wallet's rescan goroutine.
@@ -232,6 +238,7 @@ func (w *Wallet) connectBlock(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) err
 // TODO(abe): this function is used to notify the client
 func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) error {
 	// actually we just used the addrmgrNS to manage the sync state, other content will be deleted
+	// TODO(abe): transfer to IsMyAddress function...
 	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
 	mpkEnc, msvkEnc, _, err := w.Manager.FetchMasterKeyEncAbe(addrmgrNs)
 	if err != nil {
@@ -263,7 +270,7 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 		return err
 	}
 	block, err := w.chainClient.GetBlockAbe(&b.Hash)
-	br, err := wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(block.MsgBlock())
+	br, err := wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(block)
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
 
 	// At the moment all notified transactions are assumed to actually be
@@ -473,7 +480,7 @@ func (w *Wallet) addRelevantTx(dbtx walletdb.ReadWriteTx, rec *wtxmgr.TxRecord, 
 }
 func (w *Wallet) addRelevantTxAbe(dbtx walletdb.ReadWriteTx, rec *wtxmgr.TxRecordAbe, block *wtxmgr.BlockAbeMeta) error {
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
-
+	//addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
 	// At the moment all notified transactions are assumed to actually be
 	// relevant.  This assumption will not hold true when SPV support is
 	// added, but until then, simply insert the transaction because there
@@ -525,6 +532,7 @@ type birthdayStore interface {
 type walletBirthdayStore struct {
 	db      walletdb.DB
 	manager *waddrmgr.Manager
+	managerAbe *waddrmgr.ManagerAbe
 }
 
 var _ birthdayStore = (*walletBirthdayStore)(nil)

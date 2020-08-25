@@ -312,3 +312,39 @@ func (w *Wallet) rescanWithTarget(addrs []abeutil.Address,
 		return ErrWalletShuttingDown
 	}
 }
+func (w *Wallet) rescanWithTargetAbe(unspent []wtxmgr.UnspentUTXO, startStamp *waddrmgr.BlockStamp) error {
+
+	//outpoints := make(map[wire.OutPoint]abeutil.Address, len(unspent))
+	//for _, output := range unspent {
+	//	_, outputAddrs, _, err := txscript.ExtractPkScriptAddrs(
+	//		output.PkScript, w.chainParams,
+	//	)
+	//	if err != nil {
+	//		return err
+	//	}
+	//
+	//	outpoints[output.OutPoint] = outputAddrs[0]
+	//}
+	//
+	//// If a start block stamp was provided, we will use that as the initial
+	//// starting point for the rescan.
+	//if startStamp == nil {
+	//	startStamp = &waddrmgr.BlockStamp{}
+	//	*startStamp = w.Manager.SyncedTo()
+	//}
+
+	job := &RescanJob{
+		InitialSync: true,
+		Addrs:       nil,
+		OutPoints:   nil,
+		BlockStamp:  *startStamp,
+	}
+
+	// Submit merged job and block until rescan completes.
+	select {
+	case err := <-w.SubmitRescan(job):
+		return err
+	case <-w.quitChan():
+		return ErrWalletShuttingDown
+	}
+}
