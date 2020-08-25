@@ -67,8 +67,8 @@ func NewRPCClient(chainParams *chaincfg.Params, connect, user, pass string, cert
 	ntfnCallbacks := &rpcclient.NotificationHandlers{
 		//	todo(ABE): some are not supported, and should be removed.
 		OnClientConnected:   client.onClientConnect,
-		OnBlockConnectedAbe: client.onBlockConnectedAbe,
-		OnBlockDisconnectedAbe: client.onBlockDisconnectedAbe,
+		OnBlockAbeConnected: client.onBlockConnectedAbe,
+		OnBlockAbeDisconnected: client.onBlockDisconnectedAbe,
 		OnBlockConnected:    client.onBlockConnected,
 		OnBlockDisconnected: client.onBlockDisconnected,
 		//	todo(ABE): ABE does not support OutPointSpent and addressReceive notifications.
@@ -167,6 +167,15 @@ func (c *RPCClient) Rescan(startHash *chainhash.Hash, addrs []abeutil.Address,
 	}
 
 	return c.Client.Rescan(startHash, addrs, flatOutpoints)
+}
+func (c *RPCClient) RescanAbe(startHash *chainhash.Hash) error {
+
+	//flatOutpoints := make([]*wire.OutPoint, 0, len(outPoints))
+	//for ops := range outPoints {
+	//	flatOutpoints = append(flatOutpoints, &ops)
+	//}
+
+	return c.Client.RescanAbe(startHash)
 }
 
 // WaitForShutdown blocks until both the client has finished disconnecting

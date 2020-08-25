@@ -32,16 +32,18 @@ type Interface interface {
 	Start() error
 	Stop()
 	WaitForShutdown()
-	GetBestBlock() (*chainhash.Hash, int32, error)
-	GetBlock(*chainhash.Hash) (*wire.MsgBlock, error)
-	GetBlockHash(int64) (*chainhash.Hash, error)
-	GetBlockHeader(*chainhash.Hash) (*wire.BlockHeader, error)
+	GetBestBlock() (*chainhash.Hash, int32, error) // request the best block height and hash
+	GetBlock(*chainhash.Hash) (*wire.MsgBlock, error) // request the origin block by given hash
+	GetBlockAbe(hash *chainhash.Hash)(*wire.MsgBlockAbe,error)
+	GetBlockHash(int64) (*chainhash.Hash, error) //request the hash given height
+	GetBlockHeader(*chainhash.Hash) (*wire.BlockHeader, error) // request the block height given hash
 	IsCurrent() bool
 	//	todo(ABE): ABE does not support filter.
 	FilterBlocks(*FilterBlocksRequest) (*FilterBlocksResponse, error)
 	BlockStamp() (*waddrmgr.BlockStamp, error)
 	SendRawTransaction(*wire.MsgTx, bool) (*chainhash.Hash, error)
 	Rescan(*chainhash.Hash, []abeutil.Address, map[wire.OutPoint]abeutil.Address) error
+	RescanAbe(*chainhash.Hash) error
 	//	todo(ABE): ABE does not support receiving notification.
 	NotifyReceived([]abeutil.Address) error
 	NotifyBlocks() error
@@ -107,6 +109,10 @@ type (
 	RelevantTx struct {
 		TxRecord *wtxmgr.TxRecord
 		Block    *wtxmgr.BlockMeta // nil if unmined
+	}
+	RelevantTxAbe struct {
+		TxRecord *wtxmgr.TxRecordAbe
+		Block    *wtxmgr.BlockAbeMeta // nil if unmined
 	}
 
 	// RescanProgress is a notification describing the current status
