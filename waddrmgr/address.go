@@ -44,6 +44,12 @@ const (
 	WitnessPubKey
 )
 
+type AddressAbeType uint8
+
+const(
+	MasterPubKey AddressAbeType =iota
+)
+
 // ManagedAddress is an interface that provides acces to information regarding
 // an address managed by an address manager. Concrete implementations of this
 // type may provide further fields to provide information specific to that type
@@ -77,7 +83,9 @@ type ManagedAddress interface {
 	// processing
 	AddrType() AddressType
 }
-
+type ManagedAddressAbe interface {
+	abeutil.MasterAddress
+}
 // ManagedPubKeyAddress extends ManagedAddress and additionally provides the
 // public and private keys for pubkey-based addresses.
 type ManagedPubKeyAddress interface {
