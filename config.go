@@ -477,7 +477,7 @@ func loadConfig() (*config, []string, error) {
 		//	return nil, nil, err
 		//}
 		//TODO(abe):
-		if err := createWalletAbe(&cfg); err != nil {
+ 		if err := createWalletAbe(&cfg); err != nil {
 			fmt.Fprintln(os.Stderr, "Unable to create wallet:", err)
 			return nil, nil, err
 		}

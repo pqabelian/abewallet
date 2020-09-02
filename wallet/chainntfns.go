@@ -46,7 +46,8 @@ func (w *Wallet) handleChainNotifications() {
 		err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 			ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 
-			startBlock := w.Manager.SyncedTo()
+			//startBlock := w.Manager.SyncedTo()
+			startBlock := w.ManagerAbe.SyncedTo()
 
 			for i := startBlock.Height + 1; i <= height; i++ {
 				hash, err := client.GetBlockHash(int64(i))
@@ -63,7 +64,8 @@ func (w *Wallet) handleChainNotifications() {
 					Hash:      *hash,
 					Timestamp: header.Timestamp,
 				}
-				err = w.Manager.SetSyncedTo(ns, &bs)
+				//err = w.Manager.SetSyncedTo(ns, &bs)
+				err = w.ManagerAbe.SetSyncedTo(ns, &bs)
 				if err != nil {
 					return err
 				}
@@ -109,7 +111,8 @@ func (w *Wallet) handleChainNotifications() {
 				}
 				// TODO(abe): when the wallet has connected to the full node, it need
 				//  to sync with the chain
-				err = w.syncWithChain(birthdayBlock)
+				//err = w.syncWithChain(birthdayBlock)
+				err = w.syncWithChainAbe(birthdayBlock)
 				if err != nil && !w.ShuttingDown() {
 					panic(fmt.Errorf("Unable to synchronize "+
 						"wallet to chain: %v", err))
@@ -539,7 +542,9 @@ var _ birthdayStore = (*walletBirthdayStore)(nil)
 
 // Birthday returns the birthday timestamp of the wallet.
 func (s *walletBirthdayStore) Birthday() time.Time {
-	return s.manager.Birthday()
+	//TODO(abe):replace manager with abe
+	//return s.manager.Birthday()
+	return s.managerAbe.Birthday()
 }
 
 // BirthdayBlock returns the birthday block of the wallet.
@@ -552,7 +557,9 @@ func (s *walletBirthdayStore) BirthdayBlock() (waddrmgr.BlockStamp, bool, error)
 	err := walletdb.View(s.db, func(tx walletdb.ReadTx) error {
 		var err error
 		ns := tx.ReadBucket(waddrmgrNamespaceKey)
-		birthdayBlock, birthdayBlockVerified, err = s.manager.BirthdayBlock(ns)
+		//TODO(abe):replace manager with abe
+		//birthdayBlock, birthdayBlockVerified, err = s.manager.BirthdayBlock(ns)
+		birthdayBlock, birthdayBlockVerified, err = s.managerAbe.BirthdayBlock(ns)
 		return err
 	})
 
@@ -569,11 +576,15 @@ func (s *walletBirthdayStore) BirthdayBlock() (waddrmgr.BlockStamp, bool, error)
 func (s *walletBirthdayStore) SetBirthdayBlock(block waddrmgr.BlockStamp) error {
 	return walletdb.Update(s.db, func(tx walletdb.ReadWriteTx) error {
 		ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
-		err := s.manager.SetBirthdayBlock(ns, block, true)
+		//TODO(abe):replace manager with abe
+		//err := s.manager.SetBirthdayBlock(ns, block, true)
+		err := s.managerAbe.SetBirthdayBlock(ns, block, true)
 		if err != nil {
 			return err
 		}
-		return s.manager.SetSyncedTo(ns, &block)
+		//TODO(abe):replace manager with abe
+		//return s.manager.SetSyncedTo(ns, &block)
+		return s.managerAbe.SetSyncedTo(ns, &block)
 	})
 }
 

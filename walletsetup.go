@@ -301,7 +301,8 @@ func createWalletAbe(cfg *config) error {
 		return err
 	}
 
-	w.Manager.Close()
+	//w.Manager.Close()
+	w.ManagerAbe.Close()
 	fmt.Println("The wallet has been created successfully.")
 	return nil
 }

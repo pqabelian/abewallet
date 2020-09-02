@@ -141,6 +141,90 @@ func (rm *RecoveryManager) Resurrect(ns walletdb.ReadBucket,
 
 	return nil
 }
+func (rm *RecoveryManager) ResurrectAbe(ns walletdb.ReadBucket,
+	utxos []wtxmgr.UnspentUTXO) error {
+
+	// First, for each scope that we are recovering, rederive all of the
+	// addresses up to the last found address known to each branch.
+	//for keyScope, scopedMgr := range scopedMgrs {
+	//	// Load the current account properties for this scope, using the
+	//	// the default account number.
+	//	// TODO(conner): rescan for all created accounts if we allow
+	//	// users to use non-default address
+	//	scopeState := rm.state.StateForScope(keyScope)
+	//	acctProperties, err := scopedMgr.AccountProperties(
+	//		ns, waddrmgr.DefaultAccountNum,
+	//	)
+	//	if err != nil {
+	//		return err
+	//	}
+	//
+	//	// Fetch the external key count, which bounds the indexes we
+	//	// will need to rederive.
+	//	externalCount := acctProperties.ExternalKeyCount
+	//
+	//	// Walk through all indexes through the last external key,
+	//	// deriving each address and adding it to the external branch
+	//	// recovery state's set of addresses to look for.
+	//	for i := uint32(0); i < externalCount; i++ {
+	//		keyPath := externalKeyPath(i)
+	//		addr, err := scopedMgr.DeriveFromKeyPath(ns, keyPath)
+	//		if err != nil && err != hdkeychain.ErrInvalidChild {
+	//			return err
+	//		} else if err == hdkeychain.ErrInvalidChild {
+	//			scopeState.ExternalBranch.MarkInvalidChild(i)
+	//			continue
+	//		}
+	//
+	//		scopeState.ExternalBranch.AddAddr(i, addr.Address())
+	//	}
+	//
+	//	// Fetch the internal key count, which bounds the indexes we
+	//	// will need to rederive.
+	//	internalCount := acctProperties.InternalKeyCount
+	//
+	//	// Walk through all indexes through the last internal key,
+	//	// deriving each address and adding it to the internal branch
+	//	// recovery state's set of addresses to look for.
+	//	for i := uint32(0); i < internalCount; i++ {
+	//		keyPath := internalKeyPath(i)
+	//		addr, err := scopedMgr.DeriveFromKeyPath(ns, keyPath)
+	//		if err != nil && err != hdkeychain.ErrInvalidChild {
+	//			return err
+	//		} else if err == hdkeychain.ErrInvalidChild {
+	//			scopeState.InternalBranch.MarkInvalidChild(i)
+	//			continue
+	//		}
+	//
+	//		scopeState.InternalBranch.AddAddr(i, addr.Address())
+	//	}
+	//
+	//	// The key counts will point to the next key that can be
+	//	// derived, so we subtract one to point to last known key. If
+	//	// the key count is zero, then no addresses have been found.
+	//	if externalCount > 0 {
+	//		scopeState.ExternalBranch.ReportFound(externalCount - 1)
+	//	}
+	//	if internalCount > 0 {
+	//		scopeState.InternalBranch.ReportFound(internalCount - 1)
+	//	}
+	//}
+
+	// In addition, we will re-add any outpoints that are known the wallet
+	// to our global set of watched outpoints, so that we can watch them for
+	// spends.
+	//for _, credit := range credits {
+	//	_, addrs, _, err := txscript.ExtractPkScriptAddrs(
+	//		credit.PkScript, rm.chainParams,
+	//	)
+	//	if err != nil {
+	//		return err
+	//	}
+	//
+	//	rm.state.AddWatchedOutPoint(&credit.OutPoint, addrs[0])
+	//}
+	return nil
+}
 
 // AddToBlockBatch appends the block information, consisting of hash and height,
 // to the batch of blocks to be searched.

@@ -249,9 +249,10 @@ out:
 			noun := pickNoun(numAddrs, "address", "addresses")
 			log.Infof("Started rescan from block %v (height %d) for %d %s",
 				batch.bs.Hash, batch.bs.Height, numAddrs, noun)
-
-			err := chainClient.Rescan(&batch.bs.Hash, batch.addrs,
-				batch.outpoints)
+			//TODO(abe): replace rescan with rescanAbe
+			//err := chainClient.Rescan(&batch.bs.Hash, batch.addrs,
+			//	batch.outpoints)
+			err := chainClient.RescanAbe(&batch.bs.Hash)
 			if err != nil {
 				log.Errorf("Rescan for %d %s failed: %v", numAddrs,
 					noun, err)
@@ -328,10 +329,10 @@ func (w *Wallet) rescanWithTargetAbe(unspent []wtxmgr.UnspentUTXO, startStamp *w
 	//
 	//// If a start block stamp was provided, we will use that as the initial
 	//// starting point for the rescan.
-	//if startStamp == nil {
-	//	startStamp = &waddrmgr.BlockStamp{}
-	//	*startStamp = w.Manager.SyncedTo()
-	//}
+	if startStamp == nil {
+		startStamp = &waddrmgr.BlockStamp{}
+		*startStamp = w.ManagerAbe.SyncedTo()
+	}
 
 	job := &RescanJob{
 		InitialSync: true,

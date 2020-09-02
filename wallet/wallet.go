@@ -81,10 +81,10 @@ type Wallet struct {
 	publicPassphrase []byte
 
 	// Data stores
-	db      walletdb.DB
-	Manager *waddrmgr.Manager
+	db         walletdb.DB
+	Manager    *waddrmgr.Manager
 	ManagerAbe *waddrmgr.ManagerAbe
-	TxStore *wtxmgr.Store
+	TxStore    *wtxmgr.Store
 
 	chainClient        chain.Interface
 	chainClientLock    sync.Mutex
@@ -105,7 +105,7 @@ type Wallet struct {
 	rescanFinished      chan *RescanFinishedMsg
 
 	// Channel for transaction creation requests.
-	createTxRequests chan createTxRequest
+	createTxRequests    chan createTxRequest
 	createTxAbeRequests chan createTxAbeRequest
 
 	// Channels for the manager locker.
@@ -341,8 +341,9 @@ func (w *Wallet) activeData(dbtx walletdb.ReadWriteTx) ([]abeutil.Address, []wtx
 	unspent, err := w.TxStore.UnspentOutputs(txmgrNs)
 	return addrs, unspent, err
 }
+
 //TODO(abe):we just provide unspent txo
-func (w *Wallet) activeDataAbe(dbtx walletdb.ReadWriteTx) ([]wtxmgr.UnspentUTXO ,error) {
+func (w *Wallet) activeDataAbe(dbtx walletdb.ReadWriteTx) ([]wtxmgr.UnspentUTXO, error) {
 	//addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
 
@@ -369,6 +370,7 @@ func (w *Wallet) activeDataAbe(dbtx walletdb.ReadWriteTx) ([]wtxmgr.UnspentUTXO 
 	unspent, err := w.TxStore.UnspentOutputsAbe(txmgrNs)
 	return unspent, err
 }
+
 // syncWithChain brings the wallet up to date with the current chain server
 // connection. It creates a rescan request and blocks until the rescan has
 // finished. The birthday block can be passed in, if set, to ensure we can
@@ -592,7 +594,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 	if birthdayStamp == nil {
 		var err error
 		birthdayStamp, err = locateBirthdayBlock(
-			chainClient, w.Manager.Birthday(),
+			chainClient, w.ManagerAbe.Birthday(),
 		)
 		if err != nil {
 			return fmt.Errorf("unable to locate birthday block: %v",
@@ -619,7 +621,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 
 		err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 			ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
-			err := w.Manager.SetSyncedTo(ns, &waddrmgr.BlockStamp{
+			err := w.ManagerAbe.SetSyncedTo(ns, &waddrmgr.BlockStamp{
 				Hash:      *startHash,
 				Height:    startHeight,
 				Timestamp: startHeader.Timestamp,
@@ -627,7 +629,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 			if err != nil {
 				return err
 			}
-			return w.Manager.SetBirthdayBlock(ns, *birthdayStamp, true)
+			return w.ManagerAbe.SetBirthdayBlock(ns, *birthdayStamp, true)
 		})
 		if err != nil {
 			return fmt.Errorf("unable to persist initial sync "+
@@ -637,8 +639,9 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 
 	// If the wallet requested an on-chain recovery of its funds, we'll do
 	// so now.
+	//TODO(abe):recovery?
 	if w.recoveryWindow > 0 {
-		if err := w.recovery(chainClient, birthdayStamp); err != nil {
+		if err := w.recoveryAbe(chainClient, birthdayStamp); err != nil {
 			return fmt.Errorf("unable to perform wallet recovery: "+
 				"%v", err)
 		}
@@ -648,13 +651,13 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 	// these blocks no longer exist, rollback all of the missing blocks
 	// before catching up with the rescan.
 	rollback := false
-	rollbackStamp := w.Manager.SyncedTo()
+	rollbackStamp := w.ManagerAbe.SyncedTo()
 	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 		addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
 
 		for height := rollbackStamp.Height; true; height-- {
-			hash, err := w.Manager.BlockHash(addrmgrNs, height)
+			hash, err := w.ManagerAbe.BlockHash(addrmgrNs, height)
 			if err != nil {
 				return err
 			}
@@ -683,7 +686,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 		}
 
 		// Otherwise, we'll mark this as our new synced height.
-		err := w.Manager.SetSyncedTo(addrmgrNs, &rollbackStamp)
+		err := w.ManagerAbe.SetSyncedTo(addrmgrNs, &rollbackStamp)
 		if err != nil {
 			return err
 		}
@@ -694,7 +697,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 		if rollbackStamp.Height <= birthdayStamp.Height &&
 			rollbackStamp.Hash != birthdayStamp.Hash {
 
-			err := w.Manager.SetBirthdayBlock(
+			err := w.ManagerAbe.SetBirthdayBlock(
 				addrmgrNs, rollbackStamp, true,
 			)
 			if err != nil {
@@ -744,6 +747,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 	//return w.rescanWithTarget(addrs, unspent, nil)
 	return w.rescanWithTargetAbe(unspent, nil)
 }
+
 // isDevEnv determines whether the wallet is currently under a local developer
 // environment, e.g. simnet or regtest.
 func (w *Wallet) isDevEnv() bool {
@@ -858,6 +862,9 @@ func locateBirthdayBlock(chainClient chainConn,
 // recovery attempts to recover any unspent outputs that pay to any of our
 // addresses starting from our birthday, or the wallet's tip (if higher), which
 // would indicate resuming a recovery after a restart.
+// TODO(abe):we need to design the principle of recovery, at least, we do not need to
+//  restore the derived address. And when we create a wallet, we must rescan the blockchain
+//  to read the all block and parse it to get the coins those belong to wallet.
 func (w *Wallet) recovery(chainClient chain.Interface,
 	birthdayBlock *waddrmgr.BlockStamp) error {
 
@@ -975,6 +982,126 @@ func (w *Wallet) recovery(chainClient chain.Interface,
 	return nil
 }
 
+func (w *Wallet) recoveryAbe(chainClient chain.Interface,
+	birthdayBlock *waddrmgr.BlockStamp) error {
+
+	log.Infof("RECOVERY MODE ENABLED -- rescanning for used addresses "+
+		"with recovery_window=%d", w.recoveryWindow)
+	w.recoveryWindow=0
+	return nil
+
+	// We'll initialize the recovery manager with a default batch size of
+	// 2000.
+	//recoveryMgr := NewRecoveryManager(
+	//	w.recoveryWindow, recoveryBatchSize, w.chainParams,
+	//)
+
+	// In the event that this recovery is being resumed, we will need to
+	// repopulate all found addresses from the database. Ideally, for basic
+	// recovery, we would only do so for the default scopes, but due to a
+	// bug in which the wallet would create change addresses outside of the
+	// default scopes, it's necessary to attempt all registered key scopes.
+	//TODO(abe):we have no scope
+	//scopedMgrs := make(map[waddrmgr.KeyScope]*waddrmgr.ScopedKeyManager)
+	//for _, scopedMgr := range w.Manager.ActiveScopedKeyManagers() {
+	//	scopedMgrs[scopedMgr.Scope()] = scopedMgr
+	//}
+	//err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+	//	txMgrNS := tx.ReadBucket(wtxmgrNamespaceKey)
+	//	utxos, err := w.TxStore.UnspentOutputsAbe(txMgrNS)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	addrMgrNS := tx.ReadBucket(waddrmgrNamespaceKey)
+	//	return recoveryMgr.ResurrectAbe(addrMgrNS, utxos)
+	//})
+	//if err != nil {
+	//	return err
+	//}
+
+	// Fetch the best height from the backend to determine when we should
+	// stop.
+	//_, bestHeight, err := chainClient.GetBestBlock()
+	//if err != nil {
+	//	return err
+	//}
+
+	//	todo (ABE): Wallet Recovery first read the credits from database, then scan and catch up the chain.
+
+	// Now we can begin scanning the chain from the wallet's current tip to
+	// ensure we properly handle restarts. Since the recovery process itself
+	// acts as rescan, we'll also update our wallet's synced state along the
+	// way to reflect the blocks we process and prevent rescanning them
+	// later on.
+	//
+	// NOTE: We purposefully don't update our best height since we assume
+	// that a wallet rescan will be performed from the wallet's tip, which
+	// will be of bestHeight after completing the recovery process.
+	//var blocks []*waddrmgr.BlockStamp
+	//startHeight := w.ManagerAbe.SyncedTo().Height + 1
+	//for height := startHeight; height <= bestHeight; height++ {
+	//	hash, err := chainClient.GetBlockHash(int64(height))
+	//	if err != nil {
+	//		return err
+	//	}
+	//	header, err := chainClient.GetBlockHeader(hash)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	blocks = append(blocks, &waddrmgr.BlockStamp{
+	//		Hash:      *hash,
+	//		Height:    height,
+	//		Timestamp: header.Timestamp,
+	//	})
+	//
+	//	// It's possible for us to run into blocks before our birthday
+	//	// if our birthday is after our reorg safe height, so we'll make
+	//	// sure to not add those to the batch.
+	//	if height >= birthdayBlock.Height {
+	//		recoveryMgr.AddToBlockBatch(
+	//			hash, height, header.Timestamp,
+	//		)
+	//	}
+	//
+	//	// We'll perform our recovery in batches of 2000 blocks.  It's
+	//	// possible for us to reach our best height without exceeding
+	//	// the recovery batch size, so we can proceed to commit our
+	//	// state to disk.
+	//	recoveryBatch := recoveryMgr.BlockBatch()
+	//	if len(recoveryBatch) == recoveryBatchSize || height == bestHeight {
+	//		err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+	//			ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+	//			for _, block := range blocks {
+	//				err := w.Manager.SetSyncedTo(ns, block)
+	//				if err != nil {
+	//					return err
+	//				}
+	//			}
+	//			return w.recoverScopedAddresses(
+	//				chainClient, tx, ns, recoveryBatch,
+	//				recoveryMgr.State(), scopedMgrs,
+	//			)
+	//		})
+	//		if err != nil {
+	//			return err
+	//		}
+	//
+	//		if len(recoveryBatch) > 0 {
+	//			log.Infof("Recovered addresses from blocks "+
+	//				"%d-%d", recoveryBatch[0].Height,
+	//				recoveryBatch[len(recoveryBatch)-1].Height)
+	//		}
+	//
+	//		// Clear the batch of all processed blocks to reuse the
+	//		// same memory for future batches.
+	//		blocks = blocks[:0]
+	//		recoveryMgr.ResetBlockBatch()
+	//	}
+	//}
+
+	//return nil
+}
+
 // recoverScopedAddresses scans a range of blocks in attempts to recover any
 // previously used addresses for a particular account derivation path. At a high
 // level, the algorithm works as follows:
@@ -1020,6 +1147,7 @@ expandHorizons:
 
 	// Initiate the filter blocks request using our chain backend. If an
 	// error occurs, we are unable to proceed with the recovery.
+	// TODO(abe): actually,it also handle with blocks and check whether the block contains coins belong to wallet
 	filterResp, err := chainClient.FilterBlocks(filterReq)
 	if err != nil {
 		return err
@@ -1422,6 +1550,7 @@ out:
 	}
 	w.wg.Done()
 }
+
 // CreateSimpleTx creates a new signed transaction spending unspent P2PKH
 // outputs with at least minconf confirmations spending to any number of
 // address/amount pairs.  Change and an appropriate transaction fee are
@@ -1551,8 +1680,10 @@ out:
 			default:
 				continue
 			}
-
-		case w.lockState <- w.Manager.IsLocked():
+		//TODO(abe):replace with manage abe
+		//case w.lockState <- w.Manager.IsLocked():
+		//	continue
+		case w.lockState <- w.ManagerAbe.IsLocked():
 			continue
 
 		case <-quit:
@@ -1690,7 +1821,7 @@ func (w *Wallet) accountUsed(addrmgrNs walletdb.ReadWriteBucket, account uint32)
 	//}
 	//return used, err
 	// TODO(abe): we do not support the account
-	return false,nil
+	return false, nil
 }
 
 // AccountAddresses returns the addresses for every created address for an
@@ -3312,6 +3443,7 @@ func (w *Wallet) newChangeAddress(addrmgrNs walletdb.ReadWriteBucket,
 
 	return addrs[0].Address(), nil
 }
+
 //func (w *Wallet) newChangeAddressAbe(addrmgrNs walletdb.ReadWriteBucket) (abeutil.Address, error) {
 //
 //	manager, err := w.Manager.FetchScopedKeyManager(scope)
@@ -4110,8 +4242,9 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 	params *chaincfg.Params, recoveryWindow uint32) (*Wallet, error) {
 
 	var (
-		addrMgr *waddrmgr.Manager
-		txMgr   *wtxmgr.Store
+		//addrMgr *waddrmgr.Manager
+		addrMgrAbe *waddrmgr.ManagerAbe
+		txMgr      *wtxmgr.Store
 	)
 
 	// Before attempting to open the wallet, we'll check if there are any
@@ -4136,7 +4269,9 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 			return err
 		}
 
-		addrMgr, err = waddrmgr.Open(addrMgrBucket, pubPass, params)
+		//TODO(abe):disable old manager
+		//addrMgr, err = waddrmgr.Open(addrMgrBucket, pubPass, params)
+		addrMgrAbe, err = waddrmgr.OpenAbe(addrMgrBucket, pubPass, params)
 		if err != nil {
 			return err
 		}
@@ -4156,7 +4291,8 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 	w := &Wallet{
 		publicPassphrase:    pubPass,
 		db:                  db,
-		Manager:             addrMgr,
+		Manager:             nil,
+		ManagerAbe:          addrMgrAbe,
 		TxStore:             txMgr,
 		lockedOutpoints:     map[wire.OutPoint]struct{}{},
 		recoveryWindow:      recoveryWindow,
