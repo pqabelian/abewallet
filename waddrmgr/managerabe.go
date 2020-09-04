@@ -143,8 +143,9 @@ func (m *ManagerAbe) Close() {
 	m.closed = true
 	return
 }
+//TODO(abe): how to store the payee manager
 func (m *ManagerAbe) NewPayeeManager(ns walletdb.ReadWriteBucket, name string, mpk ManagedAddressAbe) (*PayeeManager, error) {
-	index := -1
+	index := 0
 	for ; index < len(m.payeeManagers); index++ {
 		if strings.EqualFold(m.payeeManagers[index].name, name) {
 			break
@@ -185,7 +186,7 @@ func (m *ManagerAbe) FetchPayeeManager(name string) (*PayeeManager, error) {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
-	index := -1
+	index := 0
 	for ; index < len(m.payeeManagers); index++ {
 		if strings.EqualFold(m.payeeManagers[index].name, name) {
 			return m.payeeManagers[index], nil

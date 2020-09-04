@@ -1,11 +1,13 @@
 package wallet
 
 import (
+	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abec/wire"
 	"github.com/abesuite/abewallet/chain"
 	"github.com/abesuite/abewallet/waddrmgr"
+	"github.com/abesuite/abewallet/walletdb"
 	"github.com/abesuite/abewallet/wtxmgr"
 )
 
@@ -313,7 +315,7 @@ func (w *Wallet) rescanWithTarget(addrs []abeutil.Address,
 		return ErrWalletShuttingDown
 	}
 }
-func (w *Wallet) rescanWithTargetAbe(unspent []wtxmgr.UnspentUTXO, startStamp *waddrmgr.BlockStamp) error {
+func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 
 	//outpoints := make(map[wire.OutPoint]abeutil.Address, len(unspent))
 	//for _, output := range unspent {
@@ -333,19 +335,103 @@ func (w *Wallet) rescanWithTargetAbe(unspent []wtxmgr.UnspentUTXO, startStamp *w
 		startStamp = &waddrmgr.BlockStamp{}
 		*startStamp = w.ManagerAbe.SyncedTo()
 	}
+	catchUpHashes := func(w *Wallet, client chain.Interface, height int32) error {
+		// TODO(aakselrod): There's a race conditon here, which
+		// happens when a reorg occurs between the
+		// rescanProgress notification and the last GetBlockHash
+		// call. The solution when using btcd is to make btcd
+		// send blockconnected notifications with each block
+		// the way Neutrino does, and get rid of the loop. The
+		// other alternative is to check the final hash and,
+		// if it doesn't match the original hash returned by
+		// the notification, to roll back and restart the
+		// rescan.
+		log.Infof("Catching up block hashes to height %d, this"+
+			" might take a while", height)
+		err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+			addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+			txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
+			mpkEncBytes, msvkEncBytes, _, err := w.ManagerAbe.FetchMasterKeyEncAbe(addrmgrNs)
+			if err != nil {
+				return err
+			}
+			msvkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, msvkEncBytes)
+			if err!=nil {
+				return err
+			}
+			mpkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, mpkEncBytes)
+			if err!=nil {
+				return err
+			}
+			msvk,err:=abesalrs.DeseralizeMasterSecretViewKey(msvkBytes)
+			if err!=nil {
+				return err
+			}
+			mpk,err:=abesalrs.DeseralizeMasterPubKey(mpkBytes)
+			if err!=nil {
+				return err
+			}
+			//startBlock := w.Manager.SyncedTo()
+			startBlock := w.ManagerAbe.SyncedTo()
 
-	job := &RescanJob{
-		InitialSync: true,
-		Addrs:       nil,
-		OutPoints:   nil,
-		BlockStamp:  *startStamp,
-	}
+			for i := startBlock.Height + 1; i <= height; i++ {
+				hash, err := client.GetBlockHash(int64(i))    //Why use client not chainclient?
+				if err != nil {
+					return err
+				}
+				b, err := client.GetBlockAbe(hash)
+				if err != nil {
+					return err
+				}
+				blockAbeDetail, err := wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(b)
+				if err != nil {
+					return err
+				}
+				err = w.TxStore.InsertBlockAbe(txmgrNs,blockAbeDetail,mpk,msvk)
+				if err != nil {
+					return err
+				}
+				bs := waddrmgr.BlockStamp{
+					Height:    i,
+					Hash:      *hash,
+					Timestamp: blockAbeDetail.RecvTime,
+				}
+				//err = w.Manager.SetSyncedTo(ns, &bs)
+				err = w.ManagerAbe.SetSyncedTo(addrmgrNs, &bs)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			log.Errorf("Failed to update address manager "+
+				"sync state for height %d: %v", height, err)
+		}
 
-	// Submit merged job and block until rescan completes.
-	select {
-	case err := <-w.SubmitRescan(job):
+		log.Info("Done catching up block hashes")
 		return err
-	case <-w.quitChan():
-		return ErrWalletShuttingDown
 	}
+	_, bestBlockHeight, err := w.chainClient.GetBestBlock()
+	if err!=nil{
+		return err
+	}
+	if err:=catchUpHashes(w,w.chainClient,bestBlockHeight);err!=nil{
+		return  err
+	}
+	//job := &RescanJob{
+	//	InitialSync: true,
+	//	Addrs:       nil,
+	//	OutPoints:   nil,
+	//	BlockStamp:  *startStamp,
+	//}
+	//
+	//// Submit merged job and block until rescan completes.
+	//select {
+	//case err := <-w.SubmitRescan(job):
+	//	return err
+	//case <-w.quitChan():
+	//	return ErrWalletShuttingDown
+	//}
+	return nil
 }

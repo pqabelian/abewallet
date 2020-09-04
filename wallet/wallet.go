@@ -606,29 +606,29 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 		// arbitrary height, rather than all the blocks from genesis, so
 		// we persist this height to ensure we don't store any blocks
 		// before it.
-		startHeight := birthdayStamp.Height
+		//startHeight := birthdayStamp.Height
 
 		// With the starting height obtained, get the remaining block
 		// details required by the wallet.
-		startHash, err := chainClient.GetBlockHash(int64(startHeight))
-		if err != nil {
-			return err
-		}
-		startHeader, err := chainClient.GetBlockHeader(startHash)
-		if err != nil {
-			return err
-		}
+		//startHash, err := chainClient.GetBlockHash(int64(startHeight))
+		//if err != nil {
+		//	return err
+		//}
+		////startHeader, err := chainClient.GetBlockHeader(startHash)
+		//if err != nil {
+		//	return err
+		//}
 
 		err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 			ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
-			err := w.ManagerAbe.SetSyncedTo(ns, &waddrmgr.BlockStamp{
-				Hash:      *startHash,
-				Height:    startHeight,
-				Timestamp: startHeader.Timestamp,
-			})
-			if err != nil {
-				return err
-			}
+			//err := w.ManagerAbe.SetSyncedTo(ns, &waddrmgr.BlockStamp{
+			//	Hash:      *startHash,
+			//	Height:    startHeight,
+			//	Timestamp: startHeader.Timestamp,
+			//})
+			//if err != nil {
+			//	return err
+			//}
 			return w.ManagerAbe.SetBirthdayBlock(ns, *birthdayStamp, true)
 		})
 		if err != nil {
@@ -731,21 +731,21 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 	// transactions sending to all wallet addresses and spending all wallet
 	// UTXOs.
 	//	todo(ABE): ABE needs to get each block and checks the transactions to see whether they should be put into wallet.
-	var (
-		//addrs   []abeutil.Address
-		//unspent []wtxmgr.Credit
-		unspent []wtxmgr.UnspentUTXO
-	)
-	err = walletdb.Update(w.db, func(dbtx walletdb.ReadWriteTx) error {
-		unspent, err = w.activeDataAbe(dbtx)
-		return err
-	})
-	if err != nil {
-		return err
-	}
+	//var (
+	//	//addrs   []abeutil.Address
+	//	//unspent []wtxmgr.Credit
+	//	unspent []wtxmgr.UnspentUTXO
+	//)
+	//err = walletdb.Update(w.db, func(dbtx walletdb.ReadWriteTx) error {
+	//	unspent, err = w.activeDataAbe(dbtx)
+	//	return err
+	//})
+	//if err != nil {
+	//	return err
+	//}
 
 	//return w.rescanWithTarget(addrs, unspent, nil)
-	return w.rescanWithTargetAbe(unspent, nil)
+	return w.rescanWithTargetAbe(nil)
 }
 
 // isDevEnv determines whether the wallet is currently under a local developer
@@ -2183,6 +2183,35 @@ func (w *Wallet) RenameAccount(scope waddrmgr.KeyScope, account uint32, newName 
 	return err
 }
 
+func (w *Wallet) AddPayee(name string, masterPubKey string) error {
+	mAddrBytes, err := hex.DecodeString(masterPubKey)
+	if err!=nil{
+		return err
+	}
+	mAddr:=new(abeutil.MasterAddressSalrs)
+	err = mAddr.Deserialize(mAddrBytes)
+	if err!=nil{
+		return err
+	}
+	manager, err := w.ManagerAbe.FetchPayeeManager(name)
+	dbtx, err := w.db.BeginReadWriteTx()
+	if err != nil {
+		return err
+	}
+	defer dbtx.Rollback()
+
+	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
+	// if there have no payee manager whose name equal to given name
+	if err==fmt.Errorf("there have no payee manager named %s", name){
+		_, err := w.ManagerAbe.NewPayeeManager(addrmgrNs, name, mAddr)
+		if err!=nil{
+			return err
+		}
+	}else {
+		return err
+	}
+	return manager.AddMPK(addrmgrNs,mAddr)
+}
 const maxEmptyAccounts = 100
 
 // NextAccount creates the next account and returns its account number.  The

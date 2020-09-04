@@ -123,6 +123,7 @@ func NewBlockAbeRecordFromMsgBlockAbe(msgBlockAbe *wire.MsgBlockAbe) (*BlockAbeR
 		Height:             int32(binary.BigEndian.Uint32(msgBlockAbe.Transactions[0].TxIns[0].PreviousOutPointRing.BlockHashs[0][0:4])),
 		Hash:               msgBlockAbe.BlockHash(),
 		RecvTime:           msgBlockAbe.Header.Timestamp,
+		TxRecordAbes:       make([]*TxRecordAbe, len(msgBlockAbe.Transactions)),
 		SerializedBlockAbe: buf.Bytes(),
 	}
 	for i := 0; i < len(msgBlockAbe.Transactions); i++ {

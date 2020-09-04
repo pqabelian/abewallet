@@ -44,28 +44,55 @@ func (w *Wallet) handleChainNotifications() {
 		log.Infof("Catching up block hashes to height %d, this"+
 			" might take a while", height)
 		err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-			ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
-
+			addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+			txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
+			mpkEncBytes, msvkEncBytes, _, err := w.ManagerAbe.FetchMasterKeyEncAbe(addrmgrNs)
+			if err != nil {
+				return err
+			}
+			msvkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, msvkEncBytes)
+			if err!=nil {
+				return err
+			}
+			mpkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, mpkEncBytes)
+			if err!=nil {
+				return err
+			}
+			msvk,err:=abesalrs.DeseralizeMasterSecretViewKey(msvkBytes)
+			if err!=nil {
+				return err
+			}
+			mpk,err:=abesalrs.DeseralizeMasterPubKey(mpkBytes)
+			if err!=nil {
+				return err
+			}
 			//startBlock := w.Manager.SyncedTo()
 			startBlock := w.ManagerAbe.SyncedTo()
 
 			for i := startBlock.Height + 1; i <= height; i++ {
-				hash, err := client.GetBlockHash(int64(i))
+				hash, err := client.GetBlockHash(int64(i))    //Why use client not chainclient?
 				if err != nil {
 					return err
 				}
-				header, err := chainClient.GetBlockHeader(hash)
+				b, err := chainClient.GetBlockAbe(hash)
 				if err != nil {
 					return err
 				}
-
+				blockAbeDetail, err := wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(b)
+				if err != nil {
+					return err
+				}
+				err = w.TxStore.InsertBlockAbe(txmgrNs,blockAbeDetail,mpk,msvk)
+				if err != nil {
+					return err
+				}
 				bs := waddrmgr.BlockStamp{
 					Height:    i,
 					Hash:      *hash,
-					Timestamp: header.Timestamp,
+					Timestamp: blockAbeDetail.RecvTime,
 				}
 				//err = w.Manager.SetSyncedTo(ns, &bs)
-				err = w.ManagerAbe.SetSyncedTo(ns, &bs)
+				err = w.ManagerAbe.SetSyncedTo(addrmgrNs, &bs)
 				if err != nil {
 					return err
 				}
@@ -96,6 +123,9 @@ func (w *Wallet) handleChainNotifications() {
 				// we'll make sure that our birthday block has
 				// been set correctly to potentially prevent
 				// missing relevant events.
+				//TODO(abe):in there, we just want to sync with chain
+				// so we use catch up to chain tip from block height which
+				// wallet had synced to
 				birthdayStore := &walletBirthdayStore{
 					db:      w.db,
 					manager: w.Manager,
@@ -128,7 +158,7 @@ func (w *Wallet) handleChainNotifications() {
 				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 					return w.connectBlockAbe(tx, wtxmgr.BlockMeta(n))
 				})
-				notificationName = "block connected"
+				notificationName = "block abe connected"
 			case chain.BlockDisconnected:
 				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 					return w.disconnectBlock(tx, wtxmgr.BlockMeta(n))
@@ -138,7 +168,7 @@ func (w *Wallet) handleChainNotifications() {
 				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 					return w.disconnectBlockAbe(tx, wtxmgr.BlockMeta(n))
 				})
-				notificationName = "block disconnected"
+				notificationName = "block abe disconnected"
 				//	todo(ABE): ABE does not support OutPointSpent and addressReceive notifications.
 			//case chain.RelevantTx:
 			//	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
@@ -243,15 +273,15 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 	// actually we just used the addrmgrNS to manage the sync state, other content will be deleted
 	// TODO(abe): transfer to IsMyAddress function...
 	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
-	mpkEnc, msvkEnc, _, err := w.Manager.FetchMasterKeyEncAbe(addrmgrNs)
+	mpkEnc, msvkEnc, _, err := w.ManagerAbe.FetchMasterKeyEncAbe(addrmgrNs)
 	if err != nil {
 		return err
 	}
-	serializedMPK, err := w.Manager.Decrypt(waddrmgr.CKTPublic, mpkEnc)
+	serializedMPK, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, mpkEnc)
 	if err != nil {
 		return err
 	}
-	serializedMSVK, err := w.Manager.Decrypt(waddrmgr.CKTPublic, msvkEnc)
+	serializedMSVK, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, msvkEnc)
 	if err != nil {
 		return err
 	}
@@ -268,7 +298,7 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 		Hash:      b.Hash,
 		Timestamp: b.Time,
 	}
-	err = w.Manager.SetSyncedTo(addrmgrNs, &bs)
+	err = w.ManagerAbe.SetSyncedTo(addrmgrNs, &bs)
 	if err != nil {
 		return err
 	}
@@ -356,8 +386,8 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 
 	// Disconnect the removed block and all blocks after it if we know about
 	// the disconnected block. Otherwise, the block is in the future.
-	if b.Height <= w.Manager.SyncedTo().Height {
-		hash, err := w.Manager.BlockHash(addrmgrNs, b.Height)
+	if b.Height <= w.ManagerAbe.SyncedTo().Height {
+		hash, err := w.ManagerAbe.BlockHash(addrmgrNs, b.Height)
 		if err != nil {
 			return err
 		}
@@ -365,7 +395,7 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 			bs := waddrmgr.BlockStamp{
 				Height: b.Height - 1,
 			}
-			hash, err = w.Manager.BlockHash(addrmgrNs, bs.Height)
+			hash, err = w.ManagerAbe.BlockHash(addrmgrNs, bs.Height)
 			if err != nil {
 				return err
 			}
@@ -378,7 +408,7 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 			}
 
 			bs.Timestamp = header.Timestamp
-			err = w.Manager.SetSyncedTo(addrmgrNs, &bs)
+			err = w.ManagerAbe.SetSyncedTo(addrmgrNs, &bs)
 			if err != nil {
 				return err
 			}
