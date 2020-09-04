@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/abejson"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abewallet/wallet/txrules"
@@ -70,6 +71,7 @@ var rpcHandlers = map[string]struct {
 	//	todo(ABE): The supported RPC requests are here. We need to remove some that are not supported any more.
 	// Reference implementation wallet methods (implemented)
 	"addmultisigaddress":     {handler: addMultiSigAddress},
+	"addpayee":     {handler: addPayee},
 	"createmultisig":         {handler: createMultiSig},
 	"dumpprivkey":            {handler: dumpPrivKey},
 	"getaccount":             {handler: getAccount},
@@ -163,7 +165,7 @@ type lazyHandler func() (interface{}, *abejson.RPCError)
 // chainClient is not nil, the returned handler performs RPC passthrough.
 func lazyApplyHandler(request *abejson.Request, w *wallet.Wallet, chainClient chain.Interface) lazyHandler {
 	handlerData, ok := rpcHandlers[request.Method]
-	if ok && handlerData.handlerWithChain != nil && w != nil && chainClient != nil {
+	if ok && handlerData.handlerWithChain != nil && w != nil && chainClient != nil { // if this handle need helps of chain
 		return func() (interface{}, *abejson.RPCError) {
 			cmd, err := abejson.UnmarshalCmd(request)
 			if err != nil {
@@ -185,7 +187,7 @@ func lazyApplyHandler(request *abejson.Request, w *wallet.Wallet, chainClient ch
 			}
 		}
 	}
-	if ok && handlerData.handler != nil && w != nil {
+	if ok && handlerData.handler != nil && w != nil {   //just wallet can handle with this request
 		return func() (interface{}, *abejson.RPCError) {
 			cmd, err := abejson.UnmarshalCmd(request)
 			if err != nil {
@@ -347,6 +349,18 @@ func addMultiSigAddress(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 
 	return p2shAddr.EncodeAddress(), nil
 }
+func addPayee(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.NewAddPayeeCmd)
+	// check the masterpubkey is right format?
+	mpk, err := hex.DecodeString(cmd.MasterPubKey)
+	if err!=nil{
+		return nil,err
+	}
+	if cmd.Name == "" ||  len(mpk)!=abesalrs.MpkByteLen {
+		return nil,ErrMasterPubKeyLength
+	}
+	return nil,w.AddPayee(cmd.Name,cmd.MasterPubKey)
+}
 
 // createMultiSig handles an createmultisig request by returning a
 // multisig address for the given inputs.
@@ -428,6 +442,7 @@ func getAddressesByAccount(icmd interface{}, w *wallet.Wallet) (interface{}, err
 // getBalance handles a getbalance request by returning the balance for an
 // account (wallet), or an error if the requested account does not
 // exist.
+//TODO(abe): we need to recount the balance depend on the unspenttxo bucket
 func getBalance(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.GetBalanceCmd)
 
@@ -459,6 +474,7 @@ func getBalance(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 
 // getBestBlock handles a getbestblock request by returning a JSON object
 // with the height and hash of the most recently processed block.
+// TODO(abe): this function can be reused for abelian
 func getBestBlock(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	blk := w.Manager.SyncedTo()
 	result := &abejson.GetBestBlockResult{
@@ -470,6 +486,7 @@ func getBestBlock(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 
 // getBestBlockHash handles a getbestblockhash request by returning the hash
 // of the most recently processed block.
+// TODO(abe): this function can be reused for abelian
 func getBestBlockHash(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	blk := w.Manager.SyncedTo()
 	return blk.Hash.String(), nil
@@ -477,6 +494,7 @@ func getBestBlockHash(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 
 // getBlockCount handles a getblockcount request by returning the chain height
 // of the most recently processed block.
+// TODO(abe): this function can be reused for abelian
 func getBlockCount(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	blk := w.Manager.SyncedTo()
 	return blk.Height, nil
@@ -485,6 +503,7 @@ func getBlockCount(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 // getInfo handles a getinfo request by returning the a structure containing
 // information about the current state of btcwallet.
 // exist.
+// TODO(abe): this function needs to be redesigned for abelian
 func getInfo(icmd interface{}, w *wallet.Wallet, chainClient *chain.RPCClient) (interface{}, error) {
 	// Call down to btcd for all of the information in this command known
 	// by them.
@@ -533,6 +552,7 @@ func decodeAddress(s string, params *chaincfg.Params) (abeutil.Address, error) {
 
 // getAccount handles a getaccount request by returning the account name
 // associated with a single address.
+// TODO(abe): In ABE, we do not support the "account"
 func getAccount(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.GetAccountCmd)
 
@@ -560,6 +580,8 @@ func getAccount(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 // If the most recently-requested address has been used, a new address (the
 // next chained address in the keypool) is used.  This can fail if the keypool
 // runs out (and will return abejson.ErrRPCWalletKeypoolRanOut if that happens).
+// TODO(abe): In ABE, we do not support the "account"
+// TODO(abe): we need to show the payees
 func getAccountAddress(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.GetAccountAddressCmd)
 

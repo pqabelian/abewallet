@@ -76,4 +76,9 @@ var (
 		Code:    abejson.ErrRPCInvalidParameter,
 		Message: "Account name is reserved by RPC server",
 	}
+	//TODO(abe): this error is for deserializing the master address when adding payerr
+	ErrMasterPubKeyLength = abejson.RPCError{
+		Code:    abejson.ErrRPCInvalidParameter,
+		Message: "The length of master public key is wrong",
+	}
 )
