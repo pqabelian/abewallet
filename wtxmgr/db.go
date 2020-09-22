@@ -946,14 +946,19 @@ func appendRawBlockAbeOutput(ns walletdb.ReadWriteBucket, k []byte, v []byte, tx
 			bucketBlockOutputs, 40, len(v))
 		return nil, storeError(ErrData, str, nil)
 	}
+	if v== nil || len(v) == 0{
+		v=canonicalOutPointAbe(txHash,index)
+		err:= putBlockAbeOutput(ns, k, v)
+		return v,err
+	}
 	newv := make([]byte, len(v)+33)
 	append := canonicalOutPointAbe(txHash, index)
 	n := byteOrder.Uint32(v[0:4])
 	byteOrder.PutUint32(newv[0:4], n+1)
 	copy(newv[4:len(v)], v[4:])
 	copy(newv[len(v):len(v)+33], append[:])
-	putBlockAbeInput(ns, k, v)
-	return newv, nil
+	err:=putBlockAbeOutput(ns, k, newv)
+	return newv, err
 }
 func putBlockAbeOutput(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	err := ns.NestedReadWriteBucket(bucketBlockOutputs).Put(k, v)
@@ -963,7 +968,7 @@ func putBlockAbeOutput(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	}
 	return nil
 }
-func fetchBlockAbeOutput(ns walletdb.ReadWriteBucket, blockHeight int32, blockHash chainhash.Hash) ([]*wire.OutPointAbe, error) {
+func fetchBlockAbeOutput(ns walletdb.ReadBucket, blockHeight int32, blockHash chainhash.Hash) ([]*wire.OutPointAbe, error) {
 	k := canonicalBlockAbe(blockHeight, blockHash)
 	v := ns.NestedReadBucket(bucketBlockOutputs).Get(k)
 	if v == nil {
@@ -974,14 +979,15 @@ func fetchBlockAbeOutput(ns walletdb.ReadWriteBucket, blockHeight int32, blockHa
 		str := "wrong value in block output bucket"
 		return nil, fmt.Errorf(str)
 	}
-	res := make([]*wire.OutPointAbe, n)
+	var res []*wire.OutPointAbe
 	offset := 4
 	for offset < len(v) {
 		tmp := new(wire.OutPointAbe)
-		copy(tmp.TxHash[:], v[offset:offset+32])
-		tmp.Index = v[offset+32] //TODO(abe): if it run with error, maybe there
+		copy(tmp.TxHash[:], v[offset:])
+		offset+=32
+		tmp.Index = v[offset] //TODO(abe): if it run with error, maybe there
+		offset+=1
 		res = append(res, tmp)
-		offset += 33
 	}
 	return res, nil
 }
@@ -1022,7 +1028,7 @@ func valueBlockAbeInput(utxoRings []*UTXORingAbe, AddedSerialNumberes [][]*chain
 	var res []byte
 	for i := 0; i < len(utxoRings); i++ {
 		uSize := utxoRings[i].SerializeSize()
-		size := 2 + 2 + uSize + len(AddedSerialNumberes[i])*32
+		size := 2 + 2 + uSize + len(AddedSerialNumberes[i])*32  // TODO(osy):the usize is redundancy
 		tmp := make([]byte, size)
 		offset := 0
 		byteOrder.PutUint16(tmp[offset:offset+2], uint16(size))
@@ -1046,25 +1052,25 @@ func readBlockAbeInput(k, v []byte, utxoRing []*UTXORingAbe, AddedSerialNumberes
 			bucketBlockOutputs, 32, len(k))
 		return storeError(ErrData, str, nil)
 	}
-	offset:=0
-	i:=0
-	for offset<len(v){
-		size := int(byteOrder.Uint16(v[offset:offset+2]))
-		uSize := int(byteOrder.Uint16(v[offset+2:offset+4]))
+	offset := 0
+	i := 0
+	for offset < len(v) {
+		size := int(byteOrder.Uint16(v[offset : offset+2]))
+		uSize := int(byteOrder.Uint16(v[offset+2 : offset+4]))
 		//t:=make([]byte,len(k)+int(size))
 		//copy(t[0:len(k)],k)
 		//copy(t[len(k):len(v)+len(k)],v[2:size])
-		err := utxoRing[i].Deserialize(v[offset+4:offset+4+uSize])
+		err := utxoRing[i].Deserialize(v[offset+4 : offset+4+uSize])
 		if err != nil {
 			return nil
 		}
-		nums := (size-uSize) / 32
+		nums := (size - uSize) / 32
 		for j := 0; j < nums; i++ {
 			tmp := new(chainhash.Hash)
 			copy(tmp[:], v[offset+4+uSize+j*32:offset+4+uSize+(j+1)*32])
 			AddedSerialNumberes[i] = append(AddedSerialNumberes[i], tmp)
 		}
-		offset+=size
+		offset += size
 		i++
 	}
 
@@ -1079,14 +1085,14 @@ func putBlockAbeInput(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	}
 	return nil
 }
-func fetchBlockAbeInput(ns walletdb.ReadWriteBucket, height int32, hash chainhash.Hash) ([]*UTXORingAbe,[][]*chainhash.Hash, error) {
+func fetchBlockAbeInput(ns walletdb.ReadWriteBucket, height int32, hash chainhash.Hash) ([]*UTXORingAbe, [][]*chainhash.Hash, error) {
 	k := canonicalBlockAbe(height, hash)
 	v := ns.NestedReadBucket(bucketBlockInputs).Get(k)
 	if v == nil {
 		return nil, nil, fmt.Errorf("empty entry")
 	}
 	var u []*UTXORingAbe
-	var ss  [][]*chainhash.Hash
+	var ss [][]*chainhash.Hash
 	err := readBlockAbeInput(k, v, u, ss)
 	if err != nil {
 		return nil, nil, err
@@ -1099,7 +1105,7 @@ func fetchRawBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) ([]*UTXORingAb
 		return nil, nil, fmt.Errorf("empty entry")
 	}
 	var u []*UTXORingAbe
-	var ss  [][]*chainhash.Hash
+	var ss [][]*chainhash.Hash
 	err := readBlockAbeInput(k, v, u, ss)
 	if err != nil {
 		return nil, nil, err
@@ -1118,12 +1124,12 @@ func deleteBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) error {
 //UnspentTXO: store the relevant output which is unspent by current wallet
 // its key is transaction hash with the output index
 // its value is relevant information : From coinbase,amount,generation time, rinhash
-func valueUnspentTXO(fromCoinBase bool,height int32, amount int64, generationTime time.Time, ringHash chainhash.Hash) []byte {
-	size := 4+ 1 + 8 + 8 + 32
+func valueUnspentTXO(fromCoinBase bool, height int32, amount int64, generationTime time.Time, ringHash chainhash.Hash) []byte {
+	size := 4 + 1 + 8 + 8 + 32
 	v := make([]byte, size)
 	offset := 0
 	byteOrder.PutUint32(v[offset:offset+4], uint32(height))
-	offset+=4
+	offset += 4
 	if fromCoinBase {
 		v[offset] = byte(1)
 	} else {
@@ -1151,7 +1157,7 @@ func putUnspentTXO(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	}
 	return nil
 }
-func fetchUnspentTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, index uint8) (*UnspentUTXO, error) {
+func fetchUnspentTXO(ns walletdb.ReadBucket, hash chainhash.Hash, index uint8) (*UnspentUTXO, error) {
 	k := canonicalOutPointAbe(hash, index)
 	v := ns.NestedReadBucket(bucketUnspentTXO).Get(k)
 	if v == nil {
@@ -1165,8 +1171,8 @@ func fetchUnspentTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, index uin
 	op.TxOutput.TxHash = hash
 	op.TxOutput.Index = index
 	offset := 0
-	op.Height= int32(byteOrder.Uint32(v[offset : offset+4]))
-	offset+=4
+	op.Height = int32(byteOrder.Uint32(v[offset : offset+4]))
+	offset += 4
 	t := v[offset]
 	offset += 1
 	if t == 0 {
@@ -1193,12 +1199,14 @@ func deleteUnspentTXO(ns walletdb.ReadWriteBucket, k []byte) error {
 
 //UnspentButUnminedTXO: store the relevant output which is spent by current wallet but now not contained in a block
 // its key is transaction hash with the output index
-// its value is relevant information : From coinbase,amount,generation time, rinhash,serialNumber，spentTime,
-func valueSpentButUnminedTXO(fromCoinBase bool, amount int64, generationTime time.Time,
-	ringHash chainhash.Hash, spentTime time.Time) []byte {
-	size := 1 + 8 + 8 + 32 + 8
+// its value is relevant information : height, from coinbase,amount,generation time, rinhash,serialNumber，spentBy, spentTime,
+func valueSpentButUnminedTXO(height int, fromCoinBase bool, amount int64, generationTime time.Time,
+	ringHash chainhash.Hash, spentBy chainhash.Hash, spentTime time.Time) []byte {
+	size := 4 + 1 + 8 + 8 + 32 + 32 + 8
 	v := make([]byte, size)
 	offset := 0
+	byteOrder.PutUint32(v[offset:offset+8], uint32(height))
+	offset += 4
 	if fromCoinBase {
 		v[offset] = byte(1)
 	} else {
@@ -1210,6 +1218,8 @@ func valueSpentButUnminedTXO(fromCoinBase bool, amount int64, generationTime tim
 	byteOrder.PutUint64(v[offset:offset+8], uint64(generationTime.Unix()))
 	offset += 8
 	copy(v[offset:offset+32], ringHash[:])
+	offset += 32
+	copy(v[offset:offset+32], spentBy[:])
 	offset += 32
 	byteOrder.PutUint64(v[offset:offset+8], uint64(spentTime.Unix()))
 	offset += 8
@@ -1229,7 +1239,7 @@ func fetchSpentButUnminedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, i
 	if v == nil {
 		return nil, fmt.Errorf("empty entry")
 	}
-	if len(v) < 57 {
+	if len(v) < 93 {
 		str := "wrong value in spent but unmined output bucket"
 		return nil, fmt.Errorf(str)
 	}
@@ -1237,7 +1247,9 @@ func fetchSpentButUnminedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, i
 	sbu.TxOutput.TxHash = hash
 	sbu.TxOutput.Index = index
 	offset := 0
-	t := v[0]
+	sbu.Height = int32(byteOrder.Uint32(v[offset : offset+4]))
+	offset += 4
+	t := v[offset]
 	offset += 1
 	if t == 0 {
 		sbu.FromCoinBase = false
@@ -1249,6 +1261,8 @@ func fetchSpentButUnminedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, i
 	sbu.GenerationTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
 	offset += 8
 	copy(sbu.RingHash[:], v[offset:offset+32])
+	offset += 32
+	copy(sbu.SpentBy[:], v[offset:offset+32])
 	offset += 32
 	sbu.SpentTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
 	offset += 8
@@ -1266,11 +1280,13 @@ func deleteSpentButUnminedTXO(ns walletdb.ReadWriteBucket, k []byte) error {
 // SpentConfirmedTXO: store the relevant output which is spent by current wallet and now is contained in a block
 // its key is transaction hash with the output index
 // its value is relevant information : From coinbase,amount,generation time, rinhash,serialNumber，spentTime,confirmedTime
-func valueSpentConfirmedTXO(fromCoinBase bool, amount int64, generationTime time.Time,
-	ringHash chainhash.Hash, spentTime time.Time, confirmTime time.Time) []byte {
-	size := 1 + 8 + 8 + 32 + 8 + 8
+func valueSpentConfirmedTXO(height int,fromCoinBase bool, amount int64, generationTime time.Time,
+	ringHash chainhash.Hash, spentBy chainhash.Hash, spentTime time.Time, confirmTime time.Time) []byte {
+	size := 4+1 + 8 + 8 + 32 +32+ 8 + 8
 	v := make([]byte, size)
 	offset := 0
+	byteOrder.PutUint32(v[offset:offset+8], uint32(height))
+	offset += 4
 	if fromCoinBase {
 		v[offset] = byte(1)
 	} else {
@@ -1282,6 +1298,8 @@ func valueSpentConfirmedTXO(fromCoinBase bool, amount int64, generationTime time
 	byteOrder.PutUint64(v[offset:offset+8], uint64(generationTime.Unix()))
 	offset += 8
 	copy(v[offset:offset+32], ringHash[:])
+	offset += 32
+	copy(v[offset:offset+32], spentBy[:])
 	offset += 32
 	byteOrder.PutUint64(v[offset:offset+8], uint64(spentTime.Unix()))
 	offset += 8
@@ -1303,7 +1321,7 @@ func fetchSpentConfirmedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, in
 	if v == nil {
 		return nil, fmt.Errorf("empty entry")
 	}
-	if len(v) != 65 {
+	if len(v) != 101 {
 		str := "wrong value in spent and confirmed output bucket"
 		return nil, fmt.Errorf(str)
 	}
@@ -1311,7 +1329,9 @@ func fetchSpentConfirmedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, in
 	sct.TxOutput.TxHash = hash
 	sct.TxOutput.Index = index
 	offset := 0
-	t := v[0]
+	sct.Height = int32(byteOrder.Uint32(v[offset : offset+4]))
+	offset += 4
+	t := v[offset]
 	offset += 1
 	if t == 0 {
 		sct.FromCoinBase = false
@@ -1323,6 +1343,8 @@ func fetchSpentConfirmedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, in
 	sct.GenerationTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
 	offset += 8
 	copy(sct.RingHash[:], v[offset:offset+32])
+	offset += 32
+	copy(sct.SpentBy[:], v[offset:offset+32])
 	offset += 32
 	sct.SpentTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
 	offset += 8
@@ -1340,7 +1362,7 @@ func fetchRawSpentConfirmedTXO(ns walletdb.ReadWriteBucket, k []byte) (*SpentCon
 		return nil, fmt.Errorf(str)
 	}
 	sct := new(SpentConfirmedTXO)
-	copy(sct.TxOutput.TxHash[:],k[0:32])
+	copy(sct.TxOutput.TxHash[:], k[0:32])
 	sct.TxOutput.Index = k[33]
 	offset := 0
 	t := v[0]
@@ -1404,7 +1426,7 @@ func fetchRingDetails(ns walletdb.ReadBucket, k []byte) (*Ring, error) {
 	return res, nil
 }
 func FetchRingDetails(ns walletdb.ReadBucket, k []byte) (*Ring, error) {
-	return fetchRingDetails(ns,k)
+	return fetchRingDetails(ns, k)
 }
 func deleteRingDetails(ns walletdb.ReadWriteBucket, k []byte) error {
 	err := ns.NestedReadWriteBucket(bucketRingDetails).Delete(k)
@@ -1446,7 +1468,7 @@ func fetchUTXORing(ns walletdb.ReadWriteBucket, k []byte) (*UTXORingAbe, error) 
 	return res, nil
 }
 func FetchUTXORing(ns walletdb.ReadWriteBucket, k []byte) (*UTXORingAbe, error) {
-	return fetchUTXORing(ns,k)
+	return fetchUTXORing(ns, k)
 }
 func deleteUTXORing(ns walletdb.ReadWriteBucket, k []byte) error {
 	err := ns.NestedReadWriteBucket(bucketUTXORing).Delete(k)
@@ -1500,6 +1522,15 @@ func putRawUnspent(ns walletdb.ReadWriteBucket, k, v []byte) error {
 
 //	todo(ABE): v=(blockheight || blockhash)
 func readUnspentBlock(v []byte, block *Block) error {
+	if len(v) < 36 {
+		str := "short unspent value"
+		return storeError(ErrData, str, nil)
+	}
+	block.Height = int32(byteOrder.Uint32(v))
+	copy(block.Hash[:], v[4:36])
+	return nil
+}
+func readUnspentBlockAbe(v []byte, block *BlockAbe) error {
 	if len(v) < 36 {
 		str := "short unspent value"
 		return storeError(ErrData, str, nil)
