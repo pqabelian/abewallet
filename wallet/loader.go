@@ -2,10 +2,12 @@ package wallet
 
 import (
 	"errors"
+	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abewallet/internal/prompt"
 	"github.com/abesuite/abewallet/waddrmgr"
 	"github.com/abesuite/abewallet/walletdb"
+	"github.com/abesuite/abewallet/wtxmgr"
 	"os"
 	"path/filepath"
 	"sync"
@@ -224,7 +226,36 @@ func (l *Loader) createNewWalletAbe(pubPassphrase, privPassphrase,
 		return nil, err
 	}
 	w.Start()
+	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+		addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
+		mpkEncBytes, msvkEncBytes, _, err := w.ManagerAbe.FetchMasterKeyEncAbe(addrmgrNs)
+		if err != nil {
+			return err
+		}
+		msvkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, msvkEncBytes)
+		if err != nil {
+			return err
+		}
+		mpkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, mpkEncBytes)
+		if err != nil {
+			return err
+		}
+		msvk, err := abesalrs.DeseralizeMasterSecretViewKey(msvkBytes)
+		if err != nil {
+			return err
+		}
+		mpk, err := abesalrs.DeseralizeMasterPubKey(mpkBytes)
+		if err != nil {
+			return err
+		}
+		genesisBlockRecords, err := wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(chaincfg.MainNetParams.GenesisBlock)
+		if err!=nil{
+			return err
+		}
+		return w.TxStore.InsertGenesisBlockAbe(txmgrNs, genesisBlockRecords, mpk, msvk)
 
+	})
 	l.onLoaded(w, db)
 	return w, nil
 }
