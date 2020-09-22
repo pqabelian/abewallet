@@ -65,6 +65,11 @@ func (m *mockChainClient) SendRawTransaction(*wire.MsgTx, bool) (
 	return nil, nil
 }
 
+func (m *mockChainClient) SendRawTransactionAbe(*wire.MsgTxAbe, bool) (
+	*chainhash.Hash, error) {
+	return nil, nil
+}
+
 func (m *mockChainClient) Rescan(*chainhash.Hash, []abeutil.Address,
 	map[wire.OutPoint]abeutil.Address) error {
 	return nil

@@ -42,6 +42,7 @@ type Interface interface {
 	FilterBlocks(*FilterBlocksRequest) (*FilterBlocksResponse, error)
 	BlockStamp() (*waddrmgr.BlockStamp, error)
 	SendRawTransaction(*wire.MsgTx, bool) (*chainhash.Hash, error)
+	SendRawTransactionAbe(*wire.MsgTxAbe, bool) (*chainhash.Hash, error)
 	Rescan(*chainhash.Hash, []abeutil.Address, map[wire.OutPoint]abeutil.Address) error
 	RescanAbe(*chainhash.Hash) error
 	//	todo(ABE): ABE does not support receiving notification.

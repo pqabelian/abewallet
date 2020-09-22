@@ -149,8 +149,9 @@ func (w *Wallet) Start() {
 	}
 	w.quitMu.Unlock()
 
-	w.wg.Add(2)
-	//go w.txCreator()
+	//w.wg.Add(2)
+	w.wg.Add(3)
+	go w.txCreator()     // TODO(abe) :this go routine will be delete   ,and the Add will be modified
 	go w.txAbeCreator()
 	go w.walletLocker()
 }
@@ -987,7 +988,7 @@ func (w *Wallet) recoveryAbe(chainClient chain.Interface,
 
 	log.Infof("RECOVERY MODE ENABLED -- rescanning for used addresses "+
 		"with recovery_window=%d", w.recoveryWindow)
-	w.recoveryWindow=0
+	w.recoveryWindow = 0
 	return nil
 
 	// We'll initialize the recovery manager with a default batch size of
@@ -1481,7 +1482,6 @@ type (
 		resp        chan createTxResponse
 	}
 	createTxAbeRequest struct {
-		account     uint32
 		outputs     []*wire.TxOutAbe
 		minconf     int32
 		feeSatPerKB abeutil.Amount
@@ -1540,8 +1540,7 @@ out:
 				txr.resp <- createTxAbeResponse{nil, err}
 				continue
 			}
-			tx, err := w.txAbeToOutputs(txr.outputs, txr.account,
-				txr.minconf, txr.feeSatPerKB, txr.dryRun)
+			tx, err := w.txAbeToOutputs(txr.outputs, txr.minconf, txr.feeSatPerKB, txr.dryRun)
 			heldUnlock.release()
 			txr.resp <- createTxAbeResponse{tx, err}
 		case <-quit:
@@ -1573,6 +1572,21 @@ func (w *Wallet) CreateSimpleTx(account uint32, outputs []*wire.TxOut,
 		resp:        make(chan createTxResponse),
 	}
 	w.createTxRequests <- req
+	resp := <-req.resp
+	return resp.tx, resp.err
+}
+
+func (w *Wallet) CreateSimpleTxAbe(outputs []*wire.TxOutAbe, minconf int32,
+	satPerKb abeutil.Amount, dryRun bool) (*txauthor.AuthoredTxAbe, error) {
+
+	req := createTxAbeRequest{
+		outputs:     outputs,
+		minconf:     minconf,
+		feeSatPerKB: satPerKb,
+		dryRun:      dryRun,
+		resp:        make(chan createTxAbeResponse),
+	}
+	w.createTxAbeRequests <- req
 	resp := <-req.resp
 	return resp.tx, resp.err
 }
@@ -1853,6 +1867,17 @@ func (w *Wallet) CalculateBalance(confirms int32) (abeutil.Amount, error) {
 		var err error
 		blk := w.Manager.SyncedTo()
 		balance, err = w.TxStore.Balance(txmgrNs, confirms, blk.Height)
+		return err
+	})
+	return balance, err
+}
+func (w *Wallet) CalculateBalanceAbe(confirms int32) (abeutil.Amount, error) {
+	var balance abeutil.Amount
+	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		var err error
+		blk := w.ManagerAbe.SyncedTo()
+		balance, err = w.TxStore.BalanceAbe(txmgrNs, confirms, blk.Height)
 		return err
 	})
 	return balance, err
@@ -2185,12 +2210,16 @@ func (w *Wallet) RenameAccount(scope waddrmgr.KeyScope, account uint32, newName 
 
 func (w *Wallet) AddPayee(name string, masterPubKey string) error {
 	mAddrBytes, err := hex.DecodeString(masterPubKey)
-	if err!=nil{
+	if err != nil {
 		return err
 	}
-	mAddr:=new(abeutil.MasterAddressSalrs)
-	err = mAddr.Deserialize(mAddrBytes)
-	if err!=nil{
+	computedHash:=chainhash.DoubleHashB(mAddrBytes[:len(mAddrBytes)-32])
+	if bytes.Equal(computedHash,mAddrBytes[len(mAddrBytes)-32:]) {
+		return fmt.Errorf("the format of master public address is error ")
+	}
+	mAddr := new(abeutil.MasterAddressSalrs)
+	err = mAddr.Deserialize(mAddrBytes[:len(mAddrBytes)-32])
+	if err != nil {
 		return err
 	}
 	manager, err := w.ManagerAbe.FetchPayeeManager(name)
@@ -2202,16 +2231,17 @@ func (w *Wallet) AddPayee(name string, masterPubKey string) error {
 
 	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
 	// if there have no payee manager whose name equal to given name
-	if err==fmt.Errorf("there have no payee manager named %s", name){
+	if err == fmt.Errorf("there have no payee manager named %s", name) {
 		_, err := w.ManagerAbe.NewPayeeManager(addrmgrNs, name, mAddr)
-		if err!=nil{
+		if err != nil {
 			return err
 		}
-	}else {
+	} else {
 		return err
 	}
-	return manager.AddMPK(addrmgrNs,mAddr)
+	return manager.AddMPK(addrmgrNs, mAddr)
 }
+
 const maxEmptyAccounts = 100
 
 // NextAccount creates the next account and returns its account number.  The
@@ -2901,11 +2931,14 @@ func (w *Wallet) AccountBalances(scope waddrmgr.KeyScope,
 // they appear in the block.  Credits from the same transaction are sorted by
 // output index.
 type creditSlice []wtxmgr.Credit
-
+type unspentUTXOSlice []wtxmgr.UnspentUTXO
 func (s creditSlice) Len() int {
 	return len(s)
 }
 
+func (u unspentUTXOSlice) Len() int {
+	return len(u)
+}
 func (s creditSlice) Less(i, j int) bool {
 	switch {
 	// If both credits are from the same tx, sort by output index.
@@ -2927,9 +2960,33 @@ func (s creditSlice) Less(i, j int) bool {
 		return s[i].Height < s[j].Height
 	}
 }
+func (u unspentUTXOSlice) Less(i, j int) bool {
+	switch {
+	// If both credits are from the same tx, sort by output index.
+	case u[i].TxOutput.TxHash == u[j].TxOutput.TxHash:
+		return u[i].TxOutput.Index < u[j].TxOutput.Index
+
+	// If both transactions are unmined, sort by their received date.
+	case u[i].Height == -1 && u[j].Height == -1:
+		return u[i].GenerationTime.Before(u[j].GenerationTime)
+
+	// Unmined (newer) txs always come last.
+	case u[i].Height == -1:
+		return false
+	case u[j].Height == -1:
+		return true
+
+	// If both txs are mined in different blocks, sort by block height.
+	default:
+		return u[i].Height < u[j].Height
+	}
+}
 
 func (s creditSlice) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
+}
+func (u unspentUTXOSlice) Swap(i, j int) {
+	u[i], u[j] = u[j], u[i]
 }
 
 // ListUnspent returns a slice of objects representing the unspent wallet
@@ -3072,7 +3129,143 @@ func (w *Wallet) ListUnspent(minconf, maxconf int32,
 	})
 	return results, err
 }
-
+// TODO(abe): not finished
+func (w *Wallet) ListUnspentAbe(minconf, maxconf int32,
+	addresses map[string]struct{}) ([]*abejson.ListUnspentResult, error) {
+	return nil,nil
+	//var results []*abejson.ListUnspentResult
+	//err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+	//	addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+	//	txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+	//
+	//	syncBlock := w.ManagerAbe.SyncedTo()
+	//
+	//	filter := len(addresses) != 0
+	//	unspent, err := w.TxStore.UnspentOutputsAbe(txmgrNs)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	sort.Sort(sort.Reverse(unspentUTXOSlice(unspent)))
+	//
+	//	defaultAccountName := "default"
+	//
+	//	results = make([]*abejson.ListUnspentResult, 0, len(unspent))
+	//	for i := range unspent {
+	//		output := unspent[i]
+	//
+	//		// Outputs with fewer confirmations than the minimum or more
+	//		// confs than the maximum are excluded.
+	//		confs := confirms(output.Height, syncBlock.Height)
+	//		if confs < minconf || confs > maxconf {
+	//			continue
+	//		}
+	//
+	//		// Only mature coinbase outputs are included.
+	//		if output.FromCoinBase {
+	//			target := int32(w.ChainParams().CoinbaseMaturity)
+	//			if !confirmed(target, output.Height, syncBlock.Height) {
+	//				continue
+	//			}
+	//		}
+	//
+	//		// Exclude locked outputs from the result set.
+	//		//TODO(abe):we do not support lock output an moment
+	//		//if w.LockedOutpoint(output.TxOutput) {
+	//		//	continue
+	//		//}
+	//
+	//		// Lookup the associated account for the output.  Use the
+	//		// default account name in case there is no associated account
+	//		// for some reason, although this should never happen.
+	//		//
+	//		// This will be unnecessary once transactions and outputs are
+	//		// grouped under the associated account in the db.
+	//		acctName := defaultAccountName
+	//		sc, addrs, _, err := txscript.ExtractPkScriptAddrs(
+	//			output.PkScript, w.chainParams)
+	//		if err != nil {
+	//			continue
+	//		}
+	//		if len(addrs) > 0 {
+	//			smgr, acct, err := w.Manager.AddrAccount(addrmgrNs, addrs[0])
+	//			if err == nil {
+	//				s, err := smgr.AccountName(addrmgrNs, acct)
+	//				if err == nil {
+	//					acctName = s
+	//				}
+	//			}
+	//		}
+	//
+	//		if filter {
+	//			for _, addr := range addrs {
+	//				_, ok := addresses[addr.EncodeAddress()]
+	//				if ok {
+	//					goto include
+	//				}
+	//			}
+	//			continue
+	//		}
+	//
+	//	include:
+	//		// At the moment watch-only addresses are not supported, so all
+	//		// recorded outputs that are not multisig are "spendable".
+	//		// Multisig outputs are only "spendable" if all keys are
+	//		// controlled by this wallet.
+	//		//
+	//		// TODO: Each case will need updates when watch-only addrs
+	//		// is added.  For P2PK, P2PKH, and P2SH, the address must be
+	//		// looked up and not be watching-only.  For multisig, all
+	//		// pubkeys must belong to the manager with the associated
+	//		// private key (currently it only checks whether the pubkey
+	//		// exists, since the private key is required at the moment).
+	//		var spendable bool
+	//	scSwitch:
+	//		switch sc {
+	//		case txscript.PubKeyHashTy:
+	//			spendable = true
+	//		case txscript.PubKeyTy:
+	//			spendable = true
+	//		case txscript.WitnessV0ScriptHashTy:
+	//			spendable = true
+	//		case txscript.WitnessV0PubKeyHashTy:
+	//			spendable = true
+	//		case txscript.MultiSigTy:
+	//			for _, a := range addrs {
+	//				_, err := w.Manager.Address(addrmgrNs, a)
+	//				if err == nil {
+	//					continue
+	//				}
+	//				if waddrmgr.IsError(err, waddrmgr.ErrAddressNotFound) {
+	//					break scSwitch
+	//				}
+	//				return err
+	//			}
+	//			spendable = true
+	//		}
+	//
+	//		result := &abejson.ListUnspentResult{
+	//			TxID:          output.OutPoint.Hash.String(),
+	//			Vout:          output.OutPoint.Index,
+	//			Account:       acctName,
+	//			ScriptPubKey:  hex.EncodeToString(output.PkScript),
+	//			Amount:        output.Amount.ToABE(),
+	//			Confirmations: int64(confs),
+	//			Spendable:     spendable,
+	//		}
+	//
+	//		// BUG: this should be a JSON array so that all
+	//		// addresses can be included, or removed (and the
+	//		// caller extracts addresses from the pkScript).
+	//		if len(addrs) > 0 {
+	//			result.Address = addrs[0].EncodeAddress()
+	//		}
+	//
+	//		results = append(results, result)
+	//	}
+	//	return nil
+	//})
+	//return results, err
+}
 // DumpPrivKeys returns the WIF-encoded private keys for all addresses with
 // private keys in a wallet.
 func (w *Wallet) DumpPrivKeys() ([]string, error) {
@@ -3672,6 +3865,41 @@ func (w *Wallet) SendOutputs(outputs []*wire.TxOut, account uint32,
 	return createdTx.Tx, nil
 }
 
+func (w *Wallet) SendOutputsAbe(outputs []*wire.TxOutAbe, minconf int32, satPerKb abeutil.Amount, label string) (*wire.MsgTxAbe, error) {
+
+	// Ensure the outputs to be created adhere to the network's consensus
+	// rules.
+	for _, output := range outputs {
+		err := txrules.CheckOutputAbe(
+			output, txrules.DefaultRelayFeePerKb,
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Create the transaction and broadcast it to the network. The
+	// transaction will be added to the database in order to ensure that we
+	// continue to re-broadcast the transaction upon restarts until it has
+	// been confirmed.
+	createdTx, err := w.CreateSimpleTxAbe(outputs, minconf, satPerKb, false)
+	if err != nil {
+		return nil, err
+	}
+
+	txHash, err := w.reliablyPublishTransactionAbe(createdTx.Tx, label)
+	if err != nil {
+		return nil, err
+	}
+
+	// Sanity check on the returned tx hash.
+	if *txHash != createdTx.Tx.TxHash() {
+		return nil, errors.New("tx hash mismatch")
+	}
+
+	return createdTx.Tx, nil
+}
+
 // SignatureError records the underlying error when validating a transaction
 // input signature.
 type SignatureError struct {
@@ -3925,6 +4153,69 @@ func (w *Wallet) reliablyPublishTransaction(tx *wire.MsgTx,
 
 	return w.publishTransaction(tx)
 }
+func (w *Wallet) reliablyPublishTransactionAbe(tx *wire.MsgTxAbe,
+	label string) (*chainhash.Hash, error) {
+
+	//chainClient, err := w.requireChainClient()
+	//if err != nil {
+	//	return nil, err
+	//}
+
+	// As we aim for this to be general reliable transaction broadcast API,
+	// we'll write this tx to disk as an unconfirmed transaction. This way,
+	// upon restarts, we'll always rebroadcast it, and also add it to our
+	// set of records.
+	txRec, err := wtxmgr.NewTxRecordAbeFromMsgTxAbe(tx, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	err = walletdb.Update(w.db, func(dbTx walletdb.ReadWriteTx) error {
+		if err := w.addRelevantTxAbe(dbTx, txRec, nil); err != nil {
+			return err
+		}
+
+		// If the tx label is empty, we can return early.
+		if len(label) == 0 {
+			return nil
+		}
+
+		// If there is a label we should write, get the namespace key
+		// and record it in the tx store.
+		txmgrNs := dbTx.ReadWriteBucket(wtxmgrNamespaceKey)
+		return w.TxStore.PutTxLabel(txmgrNs, tx.TxHash(), label)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// We'll also ask to be notified of the transaction once it confirms
+	// on-chain. This is done outside of the database transaction to prevent
+	// backend interaction within it.
+	//
+	// NOTE: In some cases, it's possible that the transaction to be
+	// broadcast is not directly relevant to the user's wallet, e.g.,
+	// multisig. In either case, we'll still ask to be notified of when it
+	// confirms to maintain consistency.
+	//
+	// TODO(wilmer): import script as external if the address does not
+	// belong to the wallet to handle confs during restarts?
+	//for _, txOut := range tx.TxOuts {
+	//	addrs, err := txscript.ExtractAddressFromScriptAbe(txOut.AddressScript)
+	//	if err != nil {
+	//		// Non-standard outputs can safely be skipped because
+	//		// they're not supported by the wallet.
+	//		continue
+	//	}
+	//TODO(abe): because this transaction is create by the wallet itself, so move its outputs in bucket means finished.
+	//	if this transaction have outputs to wallet, we need to wait for a block containing this tx, in that time, we just think
+	//	this output belongs to the wallet. The root reason is we do not support spent the unconfimed transaction.
+	//if err := chainClient.NotifyReceived(addrs); err != nil {
+	//	return nil, err
+	//}
+	//}
+
+	return w.publishTransactionAbe(tx)
+}
 
 // publishTransaction attempts to send an unconfirmed transaction to the
 // wallet's current backend. In the event that sending the transaction fails for
@@ -4110,6 +4401,197 @@ func (w *Wallet) publishTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) {
 			return err
 		}
 		return w.TxStore.RemoveUnminedTx(txmgrNs, txRec)
+	})
+	if dbErr != nil {
+		log.Warnf("Unable to remove invalid transaction %v: %v",
+			tx.TxHash(), dbErr)
+	} else {
+		log.Infof("Removed invalid transaction: %v",
+			spew.Sdump(tx))
+	}
+
+	return nil, returnErr
+}
+func (w *Wallet) publishTransactionAbe(tx *wire.MsgTxAbe) (*chainhash.Hash, error) {
+	chainClient, err := w.requireChainClient()
+	if err != nil {
+		return nil, err
+	}
+
+	// match is a helper method to easily string match on the error
+	// message.
+	match := func(err error, s string) bool {
+		return strings.Contains(strings.ToLower(err.Error()), s)
+	}
+
+	_, err = chainClient.SendRawTransactionAbe(tx, false) // send the transaction to backend
+
+	// Determine if this was an RPC error thrown due to the transaction
+	// already confirming.
+	var rpcTxConfirmed bool
+	if rpcErr, ok := err.(*abejson.RPCError); ok {
+		rpcTxConfirmed = rpcErr.Code == abejson.ErrRPCTxAlreadyInChain
+	}
+
+	var (
+		txid      = tx.TxHash()
+		returnErr error
+	)
+
+	switch {
+	case err == nil:
+		return &txid, nil
+
+	// Since we have different backends that can be used with the wallet,
+	// we'll need to check specific errors for each one.
+	//
+	// If the transaction is already in the mempool, we can just return now.
+	//
+	// This error is returned when broadcasting/sending a transaction to a
+	// btcd node that already has it in their mempool.
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L953
+	case match(err, "already have transaction"):
+		fallthrough
+
+	// This error is returned when broadcasting a transaction to a bitcoind
+	// node that already has it in their mempool.
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L590
+	case match(err, "txn-already-in-mempool"):
+		return &txid, nil
+
+	// If the transaction has already confirmed, we can safely remove it
+	// from the unconfirmed store as it should already exist within the
+	// confirmed store. We'll avoid returning an error as the broadcast was
+	// in a sense successful.
+	//
+	// This error is returned when sending a transaction that has already
+	// confirmed to a btcd/bitcoind node over RPC.
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/rpcserver.go#L3355
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/node/transaction.cpp#L36
+	case rpcTxConfirmed:
+		fallthrough
+
+	// This error is returned when broadcasting a transaction that has
+	// already confirmed to a btcd node over the P2P network.
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L1036
+	case match(err, "transaction already exists"):
+		fallthrough
+
+	// This error is returned when broadcasting a transaction that has
+	// already confirmed to a bitcoind node over the P2P network.
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L648
+	case match(err, "txn-already-known"):
+		dbErr := walletdb.Update(w.db, func(dbTx walletdb.ReadWriteTx) error {
+			txmgrNs := dbTx.ReadWriteBucket(wtxmgrNamespaceKey)
+			txRec, err := wtxmgr.NewTxRecordAbeFromMsgTxAbe(tx, time.Now())
+			if err != nil {
+				return err
+			}
+			return w.TxStore.RemoveUnminedTxAbe(txmgrNs, txRec)
+		})
+		if dbErr != nil {
+			log.Warnf("Unable to remove confirmed transaction %v "+
+				"from unconfirmed store: %v", tx.TxHash(), dbErr)
+		}
+
+		return &txid, nil
+
+	// If the transactions is invalid since it attempts to double spend a
+	// transaction already in the mempool or in the chain, we'll remove it
+	// from the store and return an error.
+	//
+	// This error is returned from btcd when there is already a transaction
+	// not signaling replacement in the mempool that spends one of the
+	// referenced outputs.
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L591
+	case match(err, "already spent"):
+		fallthrough
+
+	// This error is returned from btcd when a referenced output cannot be
+	// found, meaning it etiher has been spent or doesn't exist.
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/blockchain/chain.go#L405
+	case match(err, "already been spent"):
+		fallthrough
+
+	// This error is returned from btcd when a transaction is spending
+	// either output that is missing or already spent, and orphans aren't
+	// allowed.
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L1409
+	case match(err, "orphan transaction"):
+		fallthrough
+
+	// Error returned from bitcoind when output was spent by other
+	// non-replacable transaction already in the mempool.
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L622
+	case match(err, "txn-mempool-conflict"):
+		fallthrough
+
+	// Returned by bitcoind on the RPC when broadcasting a transaction that
+	// is spending either output that is missing or already spent.
+	//
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/node/transaction.cpp#L49
+	// https://github.com/bitcoin/bitcoin/blob/0.20/src/validation.cpp#L642
+	case match(err, "missing inputs") ||
+		match(err, "bad-txns-inputs-missingorspent"):
+
+		returnErr = &ErrDoubleSpend{
+			backendError: err,
+		}
+
+	// Returned by bitcoind if the transaction spends outputs that would be
+	// replaced by it.
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L790
+	case match(err, "bad-txns-spends-conflicting-tx"):
+		fallthrough
+
+	// Returned by bitcoind when a replacement transaction did not have
+	// enough fee.
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L830
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L894
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L904
+	case match(err, "insufficient fee"):
+		fallthrough
+
+	// Returned by bitcoind in case the transaction would replace too many
+	// transaction in the mempool.
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L858
+	case match(err, "too many potential replacements"):
+		fallthrough
+
+	// Returned by bitcoind if the transaction spends an output that is
+	// unconfimed and not spent by the transaction it replaces.
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L882
+	case match(err, "replacement-adds-unconfirmed"):
+		fallthrough
+
+	// Returned by btcd when replacement transaction was rejected for
+	// whatever reason.
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L841
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L854
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L875
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L896
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L913
+	case match(err, "replacement transaction"):
+		returnErr = &ErrReplacement{
+			backendError: err,
+		}
+
+	// We received an error not matching any of the above cases.
+	default:
+		returnErr = fmt.Errorf("unmatched backend error: %v", err)
+	}
+
+	// If the transaction was rejected for whatever other reason, then
+	// we'll remove it from the transaction store, as otherwise, we'll
+	// attempt to continually re-broadcast it, and the UTXO state of the
+	// wallet won't be accurate.
+	dbErr := walletdb.Update(w.db, func(dbTx walletdb.ReadWriteTx) error {
+		txmgrNs := dbTx.ReadWriteBucket(wtxmgrNamespaceKey)
+		txRec, err := wtxmgr.NewTxRecordAbeFromMsgTxAbe(tx, time.Now())
+		if err != nil {
+			return err
+		}
+		return w.TxStore.RemoveUnminedTxAbe(txmgrNs, txRec)
 	})
 	if dbErr != nil {
 		log.Warnf("Unable to remove invalid transaction %v: %v",
@@ -4331,6 +4813,7 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 		rescanProgress:      make(chan *RescanProgressMsg),
 		rescanFinished:      make(chan *RescanFinishedMsg),
 		createTxRequests:    make(chan createTxRequest),
+		createTxAbeRequests: make(chan createTxAbeRequest),
 		unlockRequests:      make(chan unlockRequest),
 		lockRequests:        make(chan struct{}),
 		holdUnlockRequests:  make(chan chan heldUnlock),

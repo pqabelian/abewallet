@@ -54,6 +54,20 @@ func IsDustOutput(output *wire.TxOut, relayFeePerKb abeutil.Amount) bool {
 	return IsDustAmount(abeutil.Amount(output.Value), len(output.PkScript),
 		relayFeePerKb)
 }
+func IsDustOutputAbe(output *wire.TxOutAbe, relayFeePerKb abeutil.Amount) bool {
+	// Unspendable outputs which solely carry data are not checked for dust.
+	//if txscript.GetScriptClass(output.PkScript) == txscript.NullDataTy {
+	//	return false
+	//}
+
+	// All other unspendable outputs are considered dust.
+	//if txscript.IsUnspendable(output.PkScript) {
+	//	return true
+	//}
+
+	return IsDustAmount(abeutil.Amount(output.ValueScript), len(output.AddressScript),
+		relayFeePerKb)
+}
 
 // Transaction rule violations
 var (
@@ -77,6 +91,18 @@ func CheckOutput(output *wire.TxOut, relayFeePerKb abeutil.Amount) error {
 	return nil
 }
 
+func CheckOutputAbe(output *wire.TxOutAbe, relayFeePerKb abeutil.Amount) error {
+	if output.ValueScript < 0 {
+		return ErrAmountNegative
+	}
+	if output.ValueScript > abeutil.MaxSatoshi {
+		return ErrAmountExceedsMax
+	}
+	if IsDustOutputAbe(output, relayFeePerKb) {
+		return ErrOutputIsDust
+	}
+	return nil
+}
 // FeeForSerializeSize calculates the required fee for a transaction of some
 // arbitrary size given a mempool's relay fee policy.
 func FeeForSerializeSize(relayFeePerKb abeutil.Amount, txSerializeSize int) abeutil.Amount {

@@ -5,7 +5,7 @@ import (
 	"github.com/abesuite/abec/wire"
 	"github.com/abesuite/abewallet/walletdb"
 )
-
+// TODO(abe): for abe, we do not add a unmined transaction into db except the transaction the wallet itself generates
 // insertMemPoolTx inserts the unmined transaction record.  It also marks
 // previous outputs referenced by the inputs as spent.
 func (s *Store) insertMemPoolTx(ns walletdb.ReadWriteBucket, rec *TxRecord) error {

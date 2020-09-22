@@ -178,8 +178,8 @@ func NewUnsignedTransactionAbe(outputs []*wire.TxOutAbe, relayFeePerKb abeutil.A
 	fetchInputs InputSourceAbe, fetchChange ChangeSource) (*AuthoredTxAbe, error) {
 
 	targetAmount := SumOutputValuesAbe(outputs)
-	estimatedSize := txsizes.EstimateVirtualSizeAbe(nil,outputs, true)
-	targetFee := txrules.FeeForSerializeSizeAbe(relayFeePerKb, estimatedSize)
+	estimatedSize := txsizes.EstimateVirtualSizeAbe(nil,outputs, true) //TODO(abe):about the tx fee, we can assign a value for testing
+	targetFee := txrules.FeeForSerializeSizeAbe(relayFeePerKb, estimatedSize)      // to compute the required tx fee
 
 	for {
 		inputAmount, inputs, inputValues, scripts , err := fetchInputs(targetAmount + targetFee)
@@ -205,7 +205,7 @@ func NewUnsignedTransactionAbe(outputs []*wire.TxOutAbe, relayFeePerKb abeutil.A
 			Version:  wire.TxVersion,
 			TxIns:     inputs,
 			TxOuts:    outputs,
-			TxFee: 0,
+			TxFee: int64(maxRequiredFee),
 			TxWitness: &wire.TxWitnessAbe{
 				Witnesses: []wire.Witness{},
 			},
@@ -218,6 +218,7 @@ func NewUnsignedTransactionAbe(outputs []*wire.TxOutAbe, relayFeePerKb abeutil.A
 			if err != nil {
 				return nil, err
 			}
+			// this value should be decided according the max block size
 			if len(changeScript) > txsizes.P2WPKHPkScriptSize {
 				return nil, errors.New("fee estimation requires change " +
 					"scripts no larger than P2WPKH output scripts")
@@ -454,6 +455,8 @@ func (tx *AuthoredTx) AddAllInputScripts(secrets SecretsSource) error {
 	return AddAllInputScripts(tx.Tx, tx.PrevScripts, tx.PrevInputValues, secrets)
 }
 func (tx *AuthoredTxAbe) AddAllInputScripts(msg []byte,m *waddrmgr.ManagerAbe, waddrmgrNs walletdb.ReadWriteBucket,wtxmgrNs walletdb.ReadWriteBucket) error {
+	// acquire the key
+	//TODO(abe): this process of acquire master key will be abstract to a interface
 	if m.IsLocked() {
 		return fmt.Errorf("the wallet is locked")
 	}
@@ -465,7 +468,7 @@ func (tx *AuthoredTxAbe) AddAllInputScripts(msg []byte,m *waddrmgr.ManagerAbe, w
 	if err!=nil {
 		return err
 	}
-	msvkBytes, err := m.Decrypt(waddrmgr.CKTPublic, msvkEncBytes)
+	msvkBytes, err := m.Decrypt(waddrmgr.CKTPublic, msvkEncBytes)   //TODO(abe):zero the master key byte
 	if err!=nil {
 		return err
 	}
@@ -486,7 +489,7 @@ func (tx *AuthoredTxAbe) AddAllInputScripts(msg []byte,m *waddrmgr.ManagerAbe, w
 		return err
 	}
 	for i:=0;i<len(tx.Tx.TxIns);i++{
-		//TODO(abe):when signature, what is the message?
+		//TODO(abe):when signature, what is the message?  temporary, it uses "this is a test"
 		//TODO(abe):1-get the all and own dpk from script
 		ringHash:=tx.Tx.TxIns[i].PreviousOutPointRing.Hash()
 		//utxoRing, err := wtxmgr.FetchUTXORing(waddrmgrNs, ringHash[:])
@@ -514,9 +517,9 @@ func (tx *AuthoredTxAbe) AddAllInputScripts(msg []byte,m *waddrmgr.ManagerAbe, w
 				return err
 			}
 			tx.Tx.TxWitness.Witnesses[i]=sig.Serialize()
-			k,b:=abesalrs.Verify(msg,dpkRing,sig)
-			if !b{
-				return fmt.Errorf("error in generating the key image")
+			k,b,err:=abesalrs.Verify(msg,dpkRing,sig)
+			if !b||err!=nil{
+				return fmt.Errorf("error in generating the key image:%v",err)
 			}
 			tx.Tx.TxIns[i].SerialNumber=chainhash.DoubleHashH(k.Serialize())
 			//TODO(abe):need to update the database such as utxoRing and unspentTxo...

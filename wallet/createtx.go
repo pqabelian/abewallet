@@ -54,7 +54,7 @@ func makeInputSource(eligible []wtxmgr.Credit) txauthor.InputSource {
 		return currentTotal, currentInputs, currentInputValues, currentScripts, nil
 	}
 }
-func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO,rings map[chainhash.Hash]*wtxmgr.Ring) txauthor.InputSourceAbe {
+func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO, rings map[chainhash.Hash]*wtxmgr.Ring) txauthor.InputSourceAbe {
 	// Pick largest outputs first.  This is only done for compatibility with
 	// previous tx creation code, not because it's a good idea.
 	sort.Sort(sort.Reverse(byAmountAbe(eligible)))
@@ -67,21 +67,28 @@ func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO,rings map[chainhash.Hash]*
 	currentInputValues := make([]abeutil.Amount, 0, len(eligible))
 
 	return func(target abeutil.Amount) (abeutil.Amount, []*wire.TxInAbe,
-		[]abeutil.Amount,[][]byte, error) {
+		[]abeutil.Amount, [][]byte, error) {
 		//TODO(abe): Add a serialNumber to NewTXInAbe
 		for currentTotal < target && len(eligible) != 0 {
 			nextUTXO := &eligible[0]
 			eligible = eligible[1:]
-
-			nextInput := wire.NewTxInAbe(nil,&wire.OutPointRing{
+			// TODO(abe):delete it due to we must use dpk ring to generate script, so we do not get the index
+			//index:=0
+			//for ;index<len(rings[nextUTXO.RingHash].TxHashes);index++{
+			//	if rings[nextUTXO.RingHash].TxHashes[index].IsEqual(&nextUTXO.TxOutput.TxHash) &&
+			//		rings[nextUTXO.RingHash].Index[index]==nextUTXO.TxOutput.Index{
+			//		break
+			//	}
+			//}
+			nextInput := wire.NewTxInAbe(&chainhash.Hash{}, &wire.OutPointRing{ // the outpoint index has be put in the seriaalNummber field
 				BlockHashs: []*chainhash.Hash{},
-				OutPoints: []*wire.OutPointAbe{}  ,
+				OutPoints:  []*wire.OutPointAbe{},
 			})
-			for i:=0;i<len(rings[nextUTXO.RingHash].BlockHashes);i++{
-				nextInput.PreviousOutPointRing.BlockHashs=append(nextInput.PreviousOutPointRing.BlockHashs,&rings[nextUTXO.RingHash].BlockHashes[i])
+			for i := 0; i < len(rings[nextUTXO.RingHash].BlockHashes); i++ { // fill up the blockhashes field
+				nextInput.PreviousOutPointRing.BlockHashs = append(nextInput.PreviousOutPointRing.BlockHashs, &rings[nextUTXO.RingHash].BlockHashes[i])
 			}
-			for i:=0;i<len(rings[nextUTXO.RingHash].TxHashes);i++{
-				nextInput.PreviousOutPointRing.OutPoints=append(nextInput.PreviousOutPointRing.OutPoints,&wire.OutPointAbe{
+			for i := 0; i < len(rings[nextUTXO.RingHash].TxHashes); i++ { //fill up the outpoint field
+				nextInput.PreviousOutPointRing.OutPoints = append(nextInput.PreviousOutPointRing.OutPoints, &wire.OutPointAbe{
 					TxHash: rings[nextUTXO.RingHash].TxHashes[i],
 					Index:  rings[nextUTXO.RingHash].Index[i],
 				})
@@ -92,9 +99,10 @@ func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO,rings map[chainhash.Hash]*
 			amount, _ := abeutil.NewAmount(float64(nextUTXO.Amount))
 			currentInputValues = append(currentInputValues, amount)
 		}
-		return currentTotal, currentInputs, currentInputValues, currentScripts,nil
+		return currentTotal, currentInputs, currentInputValues, currentScripts, nil
 	}
 }
+
 // secretSource is an implementation of txauthor.SecretSource for the wallet's
 // address manager.
 type secretSource struct {
@@ -135,6 +143,7 @@ func (s secretSource) GetScript(addr abeutil.Address) ([]byte, error) {
 	}
 	return msa.Script()
 }
+
 //type secretSourceAbe struct {
 //	*waddrmgr.ManagerAbe
 //	addrmgrNs walletdb.ReadBucket
@@ -255,7 +264,7 @@ func (w *Wallet) txToOutputs(outputs []*wire.TxOut, account uint32,
 		return tx, nil
 	}
 
-	err = tx.AddAllInputScripts(secretSource{w.Manager,addrmgrNs})
+	err = tx.AddAllInputScripts(secretSource{w.Manager, addrmgrNs})
 	if err != nil {
 		return nil, err
 	}
@@ -293,9 +302,9 @@ func (w *Wallet) txToOutputs(outputs []*wire.TxOut, account uint32,
 
 	return tx, nil
 }
+
 // TODO(abe): compute the transaction fee
-func (w *Wallet) txAbeToOutputs(outputs []*wire.TxOutAbe, account uint32,
-	minconf int32, feeSatPerKb abeutil.Amount, dryRun bool) (
+func (w *Wallet) txAbeToOutputs(outputs []*wire.TxOutAbe, minconf int32, feeSatPerKb abeutil.Amount, dryRun bool) (
 	tx *txauthor.AuthoredTxAbe, err error) {
 
 	chainClient, err := w.requireChainClient()
@@ -303,7 +312,7 @@ func (w *Wallet) txAbeToOutputs(outputs []*wire.TxOutAbe, account uint32,
 		return nil, err
 	}
 
-	dbtx, err := w.db.BeginReadWriteTx()
+	dbtx, err := w.db.BeginReadWriteTx() // db的根tx
 	if err != nil {
 		return nil, err
 	}
@@ -313,27 +322,28 @@ func (w *Wallet) txAbeToOutputs(outputs []*wire.TxOutAbe, account uint32,
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
 
 	// Get current block's height and hash.
+	//bs:=w.ManagerAbe.SyncedTo()
 	bs, err := chainClient.BlockStamp()
 	if err != nil {
 		return nil, err
 	}
 
 	// get the unspent transaction output
-	eligible,rings, err := w.findEligibleOutputsAbe(dbtx, minconf, bs)
+	eligible, rings, err := w.findEligibleOutputsAbe(dbtx, minconf, bs)
 	if err != nil {
 		return nil, err
 	}
-	inputSource := makeInputSourceAbe(eligible,rings)
+	inputSource := makeInputSourceAbe(eligible, rings)
 	changeSource := func() ([]byte, error) {
 		// Derive the change output script. We'll use the default key
 		// scope responsible for P2WPKH addresses to do so. As a hack to
 		// allow spending from the imported account, change addresses
 		// are created from account 0.
 		changeAddr, err := w.ManagerAbe.NewChangeAddress(addrmgrNs)
-		if err!=nil{
-			return nil,err
+		if err != nil {
+			return nil, err
 		}
-		return changeAddr.Serialize(),nil
+		return changeAddr.Serialize(), nil
 	}
 	tx, err = txauthor.NewUnsignedTransactionAbe(outputs, feeSatPerKb,
 		inputSource, changeSource)
@@ -356,7 +366,7 @@ func (w *Wallet) txAbeToOutputs(outputs []*wire.TxOutAbe, account uint32,
 		return tx, nil
 	}
 	// TODO(abe):need to get serialNumber and signature for all input in new transaction
-	err = tx.AddAllInputScripts([]byte("this is a test"),w.ManagerAbe,addrmgrNs,txmgrNs)
+	err = tx.AddAllInputScripts([]byte("this is a test"), w.ManagerAbe, addrmgrNs, txmgrNs)
 	if err != nil {
 		return nil, err
 	}
@@ -372,14 +382,15 @@ func (w *Wallet) txAbeToOutputs(outputs []*wire.TxOutAbe, account uint32,
 		return nil, err
 	}
 
-	if tx.ChangeIndex >= 0 && account == waddrmgr.ImportedAddrAccount {
-		changeAmount := abeutil.Amount(tx.Tx.TxOuts[tx.ChangeIndex].ValueScript)
-		log.Warnf("Spend from imported account produced change: moving"+
-			" %v from imported account into default account.", changeAmount)
-	}
+	//if tx.ChangeIndex >= 0 && account == waddrmgr.ImportedAddrAccount {
+	//	changeAmount := abeutil.Amount(tx.Tx.TxOuts[tx.ChangeIndex].ValueScript)
+	//	log.Warnf("Spend from imported account produced change: moving"+
+	//		" %v from imported account into default account.", changeAmount)
+	//}
 
 	// Finally, we'll request the backend to notify us of the transaction
 	// that pays to the change address, if there is one, when it confirms.
+	//TODO(abe): this process will be ignore, because we can not spend this change output before this transaction is mined into the chain
 	if tx.ChangeIndex >= 0 {
 		changePkScript := tx.Tx.TxOuts[tx.ChangeIndex].AddressScript
 		_, addrs, _, err := txscript.ExtractPkScriptAddrs(
@@ -450,27 +461,16 @@ func (w *Wallet) findEligibleOutputs(dbtx walletdb.ReadTx, account uint32, minco
 	}
 	return eligible, nil
 }
+
 // TODO(abe):we should request the unspent transaction output from tx manager
-func (w *Wallet) findEligibleOutputsAbe(dbtx walletdb.ReadTx, minconf int32, bs *waddrmgr.BlockStamp) ([]wtxmgr.UnspentUTXO, map[chainhash.Hash]*wtxmgr.Ring,error) {
+func (w *Wallet) findEligibleOutputsAbe(dbtx walletdb.ReadTx, minconf int32, bs *waddrmgr.BlockStamp) ([]wtxmgr.UnspentUTXO, map[chainhash.Hash]*wtxmgr.Ring, error) {
 	//addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
 	txmgrNs := dbtx.ReadBucket(wtxmgrNamespaceKey)
 
 	unspent, err := w.TxStore.UnspentOutputsAbe(txmgrNs)
-	rings:=*new(map[chainhash.Hash]*wtxmgr.Ring)
-	for i:=0;i<len(unspent);i++{
-		if chainhash.ZeroHash.IsEqual(&unspent[i].RingHash) {
-			unspent = append(unspent[:i], unspent[i+1:]...)
-		}
-		_,ok:=rings[unspent[i].RingHash]
-		if !ok{
-			ring, _ := wtxmgr.FetchRingDetails(txmgrNs, unspent[i].RingHash[:])
-			rings[unspent[i].RingHash]=ring
-		}
-	}
 	if err != nil {
-		return nil,nil, err
+		return nil, nil, err
 	}
-
 	// TODO: Eventually all of these filters (except perhaps output locking)
 	// should be handled by the call to UnspentOutputs (or similar).
 	// Because one of these filters requires matching the output script to
@@ -494,7 +494,22 @@ func (w *Wallet) findEligibleOutputsAbe(dbtx walletdb.ReadTx, minconf int32, bs 
 		}
 		eligible = append(eligible, *output)
 	}
-	return eligible, rings,nil
+	rings := *new(map[chainhash.Hash]*wtxmgr.Ring)
+	for i := 0; i < len(eligible); i++ {
+		if chainhash.ZeroHash.IsEqual(&unspent[i].RingHash) { //if the hash is zero, it means that this output is unspentable
+			eligible = append(eligible[:i], eligible[i+1:]...)
+			continue
+		}
+		_, ok := rings[eligible[i].RingHash]
+		if !ok {
+			ring, err := wtxmgr.FetchRingDetails(txmgrNs, eligible[i].RingHash[:])
+			if err != nil {
+				return nil, nil, err
+			}
+			rings[eligible[i].RingHash] = ring
+		}
+	}
+	return eligible, rings, nil
 }
 
 // validateMsgTx verifies transaction input scripts for tx.  All previous output
