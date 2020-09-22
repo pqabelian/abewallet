@@ -1,17 +1,19 @@
 package waddrmgr
 
 import (
+	cryptorand "crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"github.com/abesuite/abec/abecrypto"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abewallet/walletdb"
+	"math/big"
 	"time"
 )
 
 type state struct {
 	time   time.Time //when give coin to this payee
-	amount int64 //how much
+	amount int64     //how much
 }
 
 func (s *state) Serialize() []byte {
@@ -41,12 +43,19 @@ type PayeeManager struct {
 func (p PayeeManager) Name() string {
 	return p.name
 }
-func (p *PayeeManager)ChangeName(ns walletdb.ReadWriteBucket,newName string)error{
-	p.name=newName
-	return putPayeeManager(ns,p.name,p)
+func (p PayeeManager) ChooseMAddr() (abeutil.MasterAddress,error) {
+	index, err := cryptorand.Int(cryptorand.Reader, new(big.Int).SetInt64(int64(len(p.mpks))))
+	if err!=nil{
+		return nil,err
+	}
+	return p.mpks[index.Int64()],nil
+}
+func (p *PayeeManager) ChangeName(ns walletdb.ReadWriteBucket, newName string) error {
+	p.name = newName
+	return putPayeeManager(ns, p.name, p)
 
 }
-func (p *PayeeManager) Payee(ns walletdb.ReadWriteBucket,amount int64) error {
+func (p *PayeeManager) Payee(ns walletdb.ReadWriteBucket, amount int64) error {
 	if len(p.mpks) == 0 {
 		return fmt.Errorf("this payee has 0 master public key")
 	}
@@ -57,23 +66,23 @@ func (p *PayeeManager) Payee(ns walletdb.ReadWriteBucket,amount int64) error {
 	})
 	return putPayeeManager(ns, p.name, p)
 }
-func (p *PayeeManager) AddMPK(ns walletdb.ReadWriteBucket,addr ManagedAddressAbe) error {
+func (p *PayeeManager) AddMPK(ns walletdb.ReadWriteBucket, addr ManagedAddressAbe) error {
 	p.mpks = append(p.mpks, addr)
 	return putPayeeManager(ns, p.name, p)
 }
-func (p *PayeeManager) RemoveMPK(ns walletdb.ReadWriteBucket,addr ManagedAddressAbe) error {
-	index:=-1
-	for i:=0;i<len(p.mpks);i++{
+func (p *PayeeManager) RemoveMPK(ns walletdb.ReadWriteBucket, addr ManagedAddressAbe) error {
+	index := -1
+	for i := 0; i < len(p.mpks); i++ {
 		if p.mpks[i] == addr {
-			index= i
+			index = i
 			break
 		}
 	}
-	if index!=-1 {
+	if index != -1 {
 		p.mpks = append(p.mpks[:index], p.mpks[index+1:]...)
 		return putPayeeManager(ns, p.name, p)
-	}else{
-		return fmt.Errorf("the payee %s has no addr %v",p.name,addr)
+	} else {
+		return fmt.Errorf("the payee %s has no addr %v", p.name, addr)
 	}
 }
 
@@ -123,7 +132,7 @@ func (p PayeeManager) Deserialize(b []byte) error {
 	offset += nameSize
 	numOfMPK := int(binary.BigEndian.Uint16(b[offset : offset+2]))
 	offset += 2
-	for i:=0;i<numOfMPK;i++ {
+	for i := 0; i < numOfMPK; i++ {
 		lengthOfMPK := int(binary.BigEndian.Uint16(b[offset : offset+2]))
 		offset += 2
 		scheme := abecrypto.CryptoScheme(binary.BigEndian.Uint16(b[offset : offset+2]))
@@ -134,23 +143,23 @@ func (p PayeeManager) Deserialize(b []byte) error {
 		}
 		mpk.Deserialize(b[offset : offset+lengthOfMPK])
 		if p.mpks == nil {
-			p.mpks=*new([]ManagedAddressAbe)
+			p.mpks = *new([]ManagedAddressAbe)
 		}
-		p.mpks=append(p.mpks,ManagedAddressAbe(mpk))
-		offset+=lengthOfMPK
+		p.mpks = append(p.mpks, ManagedAddressAbe(mpk))
+		offset += lengthOfMPK
 	}
-	p.totalAmount=int64(binary.BigEndian.Uint64(b[offset:offset+8]))
+	p.totalAmount = int64(binary.BigEndian.Uint64(b[offset : offset+8]))
 	offset += 8
 	numOfStates := int(binary.BigEndian.Uint16(b[offset : offset+2]))
 	offset += 2
-	for i:=0;i<numOfStates;i++ {
-		s:=new(state)
-		s.Deserialize(b[offset:offset+16])
+	for i := 0; i < numOfStates; i++ {
+		s := new(state)
+		s.Deserialize(b[offset : offset+16])
 		if p.states == nil {
-			p.states=*new([]state)
+			p.states = *new([]state)
 		}
-		p.states=append(p.states,*s)
-		offset+=16
+		p.states = append(p.states, *s)
+		offset += 16
 	}
 	return nil
 }

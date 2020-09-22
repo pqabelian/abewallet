@@ -71,13 +71,14 @@ var rpcHandlers = map[string]struct {
 	//	todo(ABE): The supported RPC requests are here. We need to remove some that are not supported any more.
 	// Reference implementation wallet methods (implemented)
 	"addmultisigaddress":     {handler: addMultiSigAddress},
-	"addpayee":     {handler: addPayee},
+	"addpayee":               {handler: addPayee},
 	"createmultisig":         {handler: createMultiSig},
 	"dumpprivkey":            {handler: dumpPrivKey},
 	"getaccount":             {handler: getAccount},
 	"getaccountaddress":      {handler: getAccountAddress},
 	"getaddressesbyaccount":  {handler: getAddressesByAccount},
 	"getbalance":             {handler: getBalance},
+	"getbalancesabe":             {handler: getBalanceAbe},
 	"getbestblockhash":       {handler: getBestBlockHash},
 	"getblockcount":          {handler: getBlockCount},
 	"getinfo":                {handlerWithChain: getInfo},
@@ -89,17 +90,19 @@ var rpcHandlers = map[string]struct {
 	"help":                   {handler: helpNoChainRPC, handlerWithChain: helpWithChainRPC},
 	"importprivkey":          {handler: importPrivKey},
 	"keypoolrefill":          {handler: keypoolRefill},
-	"listaccounts":           {handler: listAccounts},
+	//"listaccounts":           {handler: listAccounts},    //TODO(abe):we have concept of "account"
 	"listlockunspent":        {handler: listLockUnspent},
 	"listreceivedbyaccount":  {handler: listReceivedByAccount},
 	"listreceivedbyaddress":  {handler: listReceivedByAddress},
 	"listsinceblock":         {handlerWithChain: listSinceBlock},
 	"listtransactions":       {handler: listTransactions},
 	"listunspent":            {handler: listUnspent},
+	"listunspentabe":            {handler: listUnspent},
 	"lockunspent":            {handler: lockUnspent},
 	"sendfrom":               {handlerWithChain: sendFrom},
 	"sendmany":               {handler: sendMany},
 	"sendtoaddress":          {handler: sendToAddress},
+	"sendtopayee":          {handler: sendToPayees},
 	"settxfee":               {handler: setTxFee},
 	"signmessage":            {handler: signMessage},
 	"signrawtransaction":     {handlerWithChain: signRawTransaction},
@@ -187,7 +190,7 @@ func lazyApplyHandler(request *abejson.Request, w *wallet.Wallet, chainClient ch
 			}
 		}
 	}
-	if ok && handlerData.handler != nil && w != nil {   //just wallet can handle with this request
+	if ok && handlerData.handler != nil && w != nil { //just wallet can handle with this request
 		return func() (interface{}, *abejson.RPCError) {
 			cmd, err := abejson.UnmarshalCmd(request)
 			if err != nil {
@@ -350,16 +353,16 @@ func addMultiSigAddress(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 	return p2shAddr.EncodeAddress(), nil
 }
 func addPayee(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.NewAddPayeeCmd)
-	// check the masterpubkey is right format?
+	cmd := icmd.(*abejson.AddPayeeCmd)
+	// check whether the masterpubkey have right format
 	mpk, err := hex.DecodeString(cmd.MasterPubKey)
-	if err!=nil{
-		return nil,err
+	if err != nil {
+		return nil, err
 	}
-	if cmd.Name == "" ||  len(mpk)!=abesalrs.MpkByteLen {
-		return nil,ErrMasterPubKeyLength
+	if cmd.Name == "" || len(mpk) != 2+abesalrs.MpkByteLen+32 {
+		return nil, ErrMasterPubKeyLength
 	}
-	return nil,w.AddPayee(cmd.Name,cmd.MasterPubKey)
+	return nil, w.AddPayee(cmd.Name, cmd.MasterPubKey)
 }
 
 // createMultiSig handles an createmultisig request by returning a
@@ -472,11 +475,24 @@ func getBalance(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	return balance.ToABE(), nil
 }
 
+func getBalanceAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.GetBalancesAbeCmd)
+
+	var balance abeutil.Amount
+	var err error
+	balance, err = w.CalculateBalanceAbe(int32(*cmd.Minconf))
+	if err != nil {
+			return nil, err
+		}
+	return balance.ToABE(), nil
+}
+
 // getBestBlock handles a getbestblock request by returning a JSON object
 // with the height and hash of the most recently processed block.
 // TODO(abe): this function can be reused for abelian
 func getBestBlock(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	blk := w.Manager.SyncedTo()
+	//blk := w.Manager.SyncedTo()
+	blk := w.ManagerAbe.SyncedTo()
 	result := &abejson.GetBestBlockResult{
 		Hash:   blk.Hash.String(),
 		Height: blk.Height,
@@ -488,7 +504,8 @@ func getBestBlock(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 // of the most recently processed block.
 // TODO(abe): this function can be reused for abelian
 func getBestBlockHash(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	blk := w.Manager.SyncedTo()
+	//blk := w.Manager.SyncedTo()
+	blk := w.ManagerAbe.SyncedTo()
 	return blk.Hash.String(), nil
 }
 
@@ -496,7 +513,8 @@ func getBestBlockHash(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 // of the most recently processed block.
 // TODO(abe): this function can be reused for abelian
 func getBlockCount(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	blk := w.Manager.SyncedTo()
+	//blk := w.Manager.SyncedTo()
+	blk := w.ManagerAbe.SyncedTo()
 	return blk.Height, nil
 }
 
@@ -512,7 +530,8 @@ func getInfo(icmd interface{}, w *wallet.Wallet, chainClient *chain.RPCClient) (
 		return nil, err
 	}
 
-	bal, err := w.CalculateBalance(1)
+	//bal, err := w.CalculateBalance(1)  // switch to calculateBalanceAbe
+	bal, err := w.CalculateBalanceAbe(1)
 	if err != nil {
 		return nil, err
 	}
@@ -1341,6 +1360,24 @@ func listUnspent(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 
 	return w.ListUnspent(int32(*cmd.MinConf), int32(*cmd.MaxConf), addresses)
 }
+func listUnspentAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.ListUnspentCmd)
+
+	var addresses map[string]struct{}
+	if cmd.Addresses != nil {
+		addresses = make(map[string]struct{})
+		// confirm that all of them are good:
+		for _, as := range *cmd.Addresses {
+			a, err := decodeAddress(as, w.ChainParams())
+			if err != nil {
+				return nil, err
+			}
+			addresses[a.EncodeAddress()] = struct{}{}
+		}
+	}
+
+	return w.ListUnspentAbe(int32(*cmd.MinConf), int32(*cmd.MaxConf), addresses)
+}
 
 // lockUnspent handles the lockunspent command.
 func lockUnspent(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
@@ -1370,6 +1407,7 @@ func lockUnspent(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 // strings to amounts.  This is used to create the outputs to include in newly
 // created transactions from a JSON object describing the output destinations
 // and amounts.
+// TODO(abe): we must use payee to send some coin
 func makeOutputs(pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) ([]*wire.TxOut, error) {
 	outputs := make([]*wire.TxOut, 0, len(pairs))
 	for addrStr, amt := range pairs {
@@ -1384,6 +1422,29 @@ func makeOutputs(pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) 
 		}
 
 		outputs = append(outputs, wire.NewTxOut(int64(amt), pkScript))
+	}
+	return outputs, nil
+}
+
+func makeOutputsAbe(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) ([]*wire.TxOutAbe, error) {
+	manager := w.ManagerAbe
+	outputs := make([]*wire.TxOutAbe, 0, len(pairs))
+	for name, amt := range pairs {
+		payeeManager, err := manager.FetchPayeeManager(name)
+		if err != nil {
+			return nil, err
+		}
+		addr, err := payeeManager.ChooseMAddr()
+		if err != nil {
+			return nil, fmt.Errorf("cannot get an address from given payee: %s", err)
+		}
+
+		pkScript, err := txscript.PayToAddressScriptAbe(addr)
+		if err != nil {
+			return nil, fmt.Errorf("cannot create txout script: %s", err)
+		}
+
+		outputs = append(outputs, wire.NewTxOutAbe(int64(amt), pkScript))
 	}
 	return outputs, nil
 }
@@ -1425,7 +1486,66 @@ func sendPairs(w *wallet.Wallet, amounts map[string]abeutil.Amount,
 func isNilOrEmpty(s *string) bool {
 	return s == nil || *s == ""
 }
+func sendPairsAbe(w *wallet.Wallet, amounts map[string]abeutil.Amount,
+	minconf int32, feeSatPerKb abeutil.Amount) (string, error) {
 
+	outputs, err := makeOutputsAbe(w, amounts, w.ChainParams())
+	if err != nil {
+		return "", err
+	}
+	tx, err := w.SendOutputsAbe(outputs,minconf, feeSatPerKb, "")
+	if err != nil {
+		if err == txrules.ErrAmountNegative {
+			return "", ErrNeedPositiveAmount
+		}
+		if waddrmgr.IsError(err, waddrmgr.ErrLocked) {
+			return "", &ErrWalletUnlockNeeded
+		}
+		switch err.(type) {
+		case abejson.RPCError:
+			return "", err
+		}
+
+		return "", &abejson.RPCError{
+			Code:    abejson.ErrRPCInternal.Code,
+			Message: err.Error(),
+		}
+	}
+
+	txHashStr := tx.TxHash().String()
+	log.Infof("Successfully sent transaction %v", txHashStr)
+	return txHashStr, nil
+}
+func sendToPayees(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.SendToPayeesCmd)
+
+	// Transaction comments are not yet supported.  Error instead of
+	// pretending to save them.
+	if !isNilOrEmpty(cmd.Comment) {
+		return nil, &abejson.RPCError{
+			Code:    abejson.ErrRPCUnimplemented,
+			Message: "Transaction comments are not yet supported",
+		}
+	}
+
+	// Check that minconf is positive.
+	minConf := int32(*cmd.MinConf)
+	if minConf < 0 {
+		return nil, ErrNeedPositiveMinconf
+	}
+
+	// Recreate address/amount pairs, using dcrutil.Amount.
+	pairs := make(map[string]abeutil.Amount, len(cmd.Amounts))
+	for k, v := range cmd.Amounts {
+		amt, err := abeutil.NewAmount(float64(v))
+		if err != nil {
+			return nil, err
+		}
+		pairs[k] = amt
+	}
+
+	return sendPairsAbe(w, pairs, minConf, txrules.DefaultRelayFeePerKb)
+}
 // sendFrom handles a sendfrom RPC request by creating a new transaction
 // spending unspent transaction outputs for a wallet to another payment
 // address.  Leftover inputs not sent to the payment address or a fee for
@@ -1764,6 +1884,179 @@ func signRawTransaction(icmd interface{}, w *wallet.Wallet, chainClient *chain.R
 	}, nil
 }
 
+//TODO(abe): we sign a transaction just when the wallet creates a unsigned transaction
+func signRawTransactionAbe(icmd interface{}, w *wallet.Wallet, chainClient *chain.RPCClient) (interface{}, error) {
+	cmd := icmd.(*abejson.SignRawTransactionCmd)
+
+	serializedTx, err := decodeHexStr(cmd.RawTx)
+	if err != nil {
+		return nil, err
+	}
+	var tx wire.MsgTx
+	err = tx.Deserialize(bytes.NewBuffer(serializedTx))
+	if err != nil {
+		e := errors.New("TX decode failed")
+		return nil, DeserializationError{e}
+	}
+
+	var hashType txscript.SigHashType
+	switch *cmd.Flags {
+	case "ALL":
+		hashType = txscript.SigHashAll
+	case "NONE":
+		hashType = txscript.SigHashNone
+	case "SINGLE":
+		hashType = txscript.SigHashSingle
+	case "ALL|ANYONECANPAY":
+		hashType = txscript.SigHashAll | txscript.SigHashAnyOneCanPay
+	case "NONE|ANYONECANPAY":
+		hashType = txscript.SigHashNone | txscript.SigHashAnyOneCanPay
+	case "SINGLE|ANYONECANPAY":
+		hashType = txscript.SigHashSingle | txscript.SigHashAnyOneCanPay
+	default:
+		e := errors.New("Invalid sighash parameter")
+		return nil, InvalidParameterError{e}
+	}
+
+	// TODO: really we probably should look these up with btcd anyway to
+	// make sure that they match the blockchain if present.
+	inputs := make(map[wire.OutPoint][]byte)
+	scripts := make(map[string][]byte)
+	var cmdInputs []abejson.RawTxInput
+	if cmd.Inputs != nil {
+		cmdInputs = *cmd.Inputs
+	}
+	for _, rti := range cmdInputs {
+		inputHash, err := chainhash.NewHashFromStr(rti.Txid)
+		if err != nil {
+			return nil, DeserializationError{err}
+		}
+
+		script, err := decodeHexStr(rti.ScriptPubKey)
+		if err != nil {
+			return nil, err
+		}
+
+		// redeemScript is only actually used iff the user provided
+		// private keys. In which case, it is used to get the scripts
+		// for signing. If the user did not provide keys then we always
+		// get scripts from the wallet.
+		// Empty strings are ok for this one and hex.DecodeString will
+		// DTRT.
+		if cmd.PrivKeys != nil && len(*cmd.PrivKeys) != 0 {
+			redeemScript, err := decodeHexStr(rti.RedeemScript)
+			if err != nil {
+				return nil, err
+			}
+
+			addr, err := abeutil.NewAddressScriptHash(redeemScript,
+				w.ChainParams())
+			if err != nil {
+				return nil, DeserializationError{err}
+			}
+			scripts[addr.String()] = redeemScript
+		}
+		inputs[wire.OutPoint{
+			Hash:  *inputHash,
+			Index: rti.Vout,
+		}] = script
+	}
+
+	// Now we go and look for any inputs that we were not provided by
+	// querying btcd with getrawtransaction. We queue up a bunch of async
+	// requests and will wait for replies after we have checked the rest of
+	// the arguments.
+	requested := make(map[wire.OutPoint]rpcclient.FutureGetTxOutResult)
+	for _, txIn := range tx.TxIn {
+		// Did we get this outpoint from the arguments?
+		if _, ok := inputs[txIn.PreviousOutPoint]; ok {
+			continue
+		}
+
+		// Asynchronously request the output script.
+		requested[txIn.PreviousOutPoint] = chainClient.GetTxOutAsync(
+			&txIn.PreviousOutPoint.Hash, txIn.PreviousOutPoint.Index,
+			true)
+	}
+
+	// Parse list of private keys, if present. If there are any keys here
+	// they are the keys that we may use for signing. If empty we will
+	// use any keys known to us already.
+	var keys map[string]*abeutil.WIF
+	if cmd.PrivKeys != nil {
+		keys = make(map[string]*abeutil.WIF)
+
+		for _, key := range *cmd.PrivKeys {
+			wif, err := abeutil.DecodeWIF(key)
+			if err != nil {
+				return nil, DeserializationError{err}
+			}
+
+			if !wif.IsForNet(w.ChainParams()) {
+				s := "key network doesn't match wallet's"
+				return nil, DeserializationError{errors.New(s)}
+			}
+
+			addr, err := abeutil.NewAddressPubKey(wif.SerializePubKey(),
+				w.ChainParams())
+			if err != nil {
+				return nil, DeserializationError{err}
+			}
+			keys[addr.EncodeAddress()] = wif
+		}
+	}
+
+	// We have checked the rest of the args. now we can collect the async
+	// txs. TODO: If we don't mind the possibility of wasting work we could
+	// move waiting to the following loop and be slightly more asynchronous.
+	for outPoint, resp := range requested {
+		result, err := resp.Receive()
+		if err != nil {
+			return nil, err
+		}
+		script, err := hex.DecodeString(result.ScriptPubKey.Hex)
+		if err != nil {
+			return nil, err
+		}
+		inputs[outPoint] = script
+	}
+
+	// All args collected. Now we can sign all the inputs that we can.
+	// `complete' denotes that we successfully signed all outputs and that
+	// all scripts will run to completion. This is returned as part of the
+	// reply.
+	signErrs, err := w.SignTransaction(&tx, hashType, inputs, keys, scripts)
+	if err != nil {
+		return nil, err
+	}
+
+	var buf bytes.Buffer
+	buf.Grow(tx.SerializeSize())
+
+	// All returned errors (not OOM, which panics) encounted during
+	// bytes.Buffer writes are unexpected.
+	if err = tx.Serialize(&buf); err != nil {
+		panic(err)
+	}
+
+	signErrors := make([]abejson.SignRawTransactionError, 0, len(signErrs))
+	for _, e := range signErrs {
+		input := tx.TxIn[e.InputIndex]
+		signErrors = append(signErrors, abejson.SignRawTransactionError{
+			TxID:      input.PreviousOutPoint.Hash.String(),
+			Vout:      input.PreviousOutPoint.Index,
+			ScriptSig: hex.EncodeToString(input.SignatureScript),
+			Sequence:  input.Sequence,
+			Error:     e.Error.Error(),
+		})
+	}
+
+	return abejson.SignRawTransactionResult{
+		Hex:      hex.EncodeToString(buf.Bytes()),
+		Complete: len(signErrors) == 0,
+		Errors:   signErrors,
+	}, nil
+}
 // validateAddress handles the validateaddress command.
 func validateAddress(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.ValidateAddressCmd)

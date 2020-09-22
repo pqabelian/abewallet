@@ -51,26 +51,26 @@ func (w *Wallet) handleChainNotifications() {
 				return err
 			}
 			msvkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, msvkEncBytes)
-			if err!=nil {
+			if err != nil {
 				return err
 			}
 			mpkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, mpkEncBytes)
-			if err!=nil {
+			if err != nil {
 				return err
 			}
-			msvk,err:=abesalrs.DeseralizeMasterSecretViewKey(msvkBytes)
-			if err!=nil {
+			msvk, err := abesalrs.DeseralizeMasterSecretViewKey(msvkBytes)
+			if err != nil {
 				return err
 			}
-			mpk,err:=abesalrs.DeseralizeMasterPubKey(mpkBytes)
-			if err!=nil {
+			mpk, err := abesalrs.DeseralizeMasterPubKey(mpkBytes)
+			if err != nil {
 				return err
 			}
 			//startBlock := w.Manager.SyncedTo()
 			startBlock := w.ManagerAbe.SyncedTo()
 
 			for i := startBlock.Height + 1; i <= height; i++ {
-				hash, err := client.GetBlockHash(int64(i))    //Why use client not chainclient?
+				hash, err := client.GetBlockHash(int64(i)) //Why use client not chainclient?
 				if err != nil {
 					return err
 				}
@@ -82,7 +82,7 @@ func (w *Wallet) handleChainNotifications() {
 				if err != nil {
 					return err
 				}
-				err = w.TxStore.InsertBlockAbe(txmgrNs,blockAbeDetail,mpk,msvk)
+				err = w.TxStore.InsertBlockAbe(txmgrNs, blockAbeDetail, mpk, msvk)
 				if err != nil {
 					return err
 				}
@@ -127,8 +127,8 @@ func (w *Wallet) handleChainNotifications() {
 				// so we use catch up to chain tip from block height which
 				// wallet had synced to
 				birthdayStore := &walletBirthdayStore{
-					db:      w.db,
-					manager: w.Manager,
+					db:         w.db,
+					manager:    w.Manager,
 					managerAbe: w.ManagerAbe,
 				}
 				birthdayBlock, err := birthdaySanityCheck(
@@ -175,12 +175,12 @@ func (w *Wallet) handleChainNotifications() {
 			//		return w.addRelevantTx(tx, n.TxRecord, n.Block)
 			//	})
 			//	notificationName = "relevant transaction"
-			case chain.RelevantTxAbe:
-				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-					return w.addRelevantTxAbe(tx, n.TxRecord, n.Block)
-				})
-				notificationName = "relevant transaction"
-				//	todo(ABE): ABE does not support filter.
+			//case chain.RelevantTxAbe: // TODO(abe): we do not support the relevantTx actually
+			//	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+			//		return w.addRelevantTxAbe(tx, n.TxRecord, n.Block)
+			//	})
+			//	notificationName = "relevant transaction"
+			//	todo(ABE): ABE does not support filter.
 			//case chain.FilteredBlockConnected:
 			//	// Atomically update for the whole block.
 			//	if len(n.RelevantTxs) > 0 {
@@ -289,7 +289,7 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 	if err != nil {
 		return err
 	}
-	msvk, err :=abesalrs.DeseralizeMasterSecretViewKey(serializedMSVK)
+	msvk, err := abesalrs.DeseralizeMasterSecretViewKey(serializedMSVK)
 	if err != nil {
 		return err
 	}
@@ -310,7 +310,7 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 	// relevant.  This assumption will not hold true when SPV support is
 	// added, but until then, simply insert the transaction because there
 	// should either be one or more relevant inputs or outputs.
-	err = w.TxStore.InsertBlockAbe(txmgrNs, br,mpk,msvk)
+	err = w.TxStore.InsertBlockAbe(txmgrNs, br, mpk, msvk)
 	if err != nil {
 		return err
 	}
@@ -380,7 +380,7 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
 
-	if !w.ChainSynced() {
+	if !w.ChainSynced() {        // if the wallet is syncing with backend, wait for it...
 		return nil
 	}
 
@@ -407,7 +407,7 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 				return err
 			}
 
-			bs.Timestamp = header.Timestamp
+			bs.Timestamp = header.Timestamp                  //if fail to detach, it will be not commited
 			err = w.ManagerAbe.SetSyncedTo(addrmgrNs, &bs)
 			if err != nil {
 				return err
@@ -518,7 +518,7 @@ func (w *Wallet) addRelevantTxAbe(dbtx walletdb.ReadWriteTx, rec *wtxmgr.TxRecor
 	// relevant.  This assumption will not hold true when SPV support is
 	// added, but until then, simply insert the transaction because there
 	// should either be one or more relevant inputs or outputs.
-	err := w.TxStore.InsertTxAbe(txmgrNs, rec, block)
+	err := w.TxStore.InsertTxAbe(txmgrNs, rec, block) //TODO(abe): when add a transaction to wallet, it means that this transaction is created by the wallet itself, it must move the outputs of this transaction from unspent txo bucket to spentButUmined txo bucket
 	if err != nil {
 		return err
 	}
@@ -563,8 +563,8 @@ type birthdayStore interface {
 // walletBirthdayStore is a wrapper around the wallet's database and address
 // manager that satisfies the birthdayStore interface.
 type walletBirthdayStore struct {
-	db      walletdb.DB
-	manager *waddrmgr.Manager
+	db         walletdb.DB
+	manager    *waddrmgr.Manager
 	managerAbe *waddrmgr.ManagerAbe
 }
 

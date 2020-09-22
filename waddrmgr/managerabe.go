@@ -230,7 +230,7 @@ func (m *ManagerAbe) IsMyAddress(ns walletdb.ReadBucket,
 
 	// We'll iterate through each of the known scoped managers, and see if
 	// any of them now of the target address.
-	return abesalrs.CheckDerivedPubKeyAttribute(dpk, mpk, msvk), nil
+	return abesalrs.CheckDerivedPubKeyAttribute(dpk, mpk, msvk)
 }
 
 // ChainParams returns the chain parameters for this address manager.
@@ -459,6 +459,7 @@ func (m *ManagerAbe) ConvertToWatchingOnly(ns walletdb.ReadWriteBucket) error {
 }
 
 func (m *ManagerAbe) NewChangeAddress(ns walletdb.ReadWriteBucket) (abeutil.DerivedAddress,error) {
+	// TODO(abe): abstact the address derivation
 	masterPubKeyEnc, _, _, err :=fetchMasterKeyEncsAbe(ns)
 	if err!=nil {
 		return nil, err
