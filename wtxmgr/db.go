@@ -158,7 +158,7 @@ func readCanonicalOutPointAbe(k []byte, op *wire.OutPointAbe) error {
 		return storeError(ErrData, str, nil)
 	}
 	copy(op.TxHash[:], k)
-	op.Index = k[33]
+	op.Index = k[32]
 	return nil
 }
 func canonicalBlockAbe(blockHeight int32, blockHash chainhash.Hash) []byte {
@@ -1160,33 +1160,9 @@ func putUnspentTXO(ns walletdb.ReadWriteBucket, k, v []byte) error {
 func fetchUnspentTXO(ns walletdb.ReadBucket, hash chainhash.Hash, index uint8) (*UnspentUTXO, error) {
 	k := canonicalOutPointAbe(hash, index)
 	v := ns.NestedReadBucket(bucketUnspentTXO).Get(k)
-	if v == nil {
-		return nil, fmt.Errorf("empty entry")
-	}
-	if len(v) < 49 {
-		str := "wrong value in unspent output bucket"
-		return nil, fmt.Errorf(str)
-	}
 	op := new(UnspentUTXO)
-	op.TxOutput.TxHash = hash
-	op.TxOutput.Index = index
-	offset := 0
-	op.Height = int32(byteOrder.Uint32(v[offset : offset+4]))
-	offset += 4
-	t := v[offset]
-	offset += 1
-	if t == 0 {
-		op.FromCoinBase = false
-	} else {
-		op.FromCoinBase = true
-	}
-	op.Amount = int64(byteOrder.Uint64(v[offset : offset+8]))
-	offset += 8
-	op.GenerationTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
-	offset += 8
-	copy(op.RingHash[:], v[offset:offset+32])
-	offset += 32
-	return op, nil
+	err := op.Deserialize(&wire.OutPointAbe{TxHash: hash, Index: index}, v)
+	return op, err
 }
 func deleteUnspentTXO(ns walletdb.ReadWriteBucket, k []byte) error {
 	err := ns.NestedReadWriteBucket(bucketUnspentTXO).Delete(k)
@@ -1422,8 +1398,8 @@ func fetchRingDetails(ns walletdb.ReadBucket, k []byte) (*Ring, error) {
 		return nil, fmt.Errorf("the pair is not exist")
 	}
 	res := new(Ring)
-	res.Deserialize(v)
-	return res, nil
+	err := res.Deserialize(v)
+	return res, err
 }
 func FetchRingDetails(ns walletdb.ReadBucket, k []byte) (*Ring, error) {
 	return fetchRingDetails(ns, k)

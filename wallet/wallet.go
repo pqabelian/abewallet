@@ -151,7 +151,7 @@ func (w *Wallet) Start() {
 
 	//w.wg.Add(2)
 	w.wg.Add(3)
-	go w.txCreator()     // TODO(abe) :this go routine will be delete   ,and the Add will be modified
+	go w.txCreator() // TODO(abe) :this go routine will be delete   ,and the Add will be modified
 	go w.txAbeCreator()
 	go w.walletLocker()
 }
@@ -344,7 +344,7 @@ func (w *Wallet) activeData(dbtx walletdb.ReadWriteTx) ([]abeutil.Address, []wtx
 }
 
 //TODO(abe):we just provide unspent txo
-func (w *Wallet) activeDataAbe(dbtx walletdb.ReadWriteTx) ([]wtxmgr.UnspentUTXO, error) {
+func (w *Wallet) activeDataAbe(dbtx walletdb.ReadWriteTx) (*[]wtxmgr.UnspentUTXO, error) {
 	//addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
 
@@ -1629,7 +1629,8 @@ out:
 		case req := <-w.unlockRequests:
 			err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 				addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-				return w.Manager.Unlock(addrmgrNs, req.passphrase)
+				//return w.Manager.Unlock(addrmgrNs, req.passphrase)
+				return w.ManagerAbe.Unlock(addrmgrNs, req.passphrase)
 			})
 			if err != nil {
 				req.err <- err
@@ -1647,7 +1648,8 @@ out:
 		case req := <-w.changePassphrase:
 			err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 				addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
-				return w.Manager.ChangePassphrase(
+				//return w.Manager.ChangePassphrase(
+				return w.ManagerAbe.ChangePassphrase(
 					addrmgrNs, req.old, req.new, req.private,
 					&waddrmgr.DefaultScryptOptions,
 				)
@@ -1658,7 +1660,8 @@ out:
 		case req := <-w.changePassphrases:
 			err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 				addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
-				err := w.Manager.ChangePassphrase(
+				//err := w.Manager.ChangePassphrase(
+				err := w.ManagerAbe.ChangePassphrase(
 					addrmgrNs, req.publicOld, req.publicNew,
 					false, &waddrmgr.DefaultScryptOptions,
 				)
@@ -1675,7 +1678,8 @@ out:
 			continue
 
 		case req := <-w.holdUnlockRequests:
-			if w.Manager.IsLocked() {
+			//if w.Manager.IsLocked() {
+			if w.ManagerAbe.IsLocked() {
 				close(req)
 				continue
 			}
@@ -1710,7 +1714,8 @@ out:
 		// Select statement fell through by an explicit lock or the
 		// timer expiring.  Lock the manager here.
 		timeout = nil
-		err := w.Manager.Lock()
+		//err := w.Manager.Lock()
+		err := w.ManagerAbe.Lock()
 		if err != nil && !waddrmgr.IsError(err, waddrmgr.ErrLocked) {
 			log.Errorf("Could not lock wallet: %v", err)
 		} else {
@@ -2207,39 +2212,46 @@ func (w *Wallet) RenameAccount(scope waddrmgr.KeyScope, account uint32, newName 
 	}
 	return err
 }
-
+ //TODO(abe):add log information in log file
 func (w *Wallet) AddPayee(name string, masterPubKey string) error {
-	mAddrBytes, err := hex.DecodeString(masterPubKey)
-	if err != nil {
-		return err
-	}
-	computedHash:=chainhash.DoubleHashB(mAddrBytes[:len(mAddrBytes)-32])
-	if bytes.Equal(computedHash,mAddrBytes[len(mAddrBytes)-32:]) {
-		return fmt.Errorf("the format of master public address is error ")
-	}
-	mAddr := new(abeutil.MasterAddressSalrs)
-	err = mAddr.Deserialize(mAddrBytes[:len(mAddrBytes)-32])
+	mAddr, err := abeutil.DecodeMasterAddressAbe(masterPubKey)
 	if err != nil {
 		return err
 	}
 	manager, err := w.ManagerAbe.FetchPayeeManager(name)
-	dbtx, err := w.db.BeginReadWriteTx()
-	if err != nil {
+	if err != nil && err.Error() != fmt.Sprintf("there have no payee manager named %s", name) {
 		return err
 	}
-	defer dbtx.Rollback()
-
-	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
-	// if there have no payee manager whose name equal to given name
-	if err == fmt.Errorf("there have no payee manager named %s", name) {
-		_, err := w.ManagerAbe.NewPayeeManager(addrmgrNs, name, mAddr)
-		if err != nil {
-			return err
+	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+		addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+		if manager==nil{
+			manager, err = w.ManagerAbe.FetchPayeeManagerFromDB(addrmgrNs, name)
 		}
-	} else {
-		return err
+		if manager == nil {
+			manager, err = w.ManagerAbe.NewPayeeManager(addrmgrNs, name)
+			if err != nil {
+				return err
+			}
+		}
+		return manager.AddMPK(addrmgrNs, mAddr)
+	})
+	return err
+}
+
+func (w *Wallet) FetchPayeeManager(name string) (*waddrmgr.PayeeManager, error) {
+	manager, err := w.ManagerAbe.FetchPayeeManager(name)
+	if err != nil && err.Error() != fmt.Sprintf("there have no payee manager named %s", name) {
+		return nil, err
 	}
-	return manager.AddMPK(addrmgrNs, mAddr)
+	if manager != nil {
+		return manager, nil
+	}
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+		manager, err = w.ManagerAbe.FetchPayeeManagerFromDB(addrmgrNs, name)
+		return err
+	})
+	return manager, err
 }
 
 const maxEmptyAccounts = 100
@@ -2932,6 +2944,7 @@ func (w *Wallet) AccountBalances(scope waddrmgr.KeyScope,
 // output index.
 type creditSlice []wtxmgr.Credit
 type unspentUTXOSlice []wtxmgr.UnspentUTXO
+
 func (s creditSlice) Len() int {
 	return len(s)
 }
@@ -3129,10 +3142,11 @@ func (w *Wallet) ListUnspent(minconf, maxconf int32,
 	})
 	return results, err
 }
+
 // TODO(abe): not finished
 func (w *Wallet) ListUnspentAbe(minconf, maxconf int32,
 	addresses map[string]struct{}) ([]*abejson.ListUnspentResult, error) {
-	return nil,nil
+	return nil, nil
 	//var results []*abejson.ListUnspentResult
 	//err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 	//	addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
@@ -3266,6 +3280,7 @@ func (w *Wallet) ListUnspentAbe(minconf, maxconf int32,
 	//})
 	//return results, err
 }
+
 // DumpPrivKeys returns the WIF-encoded private keys for all addresses with
 // private keys in a wallet.
 func (w *Wallet) DumpPrivKeys() ([]string, error) {
