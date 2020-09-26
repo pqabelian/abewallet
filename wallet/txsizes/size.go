@@ -195,7 +195,7 @@ func EstimateVirtualSizeAbe(txIns []*wire.TxInAbe,txOuts []*wire.TxOutAbe, addCh
 	changeSize := 0
 	outputCount := len(txOuts)
 	if addChangeOutput {
-		// TODO(abe):we use the derived address as a change address. the size in salrs is 4608, when the crypto scheme changed, we must change the one
+		// TODO(abe):we use the derived address as a change address. the size in salrs is 4608, when the crypto scheme changed, we must change the one or more change outputs
 		// TODO(abe): provide a interface to abstract a size of address
 		changeSize = 4608
 		outputCount++

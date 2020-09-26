@@ -476,9 +476,9 @@ func (w *Wallet) findEligibleOutputsAbe(dbtx walletdb.ReadTx, minconf int32, bs 
 	// Because one of these filters requires matching the output script to
 	// the desired account, this change depends on making wtxmgr a waddrmgr
 	// dependancy and requesting unspent outputs for a single account.
-	eligible := make([]wtxmgr.UnspentUTXO, 0, len(unspent))
-	for i := range unspent {
-		output := &unspent[i]
+	eligible := make([]wtxmgr.UnspentUTXO, 0, len(*unspent))
+	for i := range *unspent {
+		output := (*unspent)[i]
 
 		// Only include this output if it meets the required number of
 		// confirmations.  Coinbase transactions must have have reached
@@ -492,12 +492,14 @@ func (w *Wallet) findEligibleOutputsAbe(dbtx walletdb.ReadTx, minconf int32, bs 
 				continue
 			}
 		}
-		eligible = append(eligible, *output)
+		eligible = append(eligible, output)
 	}
-	rings := *new(map[chainhash.Hash]*wtxmgr.Ring)
+	rings := make(map[chainhash.Hash]*wtxmgr.Ring)
+
 	for i := 0; i < len(eligible); i++ {
-		if chainhash.ZeroHash.IsEqual(&unspent[i].RingHash) { //if the hash is zero, it means that this output is unspentable
+		if chainhash.ZeroHash.IsEqual(&(*unspent)[i].RingHash) { //if the hash is zero, it means that this output is unspentable
 			eligible = append(eligible[:i], eligible[i+1:]...)
+			i--
 			continue
 		}
 		_, ok := rings[eligible[i].RingHash]

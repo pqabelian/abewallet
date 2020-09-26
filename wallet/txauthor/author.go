@@ -176,7 +176,7 @@ func NewUnsignedTransaction(outputs []*wire.TxOut, relayFeePerKb abeutil.Amount,
 //TODO(abe):the logic of this function need to be verified
 func NewUnsignedTransactionAbe(outputs []*wire.TxOutAbe, relayFeePerKb abeutil.Amount,
 	fetchInputs InputSourceAbe, fetchChange ChangeSource) (*AuthoredTxAbe, error) {
-
+	// TODO(osy):the strategy of choosing otxos will be optimized
 	targetAmount := SumOutputValuesAbe(outputs)
 	estimatedSize := txsizes.EstimateVirtualSizeAbe(nil,outputs, true) //TODO(abe):about the tx fee, we can assign a value for testing
 	targetFee := txrules.FeeForSerializeSizeAbe(relayFeePerKb, estimatedSize)      // to compute the required tx fee
@@ -212,22 +212,46 @@ func NewUnsignedTransactionAbe(outputs []*wire.TxOutAbe, relayFeePerKb abeutil.A
 		}
 		changeIndex := -1
 		changeAmount := inputAmount - targetAmount - maxRequiredFee
-		if changeAmount != 0 && !txrules.IsDustAmount(changeAmount,
-			txsizes.P2WPKHPkScriptSize, relayFeePerKb) {
-			changeScript, err := fetchChange()
-			if err != nil {
-				return nil, err
+		//TODO(abe): to simply the process, the value will be change to integer.
+		actualChargeAmount:=changeAmount/abeutil.NeutrinoPerAbe *abeutil.NeutrinoPerAbe
+		unsignedTransaction.TxFee+=int64(changeAmount-actualChargeAmount)
+		actual:=int64(actualChargeAmount)
+		if actual!=0{
+			changeIndex = 1
+			coinValues:=[]int64{500,200,100,50,20,10,5,2,1}
+			for actual !=0{
+				changeScript, err := fetchChange()
+				if err != nil {
+					return nil, err
+						}
+				i:=0
+				for actual < coinValues[i]* abeutil.NeutrinoPerAbe{
+					i++
+				}
+				actual -=coinValues[i]* abeutil.NeutrinoPerAbe
+				txOut := wire.TxOutAbe{}
+				txOut.AddressScript = changeScript
+				txOut.ValueScript=coinValues[i]* abeutil.NeutrinoPerAbe
+				unsignedTransaction.TxOuts = append(unsignedTransaction.TxOuts, &txOut)
 			}
-			// this value should be decided according the max block size
-			if len(changeScript) > txsizes.P2WPKHPkScriptSize {
-				return nil, errors.New("fee estimation requires change " +
-					"scripts no larger than P2WPKH output scripts")
-			}
-			change := wire.NewTxOutAbe(int64(changeAmount), changeScript)
-			l := len(outputs)
-			unsignedTransaction.TxOuts = append(outputs[:l:l], change)
-			changeIndex = l
 		}
+		//if changeAmount != 0 && !txrules.IsDustAmount(changeAmount,
+		//	txsizes.P2WPKHPkScriptSize, relayFeePerKb) {
+		//	changeScript, err := fetchChange()
+		//	if err != nil {
+		//		return nil, err
+		//	}
+		//	// this value should be decided according the max block size
+		//	// TODO(abe): we just ignore this restrict at this moment.
+		//	//if len(changeScript) > txsizes.P2WPKHPkScriptSize {
+		//	//	return nil, errors.New("fee estimation requires change " +
+		//	//		"scripts no larger than P2WPKH output scripts")
+		//	//}
+		//	change := wire.NewTxOutAbe(int64(changeAmount), changeScript)
+		//	l := len(outputs)
+		//	unsignedTransaction.TxOuts = append(outputs[:l:l], change)
+		//	changeIndex = l
+		//}
 
 		return &AuthoredTxAbe{
 			Tx:              unsignedTransaction,
@@ -493,7 +517,7 @@ func (tx *AuthoredTxAbe) AddAllInputScripts(msg []byte,m *waddrmgr.ManagerAbe, w
 		//TODO(abe):1-get the all and own dpk from script
 		ringHash:=tx.Tx.TxIns[i].PreviousOutPointRing.Hash()
 		//utxoRing, err := wtxmgr.FetchUTXORing(waddrmgrNs, ringHash[:])
-		ring, err := wtxmgr.FetchRingDetails(waddrmgrNs, ringHash[:])
+		ring, err := wtxmgr.FetchRingDetails(wtxmgrNs, ringHash[:])
 		if err!=nil{
 			return err
 		}

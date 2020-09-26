@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/abejson"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abewallet/wallet/txrules"
@@ -153,7 +152,7 @@ func unimplemented(interface{}, *wallet.Wallet) (interface{}, error) {
 func unsupported(interface{}, *wallet.Wallet) (interface{}, error) {
 	return nil, &abejson.RPCError{
 		Code:    -1,
-		Message: "Request unsupported by btcwallet",
+		Message: "Request unsupported by abewallet",
 	}
 }
 
@@ -354,15 +353,15 @@ func addMultiSigAddress(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 }
 func addPayee(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.AddPayeeCmd)
-	// check whether the masterpubkey have right format
-	mpk, err := hex.DecodeString(cmd.MasterPubKey)
-	if err != nil {
-		return nil, err
+	// check whether the parameter have right format
+	if cmd.Name == "" {
+		return nil, errors.New("the name is empty")
 	}
-	if cmd.Name == "" || len(mpk) != 2+abesalrs.MpkByteLen+32 {
-		return nil, ErrMasterPubKeyLength
+	err:=w.AddPayee(cmd.Name, cmd.MasterPubKey)
+	if err!=nil{
+		return err.Error(),err
 	}
-	return nil, w.AddPayee(cmd.Name, cmd.MasterPubKey)
+	return fmt.Sprintf("successful!"),nil
 }
 
 // createMultiSig handles an createmultisig request by returning a
@@ -1427,24 +1426,33 @@ func makeOutputs(pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) 
 }
 
 func makeOutputsAbe(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) ([]*wire.TxOutAbe, error) {
-	manager := w.ManagerAbe
-	outputs := make([]*wire.TxOutAbe, 0, len(pairs))
+	outputs := make([]*wire.TxOutAbe,0)
+	coinValues:=[]int64{500,200,100,50,20,10,5,2,1}
 	for name, amt := range pairs {
-		payeeManager, err := manager.FetchPayeeManager(name)
-		if err != nil {
-			return nil, err
+		payeeManager, err := w.FetchPayeeManager(name)
+		if payeeManager==nil{
+			return nil,err
 		}
 		addr, err := payeeManager.ChooseMAddr()
 		if err != nil {
 			return nil, fmt.Errorf("cannot get an address from given payee: %s", err)
 		}
-
-		pkScript, err := txscript.PayToAddressScriptAbe(addr)
-		if err != nil {
-			return nil, fmt.Errorf("cannot create txout script: %s", err)
+		targetAmount:=int64(amt)
+		for targetAmount !=0{
+			i:=0
+			for targetAmount < coinValues[i]* abeutil.NeutrinoPerAbe{
+				i++
+			}
+			targetAmount -=coinValues[i]* abeutil.NeutrinoPerAbe
+			txOut := wire.TxOutAbe{}
+			pkScript, err := txscript.PayToAddressScriptAbe(addr)
+			if err != nil {
+				return nil, fmt.Errorf("cannot create txout script: %s", err)
+			}
+			txOut.AddressScript = pkScript
+			txOut.ValueScript=coinValues[i]* abeutil.NeutrinoPerAbe
+			outputs = append(outputs, &txOut)
 		}
-
-		outputs = append(outputs, wire.NewTxOutAbe(int64(amt), pkScript))
 	}
 	return outputs, nil
 }
@@ -1537,7 +1545,7 @@ func sendToPayees(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	// Recreate address/amount pairs, using dcrutil.Amount.
 	pairs := make(map[string]abeutil.Amount, len(cmd.Amounts))
 	for k, v := range cmd.Amounts {
-		amt, err := abeutil.NewAmount(float64(v))
+		amt, err := abeutil.NewAmountAbe(float64(v))
 		if err != nil {
 			return nil, err
 		}
