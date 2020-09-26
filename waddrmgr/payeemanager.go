@@ -1,13 +1,14 @@
 package waddrmgr
 
 import (
-	cryptorand "crypto/rand"
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"github.com/abesuite/abec/abecrypto"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abewallet/walletdb"
-	"math/big"
+	"github.com/syndtr/goleveldb/leveldb/errors"
+	mathrand "math/rand"
 	"time"
 )
 
@@ -43,12 +44,12 @@ type PayeeManager struct {
 func (p PayeeManager) Name() string {
 	return p.name
 }
-func (p PayeeManager) ChooseMAddr() (abeutil.MasterAddress,error) {
-	index, err := cryptorand.Int(cryptorand.Reader, new(big.Int).SetInt64(int64(len(p.mpks))))
-	if err!=nil{
-		return nil,err
+func (p PayeeManager) ChooseMAddr() (abeutil.MasterAddress, error) {
+	if len(p.mpks)==0{
+		return nil,errors.New("this payee has no master address, please add it.")
 	}
-	return p.mpks[index.Int64()],nil
+	i := mathrand.Intn(len(p.mpks))
+	return p.mpks[i], nil
 }
 func (p *PayeeManager) ChangeName(ns walletdb.ReadWriteBucket, newName string) error {
 	p.name = newName
@@ -67,8 +68,13 @@ func (p *PayeeManager) Payee(ns walletdb.ReadWriteBucket, amount int64) error {
 	return putPayeeManager(ns, p.name, p)
 }
 func (p *PayeeManager) AddMPK(ns walletdb.ReadWriteBucket, addr ManagedAddressAbe) error {
+	for i := 0; i < len(p.mpks); i++ {
+		if bytes.Equal(p.mpks[i].Serialize(), addr.Serialize()) {
+			return fmt.Errorf("the payee had the same master address.")
+		}
+	}
 	p.mpks = append(p.mpks, addr)
-	return putPayeeManager(ns, p.name, p)
+	return putPayeeManager(ns, p.name, p) // update the payee manager in database
 }
 func (p *PayeeManager) RemoveMPK(ns walletdb.ReadWriteBucket, addr ManagedAddressAbe) error {
 	index := -1
@@ -101,7 +107,7 @@ func (p PayeeManager) Serialize() []byte {
 	offset += 2
 	binary.BigEndian.PutUint16(res[offset:offset+2], uint16(len([]byte(p.name))))
 	offset += 2
-	copy(res[offset:offset+len([]byte(p.name))], p.name)
+	copy(res[offset:offset+len([]byte(p.name))], []byte(p.name))
 	offset += len([]byte(p.name))
 	binary.BigEndian.PutUint16(res[offset:offset+2], uint16(len(p.mpks)))
 	offset += 2
@@ -121,7 +127,7 @@ func (p PayeeManager) Serialize() []byte {
 	}
 	return res
 }
-func (p PayeeManager) Deserialize(b []byte) error {
+func (p *PayeeManager) Deserialize(b []byte) error {
 	totalSize := int(binary.BigEndian.Uint16(b[0:2]))
 	if len(b) < totalSize {
 		return fmt.Errorf("wrong size of serialized payee manager")

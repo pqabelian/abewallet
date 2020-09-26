@@ -379,8 +379,12 @@ func fetchPayeeManager(ns walletdb.ReadBucket,name string)(*PayeeManager,error){
 		return nil,managerError(ErrScopeNotFound, str, nil)
 	}
 	payeeManagerBytes :=payeeBucket.Get([]byte(name))
+	if payeeManagerBytes==nil || len(payeeManagerBytes) ==0 {
+		  return nil,fmt.Errorf("there is no payee manager with %s in database",name)
+	}
 	res:=new(PayeeManager)
 	err := res.Deserialize(payeeManagerBytes)
+	res.name=name
 	return res,err
 }
 func putPayeeManager(ns walletdb.ReadWriteBucket,name string,p *PayeeManager)error{
@@ -2527,7 +2531,11 @@ func createManagerNSAbe(ns walletdb.ReadWriteBucket) error {
 		str := "failed to create sync bucket"
 		return managerError(ErrDatabase, str, err)
 	}
-
+	_, err = ns.CreateBucket(payeeBucketName)
+	if err != nil {
+		str := "failed to create sync bucket"
+		return managerError(ErrDatabase, str, err)
+	}
 	// We'll also create the two top-level scope related buckets as
 	// preparation for the operations below.
 	// TODO(abe):we do not support th scope

@@ -143,8 +143,9 @@ func (m *ManagerAbe) Close() {
 	m.closed = true
 	return
 }
+
 //TODO(abe): how to store the payee manager
-func (m *ManagerAbe) NewPayeeManager(ns walletdb.ReadWriteBucket, name string, mpk ManagedAddressAbe) (*PayeeManager, error) {
+func (m *ManagerAbe) NewPayeeManager(ns walletdb.ReadWriteBucket, name string) (*PayeeManager, error) {
 	index := 0
 	for ; index < len(m.payeeManagers); index++ {
 		if strings.EqualFold(m.payeeManagers[index].name, name) {
@@ -155,14 +156,14 @@ func (m *ManagerAbe) NewPayeeManager(ns walletdb.ReadWriteBucket, name string, m
 		pm := PayeeManager{
 			name:        name,
 			rootManager: m,
-			mpks:        []ManagedAddressAbe{mpk},
+			mpks:        []ManagedAddressAbe{},
 			totalAmount: 0,
 			states:      []state{},
 		}
 		m.payeeManagers = append(m.payeeManagers, &pm)
-		return &pm, putPayeeManager(ns,name,&pm)
+		return &pm, putPayeeManager(ns, name, &pm)
 	} else {
-		return m.payeeManagers[index],m.payeeManagers[index].AddMPK(ns,mpk)
+		return m.payeeManagers[index], nil
 	}
 }
 
@@ -193,6 +194,16 @@ func (m *ManagerAbe) FetchPayeeManager(name string) (*PayeeManager, error) {
 		}
 	}
 	return nil, fmt.Errorf("there have no payee manager named %s", name)
+}
+func (m *ManagerAbe) FetchPayeeManagerFromDB(ns walletdb.ReadBucket, name string) (*PayeeManager, error) {
+	m.mtx.RLock()
+	defer m.mtx.RUnlock()
+	manager, err := fetchPayeeManager(ns, name)
+	if manager==nil||err!=nil{
+		return nil,err
+	}
+	m.payeeManagers=append(m.payeeManagers,manager)
+	return manager,err
 }
 
 func (m *ManagerAbe) FetchMasterKeyEncAbe(ns walletdb.ReadWriteBucket) ([]byte, []byte, []byte, error) {
@@ -458,24 +469,25 @@ func (m *ManagerAbe) ConvertToWatchingOnly(ns walletdb.ReadWriteBucket) error {
 
 }
 
-func (m *ManagerAbe) NewChangeAddress(ns walletdb.ReadWriteBucket) (abeutil.DerivedAddress,error) {
+func (m *ManagerAbe) NewChangeAddress(ns walletdb.ReadWriteBucket) (abeutil.DerivedAddress, error) {
 	// TODO(abe): abstact the address derivation
-	masterPubKeyEnc, _, _, err :=fetchMasterKeyEncsAbe(ns)
-	if err!=nil {
+	masterPubKeyEnc, _, _, err := fetchMasterKeyEncsAbe(ns)
+	if err != nil {
 		return nil, err
 	}
 	mpkBytes, err := m.cryptoKeyPub.Decrypt(masterPubKeyEnc)
-	mpk, err :=abesalrs.DeseralizeMasterPubKey(mpkBytes)
-	if err!=nil {
+	mpk, err := abesalrs.DeseralizeMasterPubKey(mpkBytes)
+	if err != nil {
 		return nil, err
 	}
 	b := make([]byte, 2+abesalrs.MpkByteLen)
 	binary.BigEndian.PutUint16(b, uint16(abecrypto.CryptoSchemeSALRS))
 	copy(b[2:], mpk.Serialize())
-	masterAddr:=new(abeutil.MasterAddressSalrs)
+	masterAddr := new(abeutil.MasterAddressSalrs)
 	masterAddr.Deserialize(b)
 	return masterAddr.GenerateDerivedAddress()
 }
+
 // IsLocked returns whether or not the address managed is locked.  When it is
 // unlocked, the decryption key needed to decrypt private keys used for signing
 // is in memory.
@@ -785,7 +797,18 @@ func loadManagerAbe(ns walletdb.ReadBucket, pubPassphrase []byte,
 
 	// Next, we'll need to load all known manager scopes from disk. Each
 	// scope is on a distinct top-level path within our HD key chain.
-	payeeManagers:=*new([]*PayeeManager)
+	payeeManagers := *new([]*PayeeManager)
+	err= forEachPayee(ns, func(name string) error {
+		payeeMgr,err:=fetchPayeeManager(ns,name)
+		if err!=nil{
+			return err
+		}
+		payeeManagers=append(payeeManagers,payeeMgr)
+		return nil
+	})
+	if err!=nil{
+		return nil,err
+	}
 	//scopedManagers := make(map[KeyScope]*ScopedKeyManager)
 	//err = forEachKeyScope(ns, func(scope KeyScope) error {
 	//	scopeSchema, err := fetchScopeAddrSchema(ns, &scope)
