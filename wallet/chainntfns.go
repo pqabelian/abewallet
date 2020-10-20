@@ -376,6 +376,7 @@ func (w *Wallet) disconnectBlock(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 }
 
 // TODO(abe): the logic of this function woule be redesigned.
+// TODO(abe): when the height meet the need, the utxo in the block shoule be modified
 func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) error {
 	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)

@@ -48,7 +48,7 @@ type Interface interface {
 	//	todo(ABE): ABE does not support receiving notification.
 	NotifyReceived([]abeutil.Address) error
 	NotifyBlocks() error
-	Notifications() <-chan interface{}
+	Notifications() <-chan interface{}     // receive the notification from block chain
 	BackEnd() string
 }
 

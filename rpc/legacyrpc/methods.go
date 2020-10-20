@@ -1501,7 +1501,7 @@ func sendPairsAbe(w *wallet.Wallet, amounts map[string]abeutil.Amount,
 	if err != nil {
 		return "", err
 	}
-	tx, err := w.SendOutputsAbe(outputs,minconf, feeSatPerKb, "")
+	tx, err := w.SendOutputsAbe(outputs,minconf, feeSatPerKb, "")    // TODO(abe): what's label?
 	if err != nil {
 		if err == txrules.ErrAmountNegative {
 			return "", ErrNeedPositiveAmount

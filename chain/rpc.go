@@ -342,6 +342,7 @@ func (c *RPCClient) onBlockConnected(hash *chainhash.Hash, height int32, time ti
 func (c *RPCClient) onBlockConnectedAbe(hash *chainhash.Hash, height int32, time time.Time) {
 	select {
 	case c.enqueueNotification <- BlockAbeConnected{
+		// TODO(abe):modify Block to BlockAbe
 		Block: wtxmgr.Block{
 			Hash:   *hash,
 			Height: height,
@@ -367,6 +368,7 @@ func (c *RPCClient) onBlockDisconnected(hash *chainhash.Hash, height int32, time
 func (c *RPCClient) onBlockDisconnectedAbe(hash *chainhash.Hash, height int32, time time.Time) {
 	select {
 	case c.enqueueNotification <- BlockAbeDisconnected{
+		// TODO(abe):modify Block to BlockAbe
 		Block: wtxmgr.Block{
 			Hash:   *hash,
 			Height: height,

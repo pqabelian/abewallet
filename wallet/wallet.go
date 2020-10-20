@@ -4197,7 +4197,7 @@ func (w *Wallet) reliablyPublishTransactionAbe(tx *wire.MsgTxAbe,
 		// If there is a label we should write, get the namespace key
 		// and record it in the tx store.
 		txmgrNs := dbTx.ReadWriteBucket(wtxmgrNamespaceKey)
-		return w.TxStore.PutTxLabel(txmgrNs, tx.TxHash(), label)
+		return w.TxStore.PutTxLabel(txmgrNs, tx.TxHash(), label)   // use the label to explain the tx?
 	})
 	if err != nil {
 		return nil, err
