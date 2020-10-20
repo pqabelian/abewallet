@@ -174,6 +174,7 @@ func NewUnsignedTransaction(outputs []*wire.TxOut, relayFeePerKb abeutil.Amount,
 	}
 }
 //TODO(abe):the logic of this function need to be verified
+//TODO(abe):if failed to create a transaction due to insufficient funds, the result should contain all spendable coin values.
 func NewUnsignedTransactionAbe(outputs []*wire.TxOutAbe, relayFeePerKb abeutil.Amount,
 	fetchInputs InputSourceAbe, fetchChange ChangeSource) (*AuthoredTxAbe, error) {
 	// TODO(osy):the strategy of choosing otxos will be optimized
@@ -192,7 +193,7 @@ func NewUnsignedTransactionAbe(outputs []*wire.TxOutAbe, relayFeePerKb abeutil.A
 
 		// We count the types of inputs, which we'll use to estimate
 		// the vsize of the transaction.
-		//TODO(abe):there should add a input size and output size
+		//TODO(abe):there should add a input size and output size to constrain the block size
 		maxSignedSize := txsizes.EstimateVirtualSizeAbe(inputs,outputs, true)
 		maxRequiredFee := txrules.FeeForSerializeSizeAbe(relayFeePerKb, maxSignedSize)
 		remainingAmount := inputAmount - targetAmount
@@ -252,7 +253,7 @@ func NewUnsignedTransactionAbe(outputs []*wire.TxOutAbe, relayFeePerKb abeutil.A
 		//	unsignedTransaction.TxOuts = append(outputs[:l:l], change)
 		//	changeIndex = l
 		//}
-
+		// TODO(abe): how to know which output in ring is spent？Specially, there is no serialNumber
 		return &AuthoredTxAbe{
 			Tx:              unsignedTransaction,
 			PrevScripts:     scripts,
@@ -512,35 +513,37 @@ func (tx *AuthoredTxAbe) AddAllInputScripts(msg []byte,m *waddrmgr.ManagerAbe, w
 	if err!=nil {
 		return err
 	}
-	for i:=0;i<len(tx.Tx.TxIns);i++{
+	for i:=0;i<len(tx.Tx.TxIns);i++{  //each input
 		//TODO(abe):when signature, what is the message?  temporary, it uses "this is a test"
 		//TODO(abe):1-get the all and own dpk from script
 		ringHash:=tx.Tx.TxIns[i].PreviousOutPointRing.Hash()
 		//utxoRing, err := wtxmgr.FetchUTXORing(waddrmgrNs, ringHash[:])
-		ring, err := wtxmgr.FetchRingDetails(wtxmgrNs, ringHash[:])
+		ring, err := wtxmgr.FetchRingDetails(wtxmgrNs, ringHash[:])    //fetch a ring detail
 		if err!=nil{
 			return err
 		}
 		dpkRing:=new(abesalrs.DpkRing)
 		dpkRing.R=len(ring.TxHashes)
 		mydpk:=new(abesalrs.DerivedPubKey)
+
 		for j:=0;j<len(ring.AddrScript);j++{
-			derivedAddr, err := txscript.ExtractAddressFromScriptAbe(ring.AddrScript[i])
+			derivedAddr, err := txscript.ExtractAddressFromScriptAbe(ring.AddrScript[j])  //add the dpk into dpkring
 			if err!=nil{
 				return err
 			}
 			dpk := derivedAddr.DerivedPubKey()
 			dpkRing.Dpks=append(dpkRing.Dpks,*dpk)
-			if bytes.Equal(ring.AddrScript[i],tx.PrevScripts[i]) {
+			if bytes.Equal(ring.AddrScript[j],tx.PrevScripts[i]) {   // find the owned dpk
 				mydpk=dpk
 			}
 		}
+
 		if mydpk !=nil{
 			sig, err :=abesalrs.Sign(msg,dpkRing,mydpk,mpk,msvk,mssk)
 			if err!=nil{
 				return err
 			}
-			tx.Tx.TxWitness.Witnesses[i]=sig.Serialize()
+			tx.Tx.TxWitness.Witnesses=append(tx.Tx.TxWitness.Witnesses,sig.Serialize())
 			k,b,err:=abesalrs.Verify(msg,dpkRing,sig)
 			if !b||err!=nil{
 				return fmt.Errorf("error in generating the key image:%v",err)

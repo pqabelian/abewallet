@@ -12,6 +12,7 @@ import (
 	"github.com/abesuite/abewallet/walletdb"
 	"github.com/abesuite/abewallet/wtxmgr"
 	"sort"
+	"time"
 )
 
 // byAmount defines the methods needed to satisify sort.Interface to
@@ -61,10 +62,10 @@ func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO, rings map[chainhash.Hash]
 
 	// Current inputs and their total value.  These are closed over by the
 	// returned input source and reused across multiple calls.
-	currentTotal := abeutil.Amount(0)
-	currentInputs := make([]*wire.TxInAbe, 0, len(eligible))
+	currentTotal := abeutil.Amount(0)    // total amount
+	currentInputs := make([]*wire.TxInAbe, 0, len(eligible)) //Inputs
 	currentScripts := make([][]byte, 0, len(eligible))
-	currentInputValues := make([]abeutil.Amount, 0, len(eligible))
+	currentInputValues := make([]abeutil.Amount, 0, len(eligible))  //input value
 
 	return func(target abeutil.Amount) (abeutil.Amount, []*wire.TxInAbe,
 		[]abeutil.Amount, [][]byte, error) {
@@ -92,7 +93,10 @@ func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO, rings map[chainhash.Hash]
 					TxHash: rings[nextUTXO.RingHash].TxHashes[i],
 					Index:  rings[nextUTXO.RingHash].Index[i],
 				})
-				currentScripts = append(currentScripts, rings[nextUTXO.RingHash].AddrScript[i])
+				//which input in ring is spent
+				if   rings[nextUTXO.RingHash].TxHashes[i]==nextUTXO.TxOutput.TxHash &&   rings[nextUTXO.RingHash].Index[i]==nextUTXO.TxOutput.Index{
+					currentScripts = append(currentScripts, rings[nextUTXO.RingHash].AddrScript[i])
+				}
 			}
 			currentTotal += abeutil.Amount(nextUTXO.Amount)
 			currentInputs = append(currentInputs, nextInput)
@@ -311,7 +315,7 @@ func (w *Wallet) txAbeToOutputs(outputs []*wire.TxOutAbe, minconf int32, feeSatP
 	if err != nil {
 		return nil, err
 	}
-
+	// TODO(abe):should use a db.View to spend, if successful, use db.Update
 	dbtx, err := w.db.BeginReadWriteTx() // db的根tx
 	if err != nil {
 		return nil, err
@@ -329,7 +333,7 @@ func (w *Wallet) txAbeToOutputs(outputs []*wire.TxOutAbe, minconf int32, feeSatP
 	}
 
 	// get the unspent transaction output
-	eligible, rings, err := w.findEligibleOutputsAbe(dbtx, minconf, bs)
+ 	eligible, rings, err := w.findEligibleOutputsAbe(dbtx, minconf, bs)
 	if err != nil {
 		return nil, err
 	}
@@ -378,6 +382,19 @@ func (w *Wallet) txAbeToOutputs(outputs []*wire.TxOutAbe, minconf int32, feeSatP
 	//	return nil, err
 	//}
 
+	// TODO(abe):up to here, the transaction will be successful created, so the spent utxo should be marked used and move to SpentButUmined Bucket.
+	//   and modify the utxo ring bucket.
+	txRecordAbe, err := wtxmgr.NewTxRecordAbeFromMsgTxAbe(tx.Tx, time.Now())
+	if err!=nil{
+		return nil,err
+	}
+	err = w.TxStore.InsertTxAbe(txmgrNs, txRecordAbe, nil)
+	if err!=nil{
+		return nil,err
+	}
+	// TODO(osy) do not commit for testing.
+	return tx,nil
+
 	if err := dbtx.Commit(); err != nil {
 		return nil, err
 	}
@@ -391,18 +408,18 @@ func (w *Wallet) txAbeToOutputs(outputs []*wire.TxOutAbe, minconf int32, feeSatP
 	// Finally, we'll request the backend to notify us of the transaction
 	// that pays to the change address, if there is one, when it confirms.
 	//TODO(abe): this process will be ignore, because we can not spend this change output before this transaction is mined into the chain
-	if tx.ChangeIndex >= 0 {
-		changePkScript := tx.Tx.TxOuts[tx.ChangeIndex].AddressScript
-		_, addrs, _, err := txscript.ExtractPkScriptAddrs(
-			changePkScript, w.chainParams,
-		)
-		if err != nil {
-			return nil, err
-		}
-		if err := chainClient.NotifyReceived(addrs); err != nil {
-			return nil, err
-		}
-	}
+	//if tx.ChangeIndex >= 0 {
+	//	changePkScript := tx.Tx.TxOuts[tx.ChangeIndex].AddressScript
+	//	_, addrs, _, err := txscript.ExtractPkScriptAddrs(
+	//		changePkScript, w.chainParams,
+	//	)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	if err := chainClient.NotifyReceived(addrs); err != nil {
+	//		return nil, err
+	//	}
+	//}
 
 	return tx, nil
 }
@@ -484,6 +501,7 @@ func (w *Wallet) findEligibleOutputsAbe(dbtx walletdb.ReadTx, minconf int32, bs 
 		// confirmations.  Coinbase transactions must have have reached
 		// maturity before their outputs may be spent.
 		if !confirmed(minconf, output.Height, bs.Height) {
+			// if the utxo.height<current height, it can not spend.
 			continue
 		}
 		if output.FromCoinBase {

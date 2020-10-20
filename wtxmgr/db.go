@@ -52,6 +52,7 @@ var byteOrder = binary.BigEndian
 // assumption holds true.
 var _ [32]byte = chainhash.Hash{}
 
+const NUMBERBLOCKABE=24    //TODO(abe):this value need to think about
 //	todo(ABE): wallet buckets
 // Bucket names
 var (
@@ -264,6 +265,16 @@ func deleteRawBlockAbe(ns walletdb.ReadWriteBucket, height int32, hash chainhash
 	k := canonicalBlockAbe(height, hash)
 	return ns.NestedReadWriteBucket(bucketBlockAbes).Delete(k)
 }
+func deleteRawBlockAbeWithBlockHeight(ns walletdb.ReadWriteBucket, height int32) error {
+	// iterator the blockabe bucket
+	err := ns.NestedReadBucket(bucketBlockAbes).ForEach(func(k, v []byte) error {
+		if height == int32(byteOrder.Uint32(k[0:4])) {
+			return ns.NestedReadWriteBucket(bucketBlockAbes).Delete(k)
+		}
+		return nil
+	})
+	return err
+}
 
 // appendRawBlockRecord returns a new block record value with a transaction
 // hash appended to the end and an incremented number of transactions.
@@ -351,6 +362,7 @@ type blockIterator struct {
 	elem blockRecord
 	err  error
 }
+// TODO(abe):has some problem,need to fix
 type blockAbeIterator struct {
 	c      walletdb.ReadWriteCursor
 	prefix []byte // height
@@ -968,6 +980,34 @@ func putBlockAbeOutput(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	}
 	return nil
 }
+//TODO(abe):integrated function
+func fetchBlockAbeOutputWithHeight(ns walletdb.ReadBucket, height int32) ([]*wire.OutPointAbe, error) {
+	it := makeReadReverseBlockAbeIterator(ns)
+	for height!=int32(byteOrder.Uint32(it.ck[0:4])){
+		it.next()
+	}
+	k := it.ck
+	v := ns.NestedReadBucket(bucketBlockOutputs).Get(k)
+	if v == nil {
+		return nil, fmt.Errorf("the entry is empty")
+	}
+	n := byteOrder.Uint32(v[:4])
+	if len(v) < int(n*33+4) {
+		str := "wrong value in block output bucket"
+		return nil, fmt.Errorf(str)
+	}
+	var res []*wire.OutPointAbe
+	offset := 4
+	for offset < len(v) {
+		tmp := new(wire.OutPointAbe)
+		copy(tmp.TxHash[:], v[offset:])
+		offset+=32
+		tmp.Index = v[offset] //TODO(abe): if it run with error, maybe there
+		offset+=1
+		res = append(res, tmp)
+	}
+	return res, nil
+}
 func fetchBlockAbeOutput(ns walletdb.ReadBucket, blockHeight int32, blockHash chainhash.Hash) ([]*wire.OutPointAbe, error) {
 	k := canonicalBlockAbe(blockHeight, blockHash)
 	v := ns.NestedReadBucket(bucketBlockOutputs).Get(k)
@@ -1123,7 +1163,7 @@ func deleteBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) error {
 
 //UnspentTXO: store the relevant output which is unspent by current wallet
 // its key is transaction hash with the output index
-// its value is relevant information : From coinbase,amount,generation time, rinhash
+// its value is relevant information : From height,Fromcoinbase,amount,generation time, rinhash
 func valueUnspentTXO(fromCoinBase bool, height int32, amount int64, generationTime time.Time, ringHash chainhash.Hash) []byte {
 	size := 4 + 1 + 8 + 8 + 32
 	v := make([]byte, size)
@@ -1145,6 +1185,7 @@ func valueUnspentTXO(fromCoinBase bool, height int32, amount int64, generationTi
 }
 func updateUnspentTXO(ns walletdb.ReadWriteBucket, k []byte, hash chainhash.Hash) []byte {
 	v := ns.NestedReadBucket(bucketUnspentTXO).Get(k)
+	//TODO(abe):there are some problem
 	copy(v[len(v)-32:], hash[:])
 	putUnspentTXO(ns, k, v)
 	return v
@@ -1255,7 +1296,7 @@ func deleteSpentButUnminedTXO(ns walletdb.ReadWriteBucket, k []byte) error {
 
 // SpentConfirmedTXO: store the relevant output which is spent by current wallet and now is contained in a block
 // its key is transaction hash with the output index
-// its value is relevant information : From coinbase,amount,generation time, rinhash,serialNumber，spentTime,confirmedTime
+// its value is relevant information : height,From coinbase,amount,generation time, rinhash,serialNumber，spentTime,confirmedTime
 func valueSpentConfirmedTXO(height int,fromCoinBase bool, amount int64, generationTime time.Time,
 	ringHash chainhash.Hash, spentBy chainhash.Hash, spentTime time.Time, confirmTime time.Time) []byte {
 	size := 4+1 + 8 + 8 + 32 +32+ 8 + 8
@@ -1409,6 +1450,19 @@ func deleteRingDetails(ns walletdb.ReadWriteBucket, k []byte) error {
 	if err != nil {
 		str := "failed to delete ring details"
 		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+func updateDeletedHeightRingDetails(ns walletdb.ReadWriteBucket, k []byte,height int32) error {
+	ring, err := fetchRingDetails(ns, k)
+	if err != nil {
+		str := "failed to fetch ring details"
+		return storeError(ErrDatabase, str, err)
+	}
+	ring.BlockHeight=height
+	err = putRingDetails(ns,k, ring.Serialize())
+	if err!=nil{
+		return err
 	}
 	return nil
 }
