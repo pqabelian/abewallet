@@ -220,7 +220,8 @@ out:
 				"%s, height %d)", len(addrs), noun, n.Hash,
 				n.Height)
 
-			go w.resendUnminedTxs()
+			go w.resendUnminedTxs()     //TODO(abe):will be deleted or change the name
+			go w.resendUnminedTxAbes()
 
 		case <-quit:
 			break out
@@ -387,7 +388,7 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 				if err != nil {
 					return err
 				}
-				err = w.TxStore.InsertBlockAbe(txmgrNs,blockAbeDetail,mpk,msvk)
+ 				err = w.TxStore.InsertBlockAbe(txmgrNs,blockAbeDetail,mpk,msvk)
 				if err != nil {
 					return err
 				}

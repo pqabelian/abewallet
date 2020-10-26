@@ -175,7 +175,8 @@ func NewUnsignedTransaction(outputs []*wire.TxOut, relayFeePerKb abeutil.Amount,
 }
 //TODO(abe):the logic of this function need to be verified
 //TODO(abe):if failed to create a transaction due to insufficient funds, the result should contain all spendable coin values.
-func NewUnsignedTransactionAbe(outputs []*wire.TxOutAbe, relayFeePerKb abeutil.Amount,
+func
+NewUnsignedTransactionAbe(outputs []*wire.TxOutAbe, relayFeePerKb abeutil.Amount,
 	fetchInputs InputSourceAbe, fetchChange ChangeSource) (*AuthoredTxAbe, error) {
 	// TODO(osy):the strategy of choosing otxos will be optimized
 	targetAmount := SumOutputValuesAbe(outputs)
@@ -187,6 +188,7 @@ func NewUnsignedTransactionAbe(outputs []*wire.TxOutAbe, relayFeePerKb abeutil.A
 		if err != nil {
 			return nil, err
 		}
+		// add some error handle when the coins is too small to spent due to too many inputs
 		if inputAmount < targetAmount+targetFee {
 			return nil, insufficientFundsError{}
 		}
@@ -479,7 +481,7 @@ func spendNestedWitnessPubKeyHash(txIn *wire.TxIn, pkScript []byte,
 func (tx *AuthoredTx) AddAllInputScripts(secrets SecretsSource) error {
 	return AddAllInputScripts(tx.Tx, tx.PrevScripts, tx.PrevInputValues, secrets)
 }
-func (tx *AuthoredTxAbe) AddAllInputScripts(msg []byte,m *waddrmgr.ManagerAbe, waddrmgrNs walletdb.ReadWriteBucket,wtxmgrNs walletdb.ReadWriteBucket) error {
+func (tx *AuthoredTxAbe) AddAllInputScripts(msg []byte,m *waddrmgr.ManagerAbe, waddrmgrNs walletdb.ReadBucket,wtxmgrNs walletdb.ReadBucket) error {
 	// acquire the key
 	//TODO(abe): this process of acquire master key will be abstract to a interface
 	if m.IsLocked() {
@@ -549,6 +551,7 @@ func (tx *AuthoredTxAbe) AddAllInputScripts(msg []byte,m *waddrmgr.ManagerAbe, w
 				return fmt.Errorf("error in generating the key image:%v",err)
 			}
 			tx.Tx.TxIns[i].SerialNumber=chainhash.DoubleHashH(k.Serialize())
+
 			//TODO(abe):need to update the database such as utxoRing and unspentTxo...
 		}else{
 			return fmt.Errorf("the tx input do not contain a output belonging to wallet")

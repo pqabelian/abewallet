@@ -653,6 +653,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 	// before catching up with the rescan.
 	rollback := false
 	rollbackStamp := w.ManagerAbe.SyncedTo()
+	// TODO(abe): there are some problem which incur the wallet stop running
 	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 		addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
@@ -3552,6 +3553,32 @@ func (w *Wallet) resendUnminedTxs() {
 			txHash)
 	}
 }
+func (w *Wallet) resendUnminedTxAbes() {
+	var txs []*wire.MsgTxAbe
+	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		var err error
+		txs, err = w.TxStore.UnminedTxAbes(txmgrNs)
+		return err
+	})
+	if err != nil {
+		log.Errorf("Unable to retrieve unconfirmed transactions to "+
+			"resend: %v", err)
+		return
+	}
+
+	for _, tx := range txs {
+		txHash, err := w.publishTransactionAbe(tx)
+		if err != nil {
+			log.Debugf("Unable to rebroadcast transaction %v: %v",
+				tx.TxHash(), err)
+			continue
+		}
+
+		log.Debugf("Successfully rebroadcast unconfirmed transaction %v",
+			txHash)
+	}
+}
 
 // SortedActivePaymentAddresses returns a slice of all active payment
 // addresses in a wallet.
@@ -3901,7 +3928,7 @@ func (w *Wallet) SendOutputsAbe(outputs []*wire.TxOutAbe, minconf int32, satPerK
 	if err != nil {
 		return nil, err
 	}
-
+	// it means that the transaction is create if successful
 	txHash, err := w.reliablyPublishTransactionAbe(createdTx.Tx, label)
 	if err != nil {
 		return nil, err
@@ -4495,7 +4522,7 @@ func (w *Wallet) publishTransactionAbe(tx *wire.MsgTxAbe) (*chainhash.Hash, erro
 	// This error is returned when broadcasting a transaction that has
 	// already confirmed to a bitcoind node over the P2P network.
 	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L648
-	case match(err, "txn-already-known"):
+	case match(err, "txn-already-known"):   //update the utxo set
 		dbErr := walletdb.Update(w.db, func(dbTx walletdb.ReadWriteTx) error {
 			txmgrNs := dbTx.ReadWriteBucket(wtxmgrNamespaceKey)
 			txRec, err := wtxmgr.NewTxRecordAbeFromMsgTxAbe(tx, time.Now())

@@ -9,7 +9,6 @@ import (
 	"github.com/abesuite/abec/blockchain"
 	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abewallet/walletdb"
-	"sort"
 	"time"
 
 	"github.com/abesuite/abec/abeutil"
@@ -102,6 +101,7 @@ func NewBlockAbeRecord(serializedBlockAbe []byte) (*BlockAbeRecord, error) {
 	copy(rec.Hash[:], blockHash.CloneBytes())
 	rec.Height = int32(binary.BigEndian.Uint32(rec.MsgBlockAbe.Transactions[0].TxIns[0].PreviousOutPointRing.BlockHashs[0][0:4]))
 	rec.RecvTime = rec.MsgBlockAbe.Header.Timestamp
+	rec.TxRecordAbes=make([]*TxRecordAbe,len(rec.MsgBlockAbe.Transactions))
 	for i := 0; i < len(rec.MsgBlockAbe.Transactions); i++ {
 		rec.TxRecordAbes[i], err = NewTxRecordAbeFromMsgTxAbe(rec.MsgBlockAbe.Transactions[i], rec.RecvTime)
 		if err != nil {
@@ -268,14 +268,14 @@ type Credit struct {
 	FromCoinBase bool
 }
 type UnspentUTXO struct {
-	Height int32
+	Height int32 // the block height used to identify whether this utox can be spent in current height
 	//BlockHash      chainhash.Hash
-	TxOutput     wire.OutPointAbe
+	TxOutput     wire.OutPointAbe //the outpoint
 	FromCoinBase bool
 	Amount       int64
 	//ValueScript    int64
 	//AddrScript     []byte
-	GenerationTime time.Time
+	GenerationTime time.Time      //at this moment, it also useless
 	RingHash       chainhash.Hash //may be zero
 }
 
@@ -284,7 +284,7 @@ func (utxo *UnspentUTXO) Deserialize(op *wire.OutPointAbe, v []byte) error {
 		return fmt.Errorf("empty byte slice")
 	}
 	if len(v) < 49 {
-		str := "wrong value in unspent output bucket"
+		str := "wrong size of serialized unspent transaction output"
 		return fmt.Errorf(str)
 	}
 	utxo.TxOutput.TxHash = op.TxHash
@@ -318,8 +318,8 @@ type SpentButUnminedTXO struct { //TODO(abe):should add a field to denote which 
 	//AddrScript     []byte
 	GenerationTime time.Time
 	RingHash       chainhash.Hash //may be zero
+	SpentByHash    chainhash.Hash
 	SpentTime      time.Time
-	SpentBy        chainhash.Hash
 }
 type SpentConfirmedTXO struct { //TODO(abe):should add a field to denote which tx spent this utxo
 	Height int32
@@ -331,18 +331,18 @@ type SpentConfirmedTXO struct { //TODO(abe):should add a field to denote which t
 	//AddrScript     []byte
 	GenerationTime time.Time
 	RingHash       chainhash.Hash //may be zero
+	SpentByHash    chainhash.Hash
 	SpentTime      time.Time
 	ConfirmTime    time.Time
-	SpentBy        chainhash.Hash
 }
 
 type Ring struct {
-	BlockHashes []chainhash.Hash
-	TxHashes    []chainhash.Hash
-	Index       []uint8
-	ValueScript []int64
-	AddrScript  [][]byte
-	BlockHeight int32 // point  height where the utxo ring is deleted
+	BlockHashes []chainhash.Hash // three block hashes
+	TxHashes    []chainhash.Hash // [2,8]
+	Index       []uint8          // [2,8]
+	ValueScript []int64          // [2,8]
+	AddrScript  [][]byte         // [2.8]
+	BlockHeight int32            // point  height where the utxo ring is deleted
 }
 
 type sortTxo struct {
@@ -378,13 +378,13 @@ func (o orderedRing) Swap(i, j int) {
 	o[i], o[j] = o[j], o[i]
 }
 
-// TODO(abe):change the method of serialization
+// TODO(abe):change the method of serialization, use offset represent the location of corresonpding addr script size
 // Serialize serialize the ring struct as such :
-// BlockHash0||BlochHash1||BlockHash2||m+1||TxHash0||OutputIndex0||ValueScipt...||TxHashm||OutputIndexm||AddrScript0||...||AddrScriptm
+// [block hash...]||transaction number||[transaction hash||output index||addrScript Size...]||[addr script...]||hegiht
 func (r Ring) Serialize() []byte {
-	addrScriptAllSize := 0
+	addrScriptAllSize := 0 //address script size
 	bLen := len(r.BlockHashes)
-	txLen := len(r.TxHashes)
+	txLen := len(r.TxHashes) //transaction number
 	var addrSize []int
 	for i := 0; i < txLen; i++ {
 		addrSize = append(addrSize, len(r.AddrScript[i]))
@@ -478,17 +478,17 @@ func (r Ring) Hash() []byte {
 }
 
 type UTXORingAbe struct {
-	AllSpent             bool // not serialized and when serializing it must be false, otherwise it will be deleted
-	Refreshed            bool // not serialied, it can be computed from any OriginSerializeNumber
-	RingHash             chainhash.Hash
-	TxHashes             []chainhash.Hash
-	OutputIndexes        []uint8
-	OriginSerialNumberes []chainhash.Hash
-	IsMy                 []bool
-	Spent                []bool
-	GotSerialNumberes    []chainhash.Hash
-	SpentByTxHashes      []chainhash.Hash
-	InputIndexes         []uint8
+	AllSpent             bool                     //1 // not serialized and when serializing it must be false, otherwise it will be deleted
+	Refreshed            bool                     //1 // not serialied, it can be computed from any OriginSerializeNumber
+	RingHash             chainhash.Hash           //32
+	TxHashes             []chainhash.Hash         //32*len
+	OutputIndexes        []uint8                  //1
+	OriginSerialNumberes map[uint8]chainhash.Hash //variable
+	IsMy                 []bool                   //total 1
+	Spent                []bool                   // total 1
+	GotSerialNumberes    []chainhash.Hash         // variable
+	//SpentByTxHashes      []chainhash.Hash
+	//InputIndexes         []uint8
 }
 
 func NewUTXORingAbeFromRing(r *Ring) (*UTXORingAbe, error) {
@@ -503,40 +503,44 @@ func NewUTXORingAbeFromRing(r *Ring) (*UTXORingAbe, error) {
 		RingHash:             *hash,
 		TxHashes:             r.TxHashes,
 		OutputIndexes:        r.Index,
-		OriginSerialNumberes: make([]chainhash.Hash, ringSize),
+		OriginSerialNumberes: make(map[uint8]chainhash.Hash),
 		IsMy:                 make([]bool, ringSize),
 		Spent:                make([]bool, ringSize),
 		GotSerialNumberes:    *new([]chainhash.Hash),
-		SpentByTxHashes:      *new([]chainhash.Hash),
-		InputIndexes:         *new([]uint8),
 	}, nil
 }
 
 type RingHashSerialNumbers struct {
-	index         int
-	utxoRings     []*UTXORingAbe      // utxo ring states before processing the block
-	serialNumbers [][]*chainhash.Hash //added serialNumber in given block
+	utxoRings     map[chainhash.Hash]UTXORingAbe      // utxo ring states before processing the block
+	serialNumbers map[chainhash.Hash][]chainhash.Hash //added serialNumber in given block
 }
 
+// ring hash || transaction number || [transaction hash||output index...]||Origin serial number ||[index||serial number...]||isMy||Spent||Got serial number||[serial number...]
 func (u UTXORingAbe) SerializeSize() int {
-	return 32 + len(u.TxHashes)*(32+1+32) + 2 + len(u.GotSerialNumberes)*(32+32+1)
+	return 32 + 1 + len(u.TxHashes)*(32+1) + 1 + len(u.OriginSerialNumberes)*(1+32) + 2 + 1 + len(u.GotSerialNumberes)*32
 
 }
 func (u UTXORingAbe) Serialize() []byte {
 	txLen := len(u.TxHashes) // TODO(osy): may be lack a tx len in serialized utxo ring
-	totalSize := 32 + txLen*(32+1+32) + 2 + len(u.GotSerialNumberes)*(32+32+1)
+	totalSize := u.SerializeSize()
 	res := make([]byte, totalSize)
 	offset := 0
 	copy(res[offset:offset+32], u.RingHash[:])
 	offset += 32
+	res[offset] = uint8(txLen)
+	offset += 1
 	for i := 0; i < txLen; i++ {
 		copy(res[offset:offset+32], u.TxHashes[i][:])
 		offset += 32
 		res[offset] = u.OutputIndexes[i]
 		offset += 1
 	}
-	for i := 0; i < txLen; i++ {
-		copy(res[offset:offset+32], u.OriginSerialNumberes[i][:])
+	res[offset] = uint8(len(u.OriginSerialNumberes))
+	offset += 1
+	for index, sn := range u.OriginSerialNumberes {
+		res[offset] = index
+		offset += 1
+		copy(res[offset:offset+32], sn[:])
 		offset += 32
 	}
 	var temp uint16
@@ -550,39 +554,46 @@ func (u UTXORingAbe) Serialize() []byte {
 	}
 	byteOrder.PutUint16(res[offset:offset+2], temp)
 	offset += 2
+	res[offset] = uint8(len(u.GotSerialNumberes))
+	offset += 1
 	for i := 0; i < len(u.GotSerialNumberes); i++ {
 		copy(res[offset:offset+32], u.GotSerialNumberes[i][:])
 		offset += 32
-		copy(res[offset:offset+32], u.SpentByTxHashes[i][:])
-		offset += 32
-		res[offset] = u.InputIndexes[i]
-		offset += 1
 	}
 	return res
 }
 func (u *UTXORingAbe) Deserialize(b []byte) error {
-	if len(b) < 32+len(u.TxHashes)*(32+2+32)+2 {
-		return fmt.Errorf("wrong length of input byte slice")
+	if len(b) < 32+1 {
+		return fmt.Errorf("the length of input byte slice less than minimum size")
 	}
 	offset := 0
 	copy(u.RingHash[:], b[offset:offset+32])
 	offset += 32
-	for i := 0; i < len(u.TxHashes); i++ {
+	txLen := int(b[offset])
+	offset += 1
+	u.TxHashes = make([]chainhash.Hash, txLen)
+	u.OutputIndexes = make([]uint8, txLen)
+	for i := 0; i < txLen; i++ {
 		copy(u.TxHashes[i][:], b[offset:offset+32])
 		offset += 32
 		u.OutputIndexes[i] = b[offset]
 		offset += 1
 	}
-	for i := 0; i < len(u.TxHashes); i++ {
-		copy(u.OriginSerialNumberes[i][:], b[offset:offset+32])
-		if !u.Refreshed && !u.OriginSerialNumberes[0].IsEqual(&chainhash.ZeroHash) {
-			u.Refreshed = true
+	originSnSize := int(b[offset])
+	offset += 1
+	for i := 0; i < originSnSize; i++ {
+		h, err := chainhash.NewHash(b[offset+1 : offset+33])
+		if err != nil {
+			return err
 		}
-		offset += 32
+		u.OriginSerialNumberes[b[offset]] = *h
+		offset += 33
 	}
 	temp := byteOrder.Uint16(b[offset : offset+2])
 	offset += 2
-	for i := 0; i < len(u.TxHashes); i++ {
+	u.IsMy = make([]bool, txLen)
+	u.Spent = make([]bool, txLen)
+	for i := 0; i < txLen; i++ {
 		if temp&(1<<i) != 0 {
 			u.IsMy[i] = true
 		}
@@ -590,33 +601,28 @@ func (u *UTXORingAbe) Deserialize(b []byte) error {
 			u.Spent[i] = true
 		}
 	}
-	for i := 0; i < len(u.GotSerialNumberes); i++ {
+	gotSnSize := int(b[offset])
+	u.GotSerialNumberes = make([]chainhash.Hash, gotSnSize)
+	for i := 0; i < gotSnSize; i++ {
 		copy(u.GotSerialNumberes[i][:], b[offset:offset+32])
 		offset += 32
-		copy(u.SpentByTxHashes[i][:], b[offset:offset+32])
-		offset += 32
-		u.InputIndexes[i] = b[offset]
-		offset += 1
 	}
 	u.AllSpent = false
 	return nil
 }
 
-func (u *UTXORingAbe) AddGotSerialNumber(txHash chainhash.Hash, index uint8, serialNumber chainhash.Hash) error {
-	if u.GotSerialNumberes == nil {
-		u.GotSerialNumberes = *new([]chainhash.Hash)
-		u.SpentByTxHashes = *new([]chainhash.Hash)
-		u.InputIndexes = *new([]uint8)
+// The caller must check the u.AllSpent after return
+func (u *UTXORingAbe) AddGotSerialNumber(serialNumber chainhash.Hash) error {
+	if u.GotSerialNumberes == nil || len(u.GotSerialNumberes) == 0 {
+		u.GotSerialNumberes = make([]chainhash.Hash, 0)
 	}
 	for i := 0; i < len(u.GotSerialNumberes); i++ {
 		if serialNumber.IsEqual(&u.GotSerialNumberes[i]) {
-			return fmt.Errorf("There has a same serialNumber in UTXORingAbe")
+			return fmt.Errorf("there has a same serialNumber in UTXORingAbe")
 		}
 	}
 
 	u.GotSerialNumberes = append(u.GotSerialNumberes, serialNumber)
-	u.SpentByTxHashes = append(u.SpentByTxHashes, txHash)
-	u.InputIndexes = append(u.InputIndexes, index)
 	// if all serialNumber shown in the chain or all utxo are spent,
 	// mark all unspent utxo as spent
 	if len(u.GotSerialNumberes) == len(u.TxHashes) {
@@ -625,22 +631,59 @@ func (u *UTXORingAbe) AddGotSerialNumber(txHash chainhash.Hash, index uint8, ser
 				u.Spent[i] = true
 			}
 		}
-		u.AllSpent = true
-	} else if u.Refreshed {
-		for i := 0; i < len(u.OriginSerialNumberes); i++ {
-			if serialNumber.IsEqual(&u.OriginSerialNumberes[i]) && u.IsMy[i] && !u.Spent[i] {
+		u.AllSpent = true //this utxo will be deleted
+		return nil
+	}
+	// update
+	for i := 0; i < len(u.IsMy); i++ {
+		if u.IsMy[i] && !u.Spent[i] {
+			hash, ok := u.OriginSerialNumberes[uint8(i)]
+			if ok && hash.IsEqual(&serialNumber) {
 				u.Spent[i] = true
-				allSpent := true
-				for i := 0; i < len(u.IsMy); i++ {
-					if u.IsMy[i] && !u.Spent[i] {
-						allSpent = false
-					}
-				}
-				u.AllSpent = allSpent
+				break
 			}
 		}
 	}
+	// check
+	u.AllSpent = true
+	for i := 0; i < len(u.IsMy); i++ {
+		if u.IsMy[i] && !u.Spent[i] {
+			u.AllSpent = false
+			break
+		}
+	}
 	return nil
+}
+
+func (u UTXORingAbe) Copy() *UTXORingAbe {
+	res := new(UTXORingAbe)
+	res.AllSpent = u.AllSpent
+	res.Refreshed = u.Refreshed
+	res.RingHash = u.RingHash
+	res.TxHashes = make([]chainhash.Hash, len(u.TxHashes))
+	for i := 0; i < len(u.TxHashes); i++ {
+		res.TxHashes[i] = u.TxHashes[i]
+	}
+	res.OutputIndexes = make([]uint8, len(u.OutputIndexes))
+	for i := 0; i < len(u.OutputIndexes); i++ {
+		res.OutputIndexes[i] = u.OutputIndexes[i]
+	}
+	for k, v := range u.OriginSerialNumberes {
+		res.OriginSerialNumberes[k] = v
+	}
+	res.IsMy = make([]bool, len(u.IsMy))
+	for i := 0; i < len(u.IsMy); i++ {
+		res.IsMy[i] = u.IsMy[i]
+	}
+	res.Spent = make([]bool, len(u.Spent))
+	for i := 0; i < len(u.Spent); i++ {
+		res.Spent[i] = u.Spent[i]
+	}
+	res.GotSerialNumberes = make([]chainhash.Hash, len(u.GotSerialNumberes))
+	for i := 0; i < len(u.GotSerialNumberes); i++ {
+		res.GotSerialNumberes[i] = u.GotSerialNumberes[i]
+	}
+	return res
 }
 
 // LockID represents a unique context-specific ID assigned to an output lock.
@@ -832,8 +875,11 @@ func (s *Store) InsertTx(ns walletdb.ReadWriteBucket, rec *TxRecord, block *Bloc
 
 // TODO(abe): actually, we must move the outputs of this transaction from unspent txo bucket to spentButUnmined txo bucket
 // TODO(abe): update the balance in this function
+// TODO(abe): record this transaction in unmined transaction bucket,
+// TODO(abe): wait for a mempool transacion, need to design
 func (s *Store) InsertTxAbe(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecordAbe, block *BlockAbeMeta) error {
 	//TODO(abe):remove the outputs of the wallet spent by given tx from UnspentTXObucket to SpentButUmined bucket
+
 	//if m.IsLocked() {
 	//	return fmt.Errorf("the wallet is locked")
 	//}
@@ -860,8 +906,17 @@ func (s *Store) InsertTxAbe(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecordAbe,
 	//if err!=nil {
 	//	return err
 	//}
+
+	if block != nil {
+		return fmt.Errorf("InsertTx just consideates the unconfirmed transaction")
+	}
+	v := existsRawUnminedAbe(wtxmgrNs, rec.Hash[:])
+	if v != nil { // it means that has exists unmined transaction bucket
+		return nil
+	}
+	// move the unspentutxo bucket to spentbutunmined bucket
 	for i := 0; i < len(rec.MsgTx.TxIns); i++ {
-		//do not update the utxoring bucket  until the transaction packaged into a block
+		// do not update the utxoring bucket  until the transaction packaged into a block
 		// just mark it is spent and move from unspent bucket to spentbutunmined bucket
 		// to avoid next time spent the same coins
 		ringHash := rec.MsgTx.TxIns[i].PreviousOutPointRing.Hash()
@@ -869,40 +924,55 @@ func (s *Store) InsertTxAbe(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecordAbe,
 		if err != nil {
 			return err
 		}
-		index := 0
-		for ; index < len(u.OriginSerialNumberes); index++ { // has finish the refresh?
-			if u.OriginSerialNumberes[index].IsEqual(&rec.MsgTx.TxIns[i].SerialNumber) {
+		//find the index
+		index := -1
+		// We expected that when spent this utxo, the utxo ring will be update when add the script
+		for k, v := range u.OriginSerialNumberes {
+			if v.IsEqual(&rec.MsgTx.TxIns[i].SerialNumber) {
+				index = int(k)
 				break
 			}
 		}
-		u.GotSerialNumberes = append(u.GotSerialNumberes, rec.MsgTx.TxIns[i].SerialNumber)
-		u.SpentByTxHashes = append(u.SpentByTxHashes, rec.Hash)
-		u.InputIndexes = append(u.InputIndexes, uint8(i))
-
-		//update the unspentUtxo bucket
+		if index == -1 {
+			continue
+		}
+		//move from the unspentUtxo bucket to spentUtxobucket if necessary
 		k := canonicalOutPointAbe(rec.MsgTx.TxIns[i].PreviousOutPointRing.OutPoints[index].TxHash, rec.MsgTx.TxIns[i].PreviousOutPointRing.OutPoints[index].Index)
 		v := wtxmgrNs.NestedReadWriteBucket(bucketUnspentTXO).Get(k)
 		if v == nil {
-			return fmt.Errorf("There is no such a utxo in wallet")
+			return fmt.Errorf("there is no such a utxo in bucket")
 		}
 		err = deleteUnspentTXO(wtxmgrNs, k)
 		if err != nil {
 			return err
 		}
 
-		newv := make([]byte, len(v)+36)
-		copy(newv, v)
-		copy(newv, rec.Hash[:])
+		newv := make([]byte, len(v)+40)
+		offset := 0
+		copy(newv[offset:], v)
+		offset += len(v)
+		copy(newv[offset:], rec.Hash[:])
+		offset += 32
 		if block != nil {
-			byteOrder.PutUint64(newv[len(newv)-8:], uint64(block.Time.Unix()))
-		} else {
-			byteOrder.PutUint64(newv[len(newv)-8:], uint64(time.Now().Unix()))
+			return fmt.Errorf("at this version, we do not support to accept transactions in block")
 		}
-		err = putSpentButUnminedTXO(wtxmgrNs, k, newv)
+		byteOrder.PutUint64(newv[len(newv)-8:], uint64(time.Now().Unix()))
+		err = putRawSpentButUnminedTXO(wtxmgrNs, k, newv)
 		if err != nil {
 			return err
 		}
 	}
+
+	// add this function to unminedAbe bucket,and notify the index has spent
+	v, err := valueTxRecordAbe(rec)
+	if err != nil {
+		return err
+	}
+	err = putRawUnminedAbe(wtxmgrNs, rec.Hash[:], v)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -967,7 +1037,7 @@ func (s *Store) InsertGenesisBlockAbe(ns walletdb.ReadWriteBucket, block *BlockA
 			blockOutputValue[offset] = k.Index
 			offset += 1
 
-			err := putUnspentTXO(ns, canonicalOutPointAbe(k.TxHash, k.Index), v)
+			err := putRawUnspentTXO(ns, canonicalOutPointAbe(k.TxHash, k.Index), v)
 			if err != nil {
 				return err
 			}
@@ -994,7 +1064,7 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 	}
 	//TODO(abe),finished:delete oldest block in the database
 	if block.Height > NUMBERBLOCKABE {
-		err = deleteRawBlockAbeWithBlockHeight(ns, block.Height-NUMBERBLOCKABE)
+		_, err = deleteRawBlockAbeWithBlockHeight(ns, block.Height-NUMBERBLOCKABE)
 		if err != nil {
 			return err
 		}
@@ -1006,16 +1076,16 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 		Hash:   block.Hash,
 		Height: block.Height,
 	}
-	myUnspetTXO := map[wire.OutPointAbe][]byte{}      // store the outputs which belong to the wallet
-	blockOutputs := map[Block][]wire.OutPointAbe{}    // if the block height meet the requirement, it also store previous two block outputs belong the wallet
-	blockInputs := map[Block]*RingHashSerialNumbers{} // save the inputs which belong to the wallet spent by this block and store the increment and the utxo ring before adding this block
+	myUnspetTXO := make(map[wire.OutPointAbe][]byte)   // store the outputs which belong to the wallet
+	blockOutputs := make(map[Block][]wire.OutPointAbe) // if the block height meet the requirement, it also store previous two block outputs belong the wallet
+	var blockInputs *RingHashSerialNumbers             // save the inputs which belong to the wallet spent by this block and store the increment and the utxo ring before adding this block
 	// check the coinbase transaction
 	// TODO(abe):for testing 1,2,5,10, the outputs in coinbase transaction may more than one
 
 	// handle the coinbbase transaction
 	coinbaseTx := block.TxRecordAbes[0].MsgTx
 	for i := 0; i < len(coinbaseTx.TxOuts); i++ {
-		addr, err := txscript.ExtractAddressFromScriptAbe(coinbaseTx.TxOuts[0].AddressScript) // may have more than one outputs
+		addr, err := txscript.ExtractAddressFromScriptAbe(coinbaseTx.TxOuts[i].AddressScript) // may have more than one outputs
 		if err != nil {
 			return err
 		}
@@ -1049,134 +1119,89 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 		}
 	}
 
+	relevantUTXORings := make(map[chainhash.Hash]*UTXORingAbe)
 	// handle with the transfer transactions
 	for i := 1; i < len(block.TxRecordAbes); i++ { // trace every tx in this block
 		txi := block.TxRecordAbes[i].MsgTx
 		// handle the inputs,TODO:need to check for this section
 		for j := 0; j < len(txi.TxIns); j++ {
 			// compute the ring hash of each input in every transaction to match the utxo in the database
-			size := len(txi.TxIns[j].PreviousOutPointRing.BlockHashs)*32 + len(txi.TxIns[j].PreviousOutPointRing.OutPoints)*(32+1) // block hashes, tx hash and index
-			v := make([]byte, size)
-			offset := 0
-			for k := 0; k < len(txi.TxIns[j].PreviousOutPointRing.BlockHashs); k++ {
-				copy(v[offset:offset+32], txi.TxIns[j].PreviousOutPointRing.BlockHashs[i][:])
-				offset += 32
-			}
-			for k := 0; k < len(txi.TxIns[j].PreviousOutPointRing.OutPoints); k++ {
-				copy(v[offset:offset+32], txi.TxIns[j].PreviousOutPointRing.OutPoints[k].TxHash[:])
-				offset += 32
-				v[offset] = txi.TxIns[j].PreviousOutPointRing.OutPoints[k].Index
-				offset += 1
-			}
-			ringHash := chainhash.DoubleHashH(v)
-			key, value := existsUTXORing(ns, ringHash)
-			if value == nil || len(value) == 0 { // if there is no value in utxo ring bucket. the pointed output must not belong to the wallet
-				continue
-			}
-			// if the ring hash exists in the database, fetch the utxo ring
-			oldU, err := fetchUTXORing(ns, key) //get the value from utxoring bucket, it will be one coins of wallet
-			// if the utxo ring is nil or the err is not nil, it means that the utxo ring of pointed output has consumed out.
-			if oldU == nil || err != nil {
-				return err
-			}
-			// match the serialNumber
+			ringHash := txi.TxIns[j].PreviousOutPointRing.Hash()
+			u, ok := relevantUTXORings[ringHash]  // firstly, check it exist in relevantUTXORing
 			serialNumber := txi.TxIns[j].SerialNumber
-			for j := 0; j < len(oldU.GotSerialNumberes); j++ { // check doubling serialNumber
-				if serialNumber.IsEqual(&oldU.GotSerialNumberes[i]) {
-					return fmt.Errorf("There has a same serialNumber in UTXORingAbe")
+			if !ok {
+				// TODO(abe):why in the bucket utxo ring, this entry which is keyed by ringHash is not found?
+				key, value := existsUTXORing(ns, ringHash)     // if not, check it the bucket
+				if value == nil {     //if not, it means that this input do not belong to wallet
+					// if there is no value in utxo ring bucket. the pointed output must not belong to the wallet
+					continue
 				}
+				// if the ring hash exists in the database, fetch the utxo ring
+				oldU, err := fetchUTXORing(ns, key) //get the value from utxoring bucket, it will be one coins of wallet
+				// if the utxo ring is nil or the err is not nil, it means that the utxo ring of pointed output has consumed out.
+				if oldU == nil || err != nil {
+					return err
+				}
+				// match the serialNumber
+				for k := 0; k < len(oldU.GotSerialNumberes); k++ {
+					// check doubling serialNumber
+					if serialNumber.IsEqual(&oldU.GotSerialNumberes[k]) {
+						return fmt.Errorf("There has a same serialNumber in UTXORingAbe")
+					}
+				}
+				// save the previous utxoring for quick roll back
+				if blockInputs == nil {
+					blockInputs = new(RingHashSerialNumbers)
+					blockInputs.utxoRings=make(map[chainhash.Hash]UTXORingAbe)
+					blockInputs.serialNumbers=make(map[chainhash.Hash][]chainhash.Hash)
+				}
+				_, ok = blockInputs.utxoRings[ringHash]
+				if !ok { // the utxo ring has not cached,record it in block input
+					blockInputs.utxoRings[ringHash] = *oldU
+				}
+				blockInputs.serialNumbers[ringHash] = append(blockInputs.serialNumbers[ringHash], serialNumber)
+				u = oldU.Copy()
 			}
-			// save the previous utxoring for quick roll back
-			ring2Ser, ok := blockInputs[b]
-			if !ok { // the utxo ring has not cached
-				ring2Ser = new(RingHashSerialNumbers)
-				ring2Ser.index = 0
-				ring2Ser.utxoRings = *new([]*UTXORingAbe)
-				ring2Ser.serialNumbers = *new([][]*chainhash.Hash)
-			}
-			// find the index of corresponding utxo ring
-			index := 0                              //search the ring hash
-			for ; index < ring2Ser.index; index++ { // search the ringhash whether the previous tx inputs has add?
-				if ring2Ser.utxoRings[index].RingHash == ringHash { // have cached
-					break
-				}
-			}
-			var u *UTXORingAbe
-			if index >= ring2Ser.index { //if not, we must add new one utxo ring information  to cache it
-				// deep copy
-				u := new(UTXORingAbe)
-				u.AllSpent = oldU.AllSpent
-				u.Refreshed = oldU.Refreshed
-				u.RingHash = oldU.RingHash
-				for i := 0; i < len(oldU.TxHashes); i++ {
-					u.TxHashes = append(u.TxHashes, oldU.TxHashes[i])
-				}
-				for i := 0; i < len(oldU.OutputIndexes); i++ {
-					u.OutputIndexes = append(u.OutputIndexes, oldU.OutputIndexes[i])
-				}
-				for i := 0; i < len(oldU.OriginSerialNumberes); i++ {
-					u.OriginSerialNumberes = append(u.OriginSerialNumberes, oldU.OriginSerialNumberes[i])
-				}
-				for i := 0; i < len(oldU.IsMy); i++ {
-					u.IsMy = append(u.IsMy, oldU.IsMy[i])
-				}
-				for i := 0; i < len(oldU.Spent); i++ {
-					u.Spent = append(u.Spent, oldU.Spent[i])
-				}
-				for i := 0; i < len(oldU.GotSerialNumberes); i++ {
-					u.GotSerialNumberes = append(u.GotSerialNumberes, oldU.GotSerialNumberes[i])
-				}
-				for i := 0; i < len(oldU.SpentByTxHashes); i++ {
-					u.SpentByTxHashes = append(u.SpentByTxHashes, oldU.SpentByTxHashes[i])
-				}
-				for i := 0; i < len(oldU.InputIndexes); i++ {
-					u.InputIndexes = append(u.InputIndexes, oldU.InputIndexes[i])
-				}
-				// put the old into block inputs
-				ring2Ser.utxoRings = append(ring2Ser.utxoRings, oldU) // previous utxo ring information
-				ring2Ser.index = index                                // update the count
-			}
-			if ring2Ser.serialNumbers[index] == nil { // and apply a hash slice
-				ring2Ser.serialNumbers[index] = *new([]*chainhash.Hash)
-			}
-			ring2Ser.serialNumbers[index] = append(ring2Ser.serialNumbers[index], &serialNumber)
-			blockInputs[b] = ring2Ser //update the map
 
-			//update the utxoring variable
-			u.GotSerialNumberes = append(u.GotSerialNumberes, serialNumber) // update the got serialnumbers
-			u.SpentByTxHashes = append(u.SpentByTxHashes, txi.TxHash())     // it points that one of utox is spent by given hash
-			u.InputIndexes = append(u.InputIndexes, uint8(i))               // the index of input which points to the utxo
-			if len(u.GotSerialNumberes) == len(u.IsMy) {                    // it means that all utxos in this ring have spent whatever the pointed output belong to the wallet
-				for i := 0; i < len(u.IsMy); i++ {
-					if u.IsMy[i] && !u.Spent[i] {
-						u.Spent[i] = true // mark all utxo spent
-					}
-				}
-				u.AllSpent = true // update the utxo ring states
-			} else if u.Refreshed { // if the serial number has refreshed TODO(abe): the refresh process have not finished
-				for i := 0; i < len(u.OriginSerialNumberes); i++ { // we can find the serial number points to which outpoints in utxo ring
-					if serialNumber.IsEqual(&u.OriginSerialNumberes[i]) && u.IsMy[i] && !u.Spent[i] {
-						u.Spent[i] = true
-						allSpent := true
-						for i := 0; i < len(u.IsMy); i++ { // check whether all outpoints belong to the wallet are spent, because we may delete the useless utxoring
-							if u.IsMy[i] && !u.Spent[i] {
-								allSpent = false
-							}
-						}
-						u.AllSpent = allSpent
-					}
-				}
-			}
+			//copy a new utxoring
+
+			//update the new utxoring variable
+			u.AddGotSerialNumber(serialNumber)
+			//u.GotSerialNumberes = append(u.GotSerialNumberes, serialNumber) // update the got serialnumbers
+			//u.SpentByTxHashes = append(u.SpentByTxHashes, txi.TxHash())     // it points that one of utox is spent by given hash
+			//u.InputIndexes = append(u.InputIndexes, uint8(i))               // the index of input which points to the utxo
+			//if len(u.GotSerialNumberes) == len(u.IsMy) {                    // it means that all utxos in this ring have spent whatever the pointed output belong to the wallet
+			//	for i := 0; i < len(u.IsMy); i++ {
+			//		if u.IsMy[i] && !u.Spent[i] {
+			//			u.Spent[i] = true // mark all utxo spent
+			//		}
+			//	}
+			//	u.AllSpent = true // update the utxo ring states
+			//} else if u.Refreshed { // if the serial number has refreshed TODO(abe): the refresh process have not finished
+			//	for i := 0; i < len(u.OriginSerialNumberes); i++ { // we can find the serial number points to which outpoints in utxo ring
+			//		if serialNumber.IsEqual(&u.OriginSerialNumberes[i]) && u.IsMy[i] && !u.Spent[i] {
+			//			u.Spent[i] = true
+			//			allSpent := true
+			//			for i := 0; i < len(u.IsMy); i++ { // check whether all outpoints belong to the wallet are spent, because we may delete the useless utxoring
+			//				if u.IsMy[i] && !u.Spent[i] {
+			//					allSpent = false
+			//				}
+			//			}
+			//			u.AllSpent = allSpent
+			//		}
+			//	}
+			//}
 			// TODO(abe): if the serial number is not refreshed, we have nothing to do. Maybe we must add this utxo ring to a bucket which includes all utxo ring waiting for refresh
 
 			//  move relevant utxo from unspentTXO to SpentConfirmTXO
 			// TODO(abe): the utxo may be in SpentButUnmined bucket
-			for i := 0; i < len(u.IsMy); i++ {
-				if u.IsMy[i] && u.Spent[i] {
-					k := canonicalOutPointAbe(u.TxHashes[i], u.OutputIndexes[i])
-					v := ns.NestedReadBucket(bucketUnspentTXO).Get(k)
-					if v != nil || len(v) != 0 { //otherwise it has been moved to spentButUnmined bucket
-						deleteUnspentTXO(ns, k)
+			for t := 0; t < len(u.IsMy); t++ {
+				if u.IsMy[t] && u.Spent[t] { // need to move to spent and confirmed bucket
+					k := canonicalOutPointAbe(u.TxHashes[t], u.OutputIndexes[t])
+					// if this output is in unspent txo bucket
+					v := existsRawUnspentTXO(ns, k)
+					if v != nil {
+						//otherwise it has been moved to spentButUnmined bucket
 						// update the balances
 						amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
 						if err != nil {
@@ -1188,43 +1213,64 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 						byteOrder.PutUint64(confirmTime[:], uint64(block.RecvTime.Unix()))
 						v = append(v, confirmTime[:]...) //spentTime
 						v = append(v, confirmTime[:]...) // confirm time
+						err = deleteUnspentTXO(ns, k)
+						if err != nil {
+							return err
+						}
 					} else { //TODO(abe): if this transaction is create by the wallet, the outpoint should be stored in spentButUnmined bucket
-						v = ns.NestedReadBucket(bucketSpentButUnmined).Get(k)
-						if v != nil || len(v) != 0 { //otherwise it has been moved to spentButUnmined bucket
-							deleteUnspentTXO(ns, k)
+						v = existsRawSpentButUnminedTXO(ns, k)
+						if v != nil { //otherwise it has been moved to spentButUnmined bucket
+
 							v = append(v, serialNumber[:]...)
 							var confirmTime [8]byte
 							byteOrder.PutUint64(confirmTime[:], uint64(block.RecvTime.Unix()))
 							v = append(v, confirmTime[:]...)
+							err := deleteUnspentTXO(ns, k)
+							if err != nil {
+								return err
+							}
 						}
 					}
-					putSpentConfirmedTXO(ns, k, v)
+					// move to spent and confirm bucket
+					err := putRawSpentConfirmedTXO(ns, k, v)
+					if err != nil {
+						return err
+					}
 				}
 			}
-			// update the utxo ring bucket
-			if u.AllSpent {
-				err := deleteUTXORing(ns, ringHash[:])
+
+			//update the relevantUTXORing
+			relevantUTXORings[ringHash] = u
+		}
+		// update the utxo ring bucket
+		for k, v := range relevantUTXORings {
+			if v.AllSpent {
+				// if all outpoints have been spent, so this utxo ring will be deleted,
+				// and mark deleted flag in ring bucket
+				err := deleteUTXORing(ns, k[:])
 				if err != nil {
 					return err
 				}
 				// TODO(abe):when delete the utxo ring, we also delete the ring? no,take a heigh flag
-				err = updateDeletedHeightRingDetails(ns, ringHash[:],block.Height)
+				err = updateDeletedHeightRingDetails(ns, k[:], block.Height)
 				if err != nil {
 					return err
 				}
-			} else {
-				err := putUTXORing(ns, ringHash[:], u.Serialize()[:])
-				if err != nil {
-					return err
-				}
+				continue
+			}
+			// if not, update the entry
+			err := putRawUTXORing(ns, k[:], v.Serialize()[32:])
+			if err != nil {
+				return err
 			}
 		}
 
+		// for all output in the given transaction
 		for j := 0; j < len(txi.TxOuts); j++ {
 			k := wire.OutPointAbe{
 				TxHash: txi.TxHash(),
 			}
-			addr, err := txscript.ExtractAddressFromScriptAbe(coinbaseTx.TxOuts[j].AddressScript)
+			addr, err := txscript.ExtractAddressFromScriptAbe(txi.TxOuts[j].AddressScript)
 			if err != nil {
 				return err
 			}
@@ -1243,16 +1289,19 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 			}
 		}
 	}
-	// store the inputs of blocks for quick rollback
-	for b, rhs := range blockInputs {
-		k := canonicalBlockAbe(b.Height, b.Hash)
-		v := valueBlockAbeInput(rhs.utxoRings, rhs.serialNumbers)
-		err := putBlockAbeInput(ns, k, v)
+
+	// store the inputs of block for quick rollback
+	if blockInputs!=nil{
+		k := canonicalBlockAbe(block.Height, block.Hash)
+		v := valueBlockAbeInput(blockInputs)
+		err = putRawBlockAbeInput(ns, k, v)
 		if err != nil {
 			return err
 		}
 	}
-	// TODO: there should be a block, so the map:block -> is useless
+
+	// store the output of block for quick rollback
+	// TODO: there just is a block, so the map:block -> is useless
 	if len(blockOutputs) != 0 { //add the block outputs in to bucket block outputs
 		// TODO(abe): this process should transfer to byte slices and then append to given
 		for blk, ops := range blockOutputs {
@@ -1279,6 +1328,7 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 			}
 		}
 	}
+
 	//TODO(abe): check the correctness of generating ring and modify the utxo in bucket unspentUtxo
 	if block.Height%3 == 2 {
 		// if the height is match, it need to generate the utxo ring
@@ -1316,6 +1366,7 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 			}
 		}
 
+		// if there is zero output in three block belongs to the wallet, we return
 		if len(myUnspetTXO) == 0 {
 			return putMinedBalance(ns, balance)
 		}
@@ -1355,11 +1406,11 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 		//}
 		//blockOutputs[bBlock0] = *new([]wire.OutPointAbe)
 
-		block0 := abeutil.NewBlockAbe(msgBlock0)
+		block0 := abeutil.NewBlockAbe(msgBlock0) // height % 3 = 0
 		block0.SetHeight(block.Height - 2)
-		block1 := abeutil.NewBlockAbe(msgBlock1)
+		block1 := abeutil.NewBlockAbe(msgBlock1) // height %3 = 1
 		block1.SetHeight(block.Height - 1)
-		block2 := abeutil.NewBlockAbe(&msgBlock2)
+		block2 := abeutil.NewBlockAbe(&msgBlock2) // height % 3 = 2
 		block2.SetHeight(block.Height)
 		blocks := []*abeutil.BlockAbe{block0, block1, block2}
 		//ringBlockHeight := blocks[2].Height()
@@ -1370,6 +1421,8 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 		}
 		ringBlockHeight := block.Height
 		allCoinBaseRmTxos, allTransferRmTxos := blockchain.NewUTXORingEntriesPreparation(blocks)
+
+		//create a view to generate the all rings
 		view := blockchain.NewUtxoRingViewpoint()
 		for i := 0; i < 9; i++ {
 			if len(allCoinBaseRmTxos[i]) != 0 {
@@ -1392,7 +1445,9 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 				oldV, ok := myUnspetTXO[*outpoint] //if the outpoint belong the wallet
 				if ok {                            // this ring has utxo belonging to the wallet
 					utxoRing, ok1 := willAddUTXORing[ringHash]
-					if !ok1 { // add this ring to database
+					if !ok1 {
+						// add this ring and utxo ring to database
+						//generate a ringDetails
 						ring := Ring{}
 						outpointRing := utxoRingEntry.OutPointRing()
 						for i := 0; i < len(outpointRing.BlockHashs); i++ {
@@ -1412,6 +1467,7 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 						if err != nil {
 							return err
 						}
+
 						//generate the utxoring, then add it to wllAddUTXORing for updating
 						utxoRing, err = NewUTXORingAbeFromRing(&ring)
 						if err != nil {
@@ -1427,8 +1483,8 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 					newV := make([]byte, len(oldV))
 					copy(newV[:], oldV[:len(oldV)-32])
 					//newV=append(newV[:len(newV)-32],ringHash[:]...)
-					//TODO(abe): there are some unknown error
 					copy(newV[len(newV)-32:], ringHash[:])
+					// update the unspent utxo
 					myUnspetTXO[*outpoint] = newV
 					//update the utxo ring
 					index := 0
@@ -1442,8 +1498,9 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 				}
 			}
 		}
+		// put the utxo ring into database
 		for ringHash, utxoRing := range willAddUTXORing {
-			err := putUTXORing(ns, ringHash[:], utxoRing.Serialize()[32:])
+			err := putRawUTXORing(ns, ringHash[:], utxoRing.Serialize()[32:])
 			if err != nil {
 				return err
 			}
@@ -1493,163 +1550,164 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 	//		}
 	//	}
 	//	for k, v := range willAddUTXORing {
-	//		err := putUTXORing(ns, k[:], v.Serialize()[32:])
+	//		err := putRawUTXORing(ns, k[:], v.Serialize()[32:])
 	//		if err != nil {
 	//			return err
 	//		}
 	//	}
 	//}
-
+	// store all unspent txo
 	for k, v := range myUnspetTXO {
-		err := putUnspentTXO(ns, canonicalOutPointAbe(k.TxHash, k.Index), v)
+		err := putRawUnspentTXO(ns, canonicalOutPointAbe(k.TxHash, k.Index), v)
 		if err != nil {
 			return err
 		}
 	}
+	// update the balances
 	return putMinedBalance(ns, balance)
 }
 
-func generateRing(ringMemberTxos []*sortTxo, blockhashs []*chainhash.Hash) (*map[chainhash.Hash]*Ring, *map[wire.OutPointAbe]*chainhash.Hash, error) {
-	res1 := make(map[chainhash.Hash]*Ring)
-	res2 := make(map[wire.OutPointAbe]*chainhash.Hash)
-	if len(ringMemberTxos) == 0 {
-		return nil, nil, nil
-	}
-
-	// sort
-	sort.Sort(orderedRing(ringMemberTxos))
-
-	txoNum := len(ringMemberTxos)
-
-	//	group Txos to rings
-	normalRingNum := txoNum / wire.TxRingSize
-	remainderTxoNum := txoNum % wire.TxRingSize
-
-	//	totalRingNum := normalRingNum
-	if remainderTxoNum != 0 {
-		//	implies 0 < remainderTxoNum < wire.TxRingSize
-		//		totalRingNum += 1
-
-		if normalRingNum >= 1 {
-			//	divide (the last normalRing and the remainder Txos) into 2 rings with ring_1.size = ring_2.size or ring_1.size = ring_2.size + 1
-			normalRingNum -= 1
-		} // else {
-		// implies 	normalRingNum == 0
-		//	the remainder forms the only ring
-		//	}
-	}
-	for i := 0; i < normalRingNum; i++ { //TODO(abe):extract a function to generate a ring
-		// rings with size wire.TxRingSize
-		start := i * wire.TxRingSize
-		outPoints := make([]*wire.OutPointAbe, wire.TxRingSize)
-		txOuts := make([]*wire.TxOutAbe, wire.TxRingSize)
-		for i := start; i < wire.TxRingSize; i++ {
-			outPoints[i] = &wire.OutPointAbe{
-				TxHash: *ringMemberTxos[i].txHash,
-				Index:  ringMemberTxos[i].index,
-			}
-			txOuts[i] = ringMemberTxos[i].txOut
-		}
-
-		r := &Ring{
-			BlockHashes: []chainhash.Hash{*blockhashs[0], *blockhashs[1], *blockhashs[2]},
-			TxHashes: []chainhash.Hash{outPoints[0].TxHash, outPoints[1].TxHash, outPoints[2].TxHash,
-				outPoints[3].TxHash, outPoints[4].TxHash, outPoints[5].TxHash, outPoints[6].TxHash},
-			Index: []uint8{outPoints[0].Index, outPoints[1].Index, outPoints[2].Index,
-				outPoints[3].Index, outPoints[4].Index, outPoints[5].Index, outPoints[6].Index},
-			ValueScript: []int64{txOuts[0].ValueScript, txOuts[1].ValueScript, txOuts[2].ValueScript,
-				txOuts[3].ValueScript, txOuts[4].ValueScript, txOuts[5].ValueScript, txOuts[6].ValueScript},
-			AddrScript: [][]byte{txOuts[0].AddressScript, txOuts[1].AddressScript, txOuts[2].AddressScript,
-				txOuts[3].AddressScript, txOuts[4].AddressScript, txOuts[5].AddressScript, txOuts[6].AddressScript},
-		}
-		outPointRingHash, _ := chainhash.NewHash(r.Hash())
-		res1[*outPointRingHash] = r
-		for j := 0; j < wire.TxRingSize; j++ {
-			res2[*outPoints[j]] = outPointRingHash
-		}
-
-	}
-	remainderTxoNum = txoNum - normalRingNum*wire.TxRingSize
-	if remainderTxoNum > wire.TxRingSize {
-		//	divide (the last normalRing and the remainder Txos) into 2 rings with sizes remainderTxoNum/2
-		ringSize1 := remainderTxoNum / 2
-		if remainderTxoNum%2 != 0 {
-			ringSize1 += 1
-		}
-		start := normalRingNum * wire.TxRingSize
-		outPoints1 := make([]*wire.OutPointAbe, ringSize1)
-		txOuts1 := make([]*wire.TxOutAbe, ringSize1)
-		r1 := &Ring{
-			BlockHashes: []chainhash.Hash{*blockhashs[0], *blockhashs[1], *blockhashs[2]},
-		}
-		for i := start; i < ringSize1; i++ {
-			outPoints1[i] = &wire.OutPointAbe{
-				TxHash: *ringMemberTxos[i].txHash,
-				Index:  ringMemberTxos[i].index,
-			}
-			txOuts1[i] = ringMemberTxos[i].txOut
-			r1.TxHashes[i] = *ringMemberTxos[i].txHash
-			r1.Index[i] = ringMemberTxos[i].index
-			r1.ValueScript[i] = txOuts1[i].ValueScript
-			r1.AddrScript[i] = txOuts1[i].AddressScript
-		}
-		outPointRingHash1, _ := chainhash.NewHash(r1.Hash())
-		res1[*outPointRingHash1] = r1
-		for j := 0; j < ringSize1; j++ {
-			res2[*outPoints1[j]] = outPointRingHash1
-		}
-		start = start + ringSize1
-		ringSize2 := remainderTxoNum - ringSize1
-		outPoints2 := make([]*wire.OutPointAbe, ringSize1)
-		txOuts2 := make([]*wire.TxOutAbe, ringSize1)
-		r2 := &Ring{
-			BlockHashes: []chainhash.Hash{*blockhashs[0], *blockhashs[1], *blockhashs[2]},
-		}
-		for i := start; i < ringSize2; i++ {
-			outPoints2[i] = &wire.OutPointAbe{
-				TxHash: *ringMemberTxos[i].txHash,
-				Index:  ringMemberTxos[i].index,
-			}
-			txOuts2[i] = ringMemberTxos[i].txOut
-			r2.TxHashes[i] = *ringMemberTxos[i].txHash
-			r2.Index[i] = ringMemberTxos[i].index
-			r2.ValueScript[i] = txOuts2[i].ValueScript
-			r2.AddrScript[i] = txOuts2[i].AddressScript
-		}
-		outPointRingHash2, _ := chainhash.NewHash(r2.Hash())
-		res1[*outPointRingHash2] = r2
-		for j := 0; j < ringSize2; j++ {
-			res2[*outPoints2[j]] = outPointRingHash2
-		}
-
-	} else if remainderTxoNum > 0 {
-		//	one ring with size = remainderTxoNum
-		start := normalRingNum * wire.TxRingSize
-		ringSize := remainderTxoNum
-		outPoints := make([]*wire.OutPointAbe, ringSize)
-		txOuts := make([]*wire.TxOutAbe, ringSize)
-		r := &Ring{
-			BlockHashes: []chainhash.Hash{*blockhashs[0], *blockhashs[1], *blockhashs[2]},
-		}
-		for i := start; i < ringSize; i++ {
-			outPoints[i] = &wire.OutPointAbe{
-				TxHash: *ringMemberTxos[i].txHash,
-				Index:  ringMemberTxos[i].index,
-			}
-			txOuts[i] = ringMemberTxos[i].txOut
-			r.TxHashes[i] = *ringMemberTxos[i].txHash
-			r.Index[i] = ringMemberTxos[i].index
-			r.ValueScript[i] = txOuts[i].ValueScript
-			r.AddrScript[i] = txOuts[i].AddressScript
-		}
-		outPointRingHash1, _ := chainhash.NewHash(r.Hash())
-		res1[*outPointRingHash1] = r
-		for j := 0; j < ringSize; j++ {
-			res2[*outPoints[j]] = outPointRingHash1
-		}
-	}
-	return &res1, &res2, nil
-}
+//func generateRing(ringMemberTxos []*sortTxo, blockhashs []*chainhash.Hash) (*map[chainhash.Hash]*Ring, *map[wire.OutPointAbe]*chainhash.Hash, error) {
+//	res1 := make(map[chainhash.Hash]*Ring)
+//	res2 := make(map[wire.OutPointAbe]*chainhash.Hash)
+//	if len(ringMemberTxos) == 0 {
+//		return nil, nil, nil
+//	}
+//
+//	// sort
+//	sort.Sort(orderedRing(ringMemberTxos))
+//
+//	txoNum := len(ringMemberTxos)
+//
+//	//	group Txos to rings
+//	normalRingNum := txoNum / wire.TxRingSize
+//	remainderTxoNum := txoNum % wire.TxRingSize
+//
+//	//	totalRingNum := normalRingNum
+//	if remainderTxoNum != 0 {
+//		//	implies 0 < remainderTxoNum < wire.TxRingSize
+//		//		totalRingNum += 1
+//
+//		if normalRingNum >= 1 {
+//			//	divide (the last normalRing and the remainder Txos) into 2 rings with ring_1.size = ring_2.size or ring_1.size = ring_2.size + 1
+//			normalRingNum -= 1
+//		} // else {
+//		// implies 	normalRingNum == 0
+//		//	the remainder forms the only ring
+//		//	}
+//	}
+//	for i := 0; i < normalRingNum; i++ { //TODO(abe):extract a function to generate a ring
+//		// rings with size wire.TxRingSize
+//		start := i * wire.TxRingSize
+//		outPoints := make([]*wire.OutPointAbe, wire.TxRingSize)
+//		txOuts := make([]*wire.TxOutAbe, wire.TxRingSize)
+//		for i := start; i < wire.TxRingSize; i++ {
+//			outPoints[i] = &wire.OutPointAbe{
+//				TxHash: *ringMemberTxos[i].txHash,
+//				Index:  ringMemberTxos[i].index,
+//			}
+//			txOuts[i] = ringMemberTxos[i].txOut
+//		}
+//
+//		r := &Ring{
+//			BlockHashes: []chainhash.Hash{*blockhashs[0], *blockhashs[1], *blockhashs[2]},
+//			TxHashes: []chainhash.Hash{outPoints[0].TxHash, outPoints[1].TxHash, outPoints[2].TxHash,
+//				outPoints[3].TxHash, outPoints[4].TxHash, outPoints[5].TxHash, outPoints[6].TxHash},
+//			Index: []uint8{outPoints[0].Index, outPoints[1].Index, outPoints[2].Index,
+//				outPoints[3].Index, outPoints[4].Index, outPoints[5].Index, outPoints[6].Index},
+//			ValueScript: []int64{txOuts[0].ValueScript, txOuts[1].ValueScript, txOuts[2].ValueScript,
+//				txOuts[3].ValueScript, txOuts[4].ValueScript, txOuts[5].ValueScript, txOuts[6].ValueScript},
+//			AddrScript: [][]byte{txOuts[0].AddressScript, txOuts[1].AddressScript, txOuts[2].AddressScript,
+//				txOuts[3].AddressScript, txOuts[4].AddressScript, txOuts[5].AddressScript, txOuts[6].AddressScript},
+//		}
+//		outPointRingHash, _ := chainhash.NewHash(r.Hash())
+//		res1[*outPointRingHash] = r
+//		for j := 0; j < wire.TxRingSize; j++ {
+//			res2[*outPoints[j]] = outPointRingHash
+//		}
+//
+//	}
+//	remainderTxoNum = txoNum - normalRingNum*wire.TxRingSize
+//	if remainderTxoNum > wire.TxRingSize {
+//		//	divide (the last normalRing and the remainder Txos) into 2 rings with sizes remainderTxoNum/2
+//		ringSize1 := remainderTxoNum / 2
+//		if remainderTxoNum%2 != 0 {
+//			ringSize1 += 1
+//		}
+//		start := normalRingNum * wire.TxRingSize
+//		outPoints1 := make([]*wire.OutPointAbe, ringSize1)
+//		txOuts1 := make([]*wire.TxOutAbe, ringSize1)
+//		r1 := &Ring{
+//			BlockHashes: []chainhash.Hash{*blockhashs[0], *blockhashs[1], *blockhashs[2]},
+//		}
+//		for i := start; i < ringSize1; i++ {
+//			outPoints1[i] = &wire.OutPointAbe{
+//				TxHash: *ringMemberTxos[i].txHash,
+//				Index:  ringMemberTxos[i].index,
+//			}
+//			txOuts1[i] = ringMemberTxos[i].txOut
+//			r1.TxHashes[i] = *ringMemberTxos[i].txHash
+//			r1.Index[i] = ringMemberTxos[i].index
+//			r1.ValueScript[i] = txOuts1[i].ValueScript
+//			r1.AddrScript[i] = txOuts1[i].AddressScript
+//		}
+//		outPointRingHash1, _ := chainhash.NewHash(r1.Hash())
+//		res1[*outPointRingHash1] = r1
+//		for j := 0; j < ringSize1; j++ {
+//			res2[*outPoints1[j]] = outPointRingHash1
+//		}
+//		start = start + ringSize1
+//		ringSize2 := remainderTxoNum - ringSize1
+//		outPoints2 := make([]*wire.OutPointAbe, ringSize1)
+//		txOuts2 := make([]*wire.TxOutAbe, ringSize1)
+//		r2 := &Ring{
+//			BlockHashes: []chainhash.Hash{*blockhashs[0], *blockhashs[1], *blockhashs[2]},
+//		}
+//		for i := start; i < ringSize2; i++ {
+//			outPoints2[i] = &wire.OutPointAbe{
+//				TxHash: *ringMemberTxos[i].txHash,
+//				Index:  ringMemberTxos[i].index,
+//			}
+//			txOuts2[i] = ringMemberTxos[i].txOut
+//			r2.TxHashes[i] = *ringMemberTxos[i].txHash
+//			r2.Index[i] = ringMemberTxos[i].index
+//			r2.ValueScript[i] = txOuts2[i].ValueScript
+//			r2.AddrScript[i] = txOuts2[i].AddressScript
+//		}
+//		outPointRingHash2, _ := chainhash.NewHash(r2.Hash())
+//		res1[*outPointRingHash2] = r2
+//		for j := 0; j < ringSize2; j++ {
+//			res2[*outPoints2[j]] = outPointRingHash2
+//		}
+//
+//	} else if remainderTxoNum > 0 {
+//		//	one ring with size = remainderTxoNum
+//		start := normalRingNum * wire.TxRingSize
+//		ringSize := remainderTxoNum
+//		outPoints := make([]*wire.OutPointAbe, ringSize)
+//		txOuts := make([]*wire.TxOutAbe, ringSize)
+//		r := &Ring{
+//			BlockHashes: []chainhash.Hash{*blockhashs[0], *blockhashs[1], *blockhashs[2]},
+//		}
+//		for i := start; i < ringSize; i++ {
+//			outPoints[i] = &wire.OutPointAbe{
+//				TxHash: *ringMemberTxos[i].txHash,
+//				Index:  ringMemberTxos[i].index,
+//			}
+//			txOuts[i] = ringMemberTxos[i].txOut
+//			r.TxHashes[i] = *ringMemberTxos[i].txHash
+//			r.Index[i] = ringMemberTxos[i].index
+//			r.ValueScript[i] = txOuts[i].ValueScript
+//			r.AddrScript[i] = txOuts[i].AddressScript
+//		}
+//		outPointRingHash1, _ := chainhash.NewHash(r.Hash())
+//		res1[*outPointRingHash1] = r
+//		for j := 0; j < ringSize; j++ {
+//			res2[*outPoints[j]] = outPointRingHash1
+//		}
+//	}
+//	return &res1, &res2, nil
+//}
 
 // RemoveUnminedTx attempts to remove an unmined transaction from the
 // transaction store. This is to be used in the scenario that a transaction
@@ -1663,12 +1721,12 @@ func (s *Store) RemoveUnminedTx(ns walletdb.ReadWriteBucket, rec *TxRecord) erro
 	// this unmined transaction, and any transactions that depend on it.
 	return s.removeConflict(ns, rec)
 }
+
+// In Abe, we this function is used to update the utxo set: move the unspent txo to spent but unmined txo
 func (s *Store) RemoveUnminedTxAbe(ns walletdb.ReadWriteBucket, rec *TxRecordAbe) error {
-	// As we already have a tx record, we can directly call the
-	// removeConflict method. This will do the job of recursively removing
-	// this unmined transaction, and any transactions that depend on it.
-	//return s.removeConflict(ns, rec)
-	//TODO(abe): when remove a transaction, we just move the unmined output to unspent txo bucket
+	//TODO(abe): when remove a transaction, we should delete the conflict transaction in bucketUnminedTxAbe
+	//  and according the given hash to update the utxo se
+	// the code need to be re-writed0
 	for i := 0; i < len(rec.MsgTx.TxIns); i++ {
 		txIn := rec.MsgTx.TxIns[i]
 		for j := 0; j < len(txIn.PreviousOutPointRing.OutPoints); j++ {
@@ -1676,7 +1734,7 @@ func (s *Store) RemoveUnminedTxAbe(ns walletdb.ReadWriteBucket, rec *TxRecordAbe
 			if err != nil {
 				return err
 			}
-			if !sbutxo.SpentBy.IsEqual(&rec.Hash) {
+			if !sbutxo.SpentByHash.IsEqual(&rec.Hash) {
 				continue
 			}
 			// move given outpoint from spent but unmined txo bucket to unspent txo bucket
@@ -1685,14 +1743,14 @@ func (s *Store) RemoveUnminedTxAbe(ns walletdb.ReadWriteBucket, rec *TxRecordAbe
 			if err != nil {
 				return err
 			}
-			err = putUnspentTXO(ns,
+			err = putRawUnspentTXO(ns,
 				canonicalOutPointAbe(txIn.PreviousOutPointRing.OutPoints[j].TxHash, txIn.PreviousOutPointRing.OutPoints[j].Index),
 				valueUnspentTXO(sbutxo.FromCoinBase, sbutxo.Height, sbutxo.Amount, sbutxo.GenerationTime, sbutxo.RingHash))
 			if err != nil {
 				return err
 			}
 		}
-		// TODO(abe):need to update the utxoring bucket
+		// TODO(abe):need to update the utxoring bucket?
 	}
 	return nil
 }
@@ -2131,9 +2189,10 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 	//TODO(Abe): what influence about previous two block when we delete a height-2 block?
 	// TODO(abe):use the blockabeIterator to iterator reversely the blockabe bucket
 	for i := maxHeight; i > height; i-- {
-		willDeleteRingHash := make([]chainhash.Hash, 0)
+		willDeleteRingHash := make(map[chainhash.Hash]struct{})
+		// modify the ring hash of outputs in previous two blocks
 		if i%3 == 2 {
-			// previous block outputs
+			// previous two blocks' outputs
 			outpoint1, err := fetchBlockAbeOutputWithHeight(ns, i-1)
 			if err != nil {
 				return err
@@ -2141,23 +2200,27 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 			for j := 0; j < len(outpoint1); j++ {
 				k := canonicalOutPointAbe(outpoint1[j].TxHash, outpoint1[j].Index)
 				txo, err := fetchUnspentTXO(ns, outpoint1[j].TxHash, outpoint1[j].Index)
-				if err == nil {
-					willDeleteRingHash = append(willDeleteRingHash, txo.RingHash)
-					newV := valueUnspentTXO(txo.FromCoinBase, txo.Height, txo.Amount, txo.GenerationTime, chainhash.ZeroHash)
-					err := putUnspentTXO(ns, k, newV)
-					if err != nil {
-						return fmt.Errorf("putUnspentTXO error in rollbackAbe : %v", err)
+				if err == nil { // this output is in unspent txo bucket
+					if _, ok := willDeleteRingHash[txo.RingHash]; !ok {
+						willDeleteRingHash[txo.RingHash] = struct{}{}
 					}
-				} else {
+					newV := valueUnspentTXO(txo.FromCoinBase, txo.Height, txo.Amount, txo.GenerationTime, chainhash.ZeroHash)
+					err := putRawUnspentTXO(ns, k, newV)
+					if err != nil {
+						return fmt.Errorf("putRawUnspentTXO error in rollbackAbe : %v", err)
+					}
+				} else { //this output is in spent but unmined bucket
 					unmined, err := fetchSpentButUnminedTXO(ns, outpoint1[j].TxHash, outpoint1[j].Index)
 					if err != nil {
 						return err // means error
 					}
-					willDeleteRingHash = append(willDeleteRingHash, txo.RingHash)
+					if _, ok := willDeleteRingHash[txo.RingHash]; !ok {
+						willDeleteRingHash[txo.RingHash] = struct{}{}
+					}
 					newV := valueUnspentTXO(unmined.FromCoinBase, unmined.Height, unmined.Amount, unmined.GenerationTime, chainhash.ZeroHash)
-					err = putUnspentTXO(ns, k, newV)
+					err = putRawUnspentTXO(ns, k, newV) // move to unspent txo bucket
 					if err != nil {
-						return fmt.Errorf("putUnspentTXO error in rollbackAbe : %v", err)
+						return fmt.Errorf("putRawUnspentTXO error in rollbackAbe : %v", err)
 					}
 
 				}
@@ -2171,36 +2234,50 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 				k := canonicalOutPointAbe(outpoint2[j].TxHash, outpoint2[j].Index)
 				txo, err := fetchUnspentTXO(ns, outpoint2[j].TxHash, outpoint2[j].Index)
 				if err == nil {
+					if _, ok := willDeleteRingHash[txo.RingHash]; !ok {
+						willDeleteRingHash[txo.RingHash] = struct{}{}
+					}
 					newV := valueUnspentTXO(txo.FromCoinBase, txo.Height, txo.Amount, txo.GenerationTime, chainhash.ZeroHash)
-					err := putUnspentTXO(ns, k, newV)
+					err := putRawUnspentTXO(ns, k, newV)
 					if err != nil {
-						return fmt.Errorf("putUnspentTXO error in rollbackAbe : %v", err)
+						return fmt.Errorf("putRawUnspentTXO error in rollbackAbe : %v", err)
 					}
 				} else {
 					unmined, err := fetchSpentButUnminedTXO(ns, outpoint2[j].TxHash, outpoint2[j].Index)
 					if err != nil {
 						return err
 					}
+					if _, ok := willDeleteRingHash[txo.RingHash]; !ok {
+						willDeleteRingHash[txo.RingHash] = struct{}{}
+					}
 					newV := valueUnspentTXO(unmined.FromCoinBase, unmined.Height, unmined.Amount, unmined.GenerationTime, chainhash.ZeroHash)
-					err = putUnspentTXO(ns, k, newV)
+					err = putRawUnspentTXO(ns, k, newV)
 					if err != nil {
-						return fmt.Errorf("putUnspentTXO error in rollbackAbe : %v", err)
+						return fmt.Errorf("putRawUnspentTXO error in rollbackAbe : %v", err)
 					}
 
 				}
 			}
 		}
-		//current block output
+		//deleted current block output
 		outpoints, err := fetchRawBlockAbeOutput(ns, keysToRemove[i])
+		relevantTx := make(map[chainhash.Hash]struct{}, 0)
 		if err != nil {
 			return fmt.Errorf("fetchRawBlockAbeOutput in rollback is error:%v", err)
 		}
 		for _, output := range outpoints { //delete the output generated by this block
 			// if delete a unexisting one from db, what will happen?
+			if _, ok := relevantTx[output.TxHash]; !ok {
+				relevantTx[output.TxHash] = struct{}{}
+			}
 			k := canonicalOutPointAbe(output.TxHash, output.Index)
 			txo, err := fetchUnspentTXO(ns, output.TxHash, output.Index)
 			if err == nil { //TODO(abe):it must be txo!=nil when err==nil
-				willDeleteRingHash = append(willDeleteRingHash, txo.RingHash)
+				if i%3 == 2 { // if the height is 2 mod 3, it need to remove the ring
+					if _, ok := willDeleteRingHash[txo.RingHash]; !ok {
+						willDeleteRingHash[txo.RingHash] = struct{}{}
+					}
+				}
 				err := deleteUnspentTXO(ns, k)
 				if err != nil {
 					return fmt.Errorf("error in deleteUnspentTXO in rollback")
@@ -2211,20 +2288,23 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 				}
 				balance -= amt
 			} else {
-				unminedTXO, err := fetchSpentButUnminedTXO(ns, output.TxHash, output.Index)
+				_, err := fetchSpentButUnminedTXO(ns, output.TxHash, output.Index)
 				if err != nil {
 					return err // means error
 				}
-				willDeleteRingHash = append(willDeleteRingHash, txo.RingHash)
+				if _, ok := willDeleteRingHash[txo.RingHash]; !ok {
+					willDeleteRingHash[txo.RingHash] = struct{}{}
+				}
 				err = deleteSpentButUnminedTXO(ns, k)
 				if err != nil {
 					return fmt.Errorf("error in deleteSpentButUnminedTXO in rollback")
 				}
-				amt, err := abeutil.NewAmountAbe(float64(unminedTXO.Amount))
-				if err != nil {
-					return err
-				}
-				balance -= amt
+				// the amount should not be minus, because this output is in a transaction.
+				//amt, err := abeutil.NewAmountAbe(float64(unminedTXO.Amount))
+				//if err != nil {
+				//	return err
+				//}
+				//balance -= amt
 			}
 
 			// actually, the utxo can not in the bucket SpentAndConfirmed
@@ -2236,12 +2316,12 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 		}
 		if i%3 == 2 {
 			//delete the utxoring and the ring
-			for i := 0; i < len(willDeleteRingHash); i++ {
-				err := deleteUTXORing(ns, willDeleteRingHash[i][:])
+			for hash, _ := range willDeleteRingHash {
+				err := deleteUTXORing(ns, hash[:])
 				if err != nil {
 					return fmt.Errorf("error in deleteUTXORing in rollbackAbe: %v", err)
 				}
-				err = deleteRingDetails(ns, willDeleteRingHash[i][:])  //delete the ring detail when delete the utxo ring in rollback
+				err = deleteRingDetails(ns, hash[:]) //delete the ring detail when delete the utxo ring in rollback
 				if err != nil {
 					return fmt.Errorf("error in deleteRingDetail in rollbackAbe: %v", err)
 				}
@@ -2249,9 +2329,9 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 		}
 
 		// restore the input in block
-		utxoRings, ss, err := fetchRawBlockAbeInput(ns, keysToRemove[i]) //there should be fetch the byte not the utxoRing
+		utxoRings, ss, err := fetchBlockAbeInput(ns, keysToRemove[i]) //there should be fetch the byte not the utxoRing
 		for j := 0; j < len(utxoRings); j++ {
-			_, err := fetchUTXORing(ns, utxoRings[j].RingHash[:])
+			u, err := fetchUTXORing(ns, utxoRings[j].RingHash[:])
 			if err != nil {
 				// if the utxo ring do not exist in utxoring bucket, it means that the utxoring is delete when processing this block
 				// restore the outputs deleted when attaching this block
@@ -2259,52 +2339,70 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 					if utxoRings[j].IsMy[k] && !utxoRings[j].Spent[k] { // is my but not spend
 						k := canonicalOutPointAbe(utxoRings[j].TxHashes[k], utxoRings[j].OutputIndexes[k])
 						v := ns.NestedReadBucket(bucketSpentConfirmed).Get(k)
-						amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
-						if err != nil {
-							return err
-						}
-						balance += amt
-						err = putSpentButUnminedTXO(ns, k, v[:len(v)-8])
+						//amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
+						//if err != nil {
+						//	return err
+						//}
+						//balance += amt
+						err = putRawSpentButUnminedTXO(ns, k, v[:len(v)-8])
 						if err != nil {
 							return err
 						}
 					}
 				}
-				err := putUTXORing(ns, utxoRings[j].RingHash[:], utxoRings[j].Serialize())
+				err := putRawUTXORing(ns, utxoRings[j].RingHash[:], utxoRings[j].Serialize()[32:])
 				if err != nil {
 					return err
 				}
 			} else {
-				// compare the delta
+				// compare the delta and update the utxo ring entry
 				for k := 0; k < len(ss[j]); k++ {
-					for m := 0; m < len(utxoRings[j].OriginSerialNumberes); m++ {
-						if utxoRings[j].IsMy[m] && !utxoRings[j].Spent[m] && utxoRings[j].OriginSerialNumberes[m].IsEqual(ss[j][k]) {
+					for m, sn := range utxoRings[j].OriginSerialNumberes {
+						if sn.IsEqual(ss[j][k]) && utxoRings[j].IsMy[m] && !utxoRings[j].Spent[m]  {
 							k := canonicalOutPointAbe(utxoRings[j].TxHashes[m], utxoRings[j].OutputIndexes[m])
 							v := ns.NestedReadBucket(bucketSpentConfirmed).Get(k)
-							amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
-							if err != nil {
-								return err
-							}
-							balance += amt
-							err = putSpentButUnminedTXO(ns, k, v[:len(v)-8])
+							//amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
+							//if err != nil {
+							//	return err
+							//}
+							//balance += amt
+							err = putRawSpentButUnminedTXO(ns, k, v[:len(v)-8])
 							if err != nil {
 								return err
 							}
 							break
 						}
 					}
+					// update the origin serialNumber
+					for index, sn := range u.OriginSerialNumberes {
+						if _, ok := utxoRings[j].OriginSerialNumberes[index]; !ok {
+							utxoRings[j].OriginSerialNumberes[index] = sn
+						}
+					}
 				}
-				err = putUTXORing(ns, utxoRings[i].RingHash[:], utxoRings[i].Serialize())
+				err = putRawUTXORing(ns, utxoRings[j].RingHash[:], utxoRings[j].Serialize()[32:])
 				if err != nil {
 					return err
 				}
 			}
 		}
 		//delete the block
-		err = deleteRawBlockAbeWithBlockHeight(ns, i)
+		block, err := deleteRawBlockAbeWithBlockHeight(ns, i)
 		if err != nil {
 			return fmt.Errorf("deleteRawBlockAbeWithBlockHeight in rollbackAbe with err:%v", err)
 		}
+		// move the relevant transaction into unmined transaction
+		for i := 0; i < len(block.TxRecordAbes); i++ {
+			if _, ok := relevantTx[block.TxRecordAbes[i].Hash]; ok {
+				rec := block.TxRecordAbes[i]
+				v, err := valueTxRecordAbe(rec)
+				if err != nil {
+					return err
+				}
+				err = putRawUnminedAbe(ns.NestedReadWriteBucket(bucketUnminedAbe), rec.Hash[:], v)
+			}
+		}
+
 	}
 	return putMinedBalance(ns, balance)
 }

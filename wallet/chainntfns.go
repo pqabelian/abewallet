@@ -314,7 +314,7 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 	if err != nil {
 		return err
 	}
-	return nil
+	//return nil
 	// Notify interested clients of the connected block.
 	//
 	// TODO: move all notifications outside of the database transaction.
@@ -523,6 +523,8 @@ func (w *Wallet) addRelevantTxAbe(dbtx walletdb.ReadWriteTx, rec *wtxmgr.TxRecor
 	if err != nil {
 		return err
 	}
+	// TODO(abe):Notificate the client know some coins/utxos has been spent
+	// but now, we need to add some struct to express it.
 	return nil
 }
 
