@@ -3,12 +3,13 @@ package waddrmgr
 import (
 	"crypto/rand"
 	"crypto/sha512"
-	"encoding/binary"
+	"encoding/hex"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto"
 	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/chaincfg"
+	"github.com/abesuite/abec/chainhash"
+	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abewallet/internal/zero"
 	"github.com/abesuite/abewallet/snacl"
 	"github.com/abesuite/abewallet/walletdb"
@@ -206,7 +207,7 @@ func (m *ManagerAbe) FetchPayeeManagerFromDB(ns walletdb.ReadBucket, name string
 	return manager,err
 }
 
-func (m *ManagerAbe) FetchMasterKeyEncAbe(ns walletdb.ReadWriteBucket) ([]byte, []byte, []byte, error) {
+func (m *ManagerAbe) FetchMasterKeyEncAbe(ns walletdb.ReadBucket) ([]byte, []byte, []byte, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	return fetchMasterKeyEncsAbe(ns)
@@ -469,7 +470,7 @@ func (m *ManagerAbe) ConvertToWatchingOnly(ns walletdb.ReadWriteBucket) error {
 
 }
 
-func (m *ManagerAbe) NewChangeAddress(ns walletdb.ReadWriteBucket) (abeutil.DerivedAddress, error) {
+func (m *ManagerAbe) NewChangeAddress(ns walletdb.ReadBucket) ([]byte, error) {
 	// TODO(abe): abstact the address derivation
 	masterPubKeyEnc, _, _, err := fetchMasterKeyEncsAbe(ns)
 	if err != nil {
@@ -480,12 +481,21 @@ func (m *ManagerAbe) NewChangeAddress(ns walletdb.ReadWriteBucket) (abeutil.Deri
 	if err != nil {
 		return nil, err
 	}
-	b := make([]byte, 2+abesalrs.MpkByteLen)
-	binary.BigEndian.PutUint16(b, uint16(abecrypto.CryptoSchemeSALRS))
-	copy(b[2:], mpk.Serialize())
-	masterAddr := new(abeutil.MasterAddressSalrs)
-	masterAddr.Deserialize(b)
-	return masterAddr.GenerateDerivedAddress()
+
+
+	b := make([]byte,0)
+	for i:=0;i<2;i++{
+		b=append(b,0)
+	}
+	b=append(b,mpk.Serialize()...)
+	hashB:=chainhash.DoubleHashB(b)
+	b=append(b,hashB...)
+	maddrStr:=hex.EncodeToString(b)
+	maddr,err:=abeutil.DecodeMasterAddressAbe(maddrStr)
+	if err!=nil{
+		return nil,err
+	}
+	return txscript.PayToAddressScriptAbe(maddr)
 }
 
 // IsLocked returns whether or not the address managed is locked.  When it is
