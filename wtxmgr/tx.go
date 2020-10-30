@@ -586,6 +586,9 @@ func (u *UTXORingAbe) Deserialize(b []byte) error {
 		if err != nil {
 			return err
 		}
+		if u.OriginSerialNumberes==nil{
+			u.OriginSerialNumberes=make(map[uint8]chainhash.Hash)
+		}
 		u.OriginSerialNumberes[b[offset]] = *h
 		offset += 33
 	}
@@ -667,6 +670,9 @@ func (u UTXORingAbe) Copy() *UTXORingAbe {
 	res.OutputIndexes = make([]uint8, len(u.OutputIndexes))
 	for i := 0; i < len(u.OutputIndexes); i++ {
 		res.OutputIndexes[i] = u.OutputIndexes[i]
+	}
+	if res.OriginSerialNumberes==nil{
+		res.OriginSerialNumberes=make(map[uint8]chainhash.Hash)
 	}
 	for k, v := range u.OriginSerialNumberes {
 		res.OriginSerialNumberes[k] = v

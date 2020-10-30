@@ -481,7 +481,7 @@ func spendNestedWitnessPubKeyHash(txIn *wire.TxIn, pkScript []byte,
 func (tx *AuthoredTx) AddAllInputScripts(secrets SecretsSource) error {
 	return AddAllInputScripts(tx.Tx, tx.PrevScripts, tx.PrevInputValues, secrets)
 }
-func (tx *AuthoredTxAbe) AddAllInputScripts(msg []byte,m *waddrmgr.ManagerAbe, waddrmgrNs walletdb.ReadBucket,wtxmgrNs walletdb.ReadBucket) error {
+func (tx *AuthoredTxAbe) AddAllInputScripts(msg []byte,m *waddrmgr.ManagerAbe, waddrmgrNs walletdb.ReadBucket,wtxmgrNs walletdb.ReadWriteBucket) error {
 	// acquire the key
 	//TODO(abe): this process of acquire master key will be abstract to a interface
 	if m.IsLocked() {
@@ -524,6 +524,10 @@ func (tx *AuthoredTxAbe) AddAllInputScripts(msg []byte,m *waddrmgr.ManagerAbe, w
 		if err!=nil{
 			return err
 		}
+		utxoring,err:=wtxmgr.FetchUTXORing(wtxmgrNs,ringHash[:])
+		if err!=nil{
+			return err
+		}
 		dpkRing:=new(abesalrs.DpkRing)
 		dpkRing.R=len(ring.TxHashes)
 		mydpk:=new(abesalrs.DerivedPubKey)
@@ -550,9 +554,17 @@ func (tx *AuthoredTxAbe) AddAllInputScripts(msg []byte,m *waddrmgr.ManagerAbe, w
 			if !b||err!=nil{
 				return fmt.Errorf("error in generating the key image:%v",err)
 			}
+			index:=tx.Tx.TxIns[i].SerialNumber[0]
 			tx.Tx.TxIns[i].SerialNumber=chainhash.DoubleHashH(k.Serialize())
-
-			//TODO(abe):need to update the database such as utxoRing and unspentTxo...
+			if utxoring.OriginSerialNumberes==nil{
+				utxoring.OriginSerialNumberes=make(map[uint8]chainhash.Hash)
+			}
+			utxoring.OriginSerialNumberes[index]=tx.Tx.TxIns[i].SerialNumber
+			err = wtxmgr.PutUTXORing(wtxmgrNs, ringHash[:], utxoring)  //record this serial number
+			if err!=nil{
+				return err
+			}
+			//TODO(abe):need to update the database such as unspentTxo...
 		}else{
 			return fmt.Errorf("the tx input do not contain a output belonging to wallet")
 		}

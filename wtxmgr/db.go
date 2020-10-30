@@ -1526,6 +1526,10 @@ func existsUTXORing(ns walletdb.ReadBucket, hash chainhash.Hash) (k, v []byte) {
 	v = ns.NestedReadBucket(bucketUTXORing).Get(k)
 	return
 }
+func PutUTXORing(ns walletdb.ReadWriteBucket, k []byte,utxoring *UTXORingAbe)  error {
+	v := valueUTXORing(utxoring)
+	return putRawUTXORing(ns, k,v)
+}
 func putRawUTXORing(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	err := ns.NestedReadWriteBucket(bucketUTXORing).Put(k, v)
 	if err != nil {
@@ -1533,6 +1537,9 @@ func putRawUTXORing(ns walletdb.ReadWriteBucket, k, v []byte) error {
 		return storeError(ErrDatabase, str, err)
 	}
 	return nil
+}
+func FetchUTXORing(ns walletdb.ReadBucket, k []byte) (*UTXORingAbe, error) {
+	return fetchUTXORing(ns, k)
 }
 func fetchUTXORing(ns walletdb.ReadBucket, k []byte) (*UTXORingAbe, error) {
 	v := ns.NestedReadBucket(bucketUTXORing).Get(k)

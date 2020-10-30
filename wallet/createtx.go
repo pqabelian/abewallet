@@ -84,6 +84,7 @@ func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO, rings map[chainhash.Hash]
 				BlockHashs: []*chainhash.Hash{},
 				OutPoints:  []*wire.OutPointAbe{},
 			})
+			index:=-1
 			for i := 0; i < len(rings[nextUTXO.RingHash].BlockHashes); i++ { // fill up the blockhashes field
 				nextInput.PreviousOutPointRing.BlockHashs = append(nextInput.PreviousOutPointRing.BlockHashs, &rings[nextUTXO.RingHash].BlockHashes[i])
 			}
@@ -95,9 +96,11 @@ func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO, rings map[chainhash.Hash]
 				//which input in ring is spent
 				if rings[nextUTXO.RingHash].TxHashes[i] == nextUTXO.TxOutput.TxHash && rings[nextUTXO.RingHash].Index[i] == nextUTXO.TxOutput.Index {
 					currentScripts = append(currentScripts, rings[nextUTXO.RingHash].AddrScript[i])
+					index=i
 				}
 			}
 			currentTotal += abeutil.Amount(nextUTXO.Amount)
+			nextInput.SerialNumber[0]=byte(index)
 			currentInputs = append(currentInputs, nextInput)
 			amount, _ := abeutil.NewAmount(float64(nextUTXO.Amount))
 			currentInputValues = append(currentInputValues, amount)
@@ -369,9 +372,9 @@ func (w *Wallet) txAbeToOutputs(outputs []*wire.TxOutAbe, minconf int32, feeSatP
 	// TODO(abe):refresh the utxo ring
 	//   todo
 	// TODO(abe):need to get serialNumber and signature for all input in new transaction
-	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
 		err = unsignedTx.AddAllInputScripts([]byte("this is a test"), w.ManagerAbe, addrmgrNs, txmgrNs)
 		if err != nil {
 			return nil
@@ -527,7 +530,7 @@ func (w *Wallet) findEligibleOutputsAbe(txmgrNs walletdb.ReadBucket, minconf int
 	rings := make(map[chainhash.Hash]*wtxmgr.Ring)
 
 	for i := 0; i < len(eligible); i++ {
-		if chainhash.ZeroHash.IsEqual(&(*unspent)[i].RingHash) { //if the hash is zero, it means that this output is unspentable
+		if chainhash.ZeroHash.IsEqual(&eligible[i].RingHash) { //if the hash is zero, it means that this output is unspentable
 			eligible = append(eligible[:i], eligible[i+1:]...)
 			i--
 			continue
@@ -535,8 +538,10 @@ func (w *Wallet) findEligibleOutputsAbe(txmgrNs walletdb.ReadBucket, minconf int
 		_, ok := rings[eligible[i].RingHash]
 		if !ok {
 			ring, err := wtxmgr.FetchRingDetails(txmgrNs, eligible[i].RingHash[:])
-			if err != nil {
-				return nil, nil, err
+			if ring==nil && err.Error()=="the pair is not exist"{     // it means that this outpoint is not contained in a ring
+				continue
+			}else if err!=nil{
+				return nil,nil,err
 			}
 			rings[eligible[i].RingHash] = ring
 		}
