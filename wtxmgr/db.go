@@ -1119,7 +1119,7 @@ func fetchRawBlockAbeOutput(ns walletdb.ReadWriteBucket, k []byte) ([]*wire.OutP
 		str := "wrong value in block output bucket"
 		return nil, fmt.Errorf(str)
 	}
-	res := make([]*wire.OutPointAbe, n)
+	res := make([]*wire.OutPointAbe, 0)
 	offset := 4
 	for offset < len(v) {
 		tmp := new(wire.OutPointAbe)

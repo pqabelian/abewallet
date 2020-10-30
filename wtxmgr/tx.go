@@ -2267,7 +2267,7 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 		}
 		//deleted current block output
 		outpoints, err := fetchRawBlockAbeOutput(ns, keysToRemove[i])
-		relevantTx := make(map[chainhash.Hash]struct{}, 0)
+		relevantTx := make(map[chainhash.Hash]struct{})
 		if err != nil {
 			return fmt.Errorf("fetchRawBlockAbeOutput in rollback is error:%v", err)
 		}
