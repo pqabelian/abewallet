@@ -1047,6 +1047,15 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 		if err != nil {
 			return fmt.Errorf("failed to generate master key")
 		}
+		var b []byte
+		for i:=0;i<2;i++{
+			b=append(b,0)
+		}
+		b=append(b,mpk.Serialize()[:]...)
+		hash:=chainhash.DoubleHashB(b)
+		b=append(b,hash...)
+		fmt.Println(`Please remember the following master address:`)
+		fmt.Println(hex.EncodeToString(b))
 		// Next, for each registers default manager scope, we'll
 		// create the hardened cointype key for it, as well as the
 		// first default account.
