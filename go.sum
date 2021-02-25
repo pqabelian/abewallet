@@ -6,6 +6,10 @@ github.com/abesuite/abec v0.0.0-20201026030853-a2cb412df87b h1:G7w2K9qeXHQpTUSML
 github.com/abesuite/abec v0.0.0-20201026030853-a2cb412df87b/go.mod h1:buqHVmxEXRzLdoleecLMH/I5i0UnyBsOVR378ev2IOU=
 github.com/abesuite/abec v0.0.0-20201030030859-6009b680e9b0 h1:MG5qSgYtC4uq/uWYhC5SC9QOmnyelj38lSGyDEDCvuc=
 github.com/abesuite/abec v0.0.0-20201030030859-6009b680e9b0/go.mod h1:buqHVmxEXRzLdoleecLMH/I5i0UnyBsOVR378ev2IOU=
+github.com/abesuite/abec v0.0.0-beta h1:+O9/hvcPgO4zoHytHKvl5Ea/uEzjfTmCnROxRAGq9/4=
+github.com/abesuite/abec v0.0.0-beta/go.mod h1:buqHVmxEXRzLdoleecLMH/I5i0UnyBsOVR378ev2IOU=
+github.com/abesuite/abec v0.0.0-beta.0.20210224052835-1b218d450267 h1:anTJ/Wd62Ur7+X8M7dc41JZpNPyXp9wTyk25aSARuhM=
+github.com/abesuite/abec v0.0.0-beta.0.20210224052835-1b218d450267/go.mod h1:buqHVmxEXRzLdoleecLMH/I5i0UnyBsOVR378ev2IOU=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd h1:BNI2MkhhtofxM0sTP8WmdcT4chaAKZOsyhspB58DSrM=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd/go.mod h1:eo8+6JwPaqdnrzzGmGXEH3nOYknOkk8GtuXw7Bo+f08=
 github.com/abesuite/go-spew v1.1.1 h1:8v1IQu/pRuElOpgwrBLmtxsSTEEK+fCBBOw4VYE9fx8=
