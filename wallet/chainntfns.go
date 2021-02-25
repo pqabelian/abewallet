@@ -70,7 +70,7 @@ func (w *Wallet) handleChainNotifications() {
 			startBlock := w.ManagerAbe.SyncedTo()
 
 			for i := startBlock.Height + 1; i <= height; i++ {
-				hash, err := client.GetBlockHash(int64(i)) //Why use client not chainclient?
+				hash, err := client.GetBlockHash(int64(i)) //Why use client not chainclient? It uses a interface to adapt to different client.
 				if err != nil {
 					return err
 				}

@@ -70,7 +70,7 @@ var (
 	ErrTxLabelExists = errors.New("transaction already labelled")
 
 	// Namespace bucket keys.
-	waddrmgrNamespaceKey = []byte("waddrmgr")
+	waddrmgrNamespaceKey = []byte("waddrmgr") // used for restore the master key
 	wtxmgrNamespaceKey   = []byte("wtxmgr")
 )
 
@@ -640,7 +640,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 
 	// If the wallet requested an on-chain recovery of its funds, we'll do
 	// so now.
-	//TODO(abe):recovery?
+	//TODO(abe):recovery? it seems be the part of HD wallet, and this code will be deleted.
 	if w.recoveryWindow > 0 {
 		if err := w.recoveryAbe(chainClient, birthdayStamp); err != nil {
 			return fmt.Errorf("unable to perform wallet recovery: "+
@@ -653,7 +653,8 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 	// before catching up with the rescan.
 	rollback := false
 	rollbackStamp := w.ManagerAbe.SyncedTo()
-	// TODO(abe): there are some problem which incur the wallet stop running
+	// TODO(abe): there are some problem which incur the wallet stop running?
+	// TODO(abe): rescan will be tested...
 	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 		addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)

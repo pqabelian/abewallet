@@ -80,7 +80,7 @@ type BlockAbeMeta struct {
 	Time time.Time
 }
 type BlockAbeRecord struct {
-	MsgBlockAbe        wire.MsgBlockAbe
+	MsgBlockAbe        wire.MsgBlockAbe //TODO(abe):using a pointer replace the struct
 	Height             int32
 	Hash               chainhash.Hash
 	RecvTime           time.Time
@@ -1097,7 +1097,7 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 		}
 		dpk := addr.DerivedPubKey()
 		isMy, err := abesalrs.CheckDerivedPubKeyAttribute(dpk, mpk, msvk)
-		if isMy && err == nil {
+		if isMy && err == nil { // TODO(abe):the err==nil can deleted
 			//k := canonicalOutPointAbe(block.MsgBlockAbe.Transactions[0].TxHash(), 0)
 			//v := &UnspentUTXO{
 			//	TxOutput: wire.OutPointAbe{
