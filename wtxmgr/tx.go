@@ -2791,12 +2791,12 @@ func (s *Store) Balance(ns walletdb.ReadBucket, minConf int32, syncHeight int32)
 
 	return bal, nil
 }
-func (s *Store) BalanceAbe(ns walletdb.ReadBucket, minConf int32, syncHeight int32) (abeutil.Amount, error) {
+func (s *Store) BalanceAbe(ns walletdb.ReadBucket, minConf int32, syncHeight int32) ([]abeutil.Amount, error) {
+	var allBal,immatureBal abeutil.Amount
 	bal, err := fetchMinedBalance(ns)
 	if err != nil {
-		return 0, err
+		return []abeutil.Amount{}, err
 	}
-
 	// Subtract the balance for each credit that is spent by an unmined
 	// transaction.
 	//var op wire.OutPointAbe
@@ -2845,12 +2845,12 @@ func (s *Store) BalanceAbe(ns walletdb.ReadBucket, minConf int32, syncHeight int
 	})
 	if err != nil {
 		if _, ok := err.(Error); ok {
-			return 0, err
+			return []abeutil.Amount{}, err
 		}
 		str := "failed iterating unspent outputs"
-		return 0, storeError(ErrDatabase, str, err)
+		return []abeutil.Amount{}, storeError(ErrDatabase, str, err)
 	}
-
+	allBal=bal //total amount
 	// Decrement the balance for any unspent credit with less than
 	// minConf confirmations and any (unspent) immature coinbase credit.
 	coinbaseMaturity := int32(s.chainParams.CoinbaseMaturity)
@@ -2900,12 +2900,13 @@ func (s *Store) BalanceAbe(ns walletdb.ReadBucket, minConf int32, syncHeight int
 		}
 		return nil
 	})
+	immatureBal=allBal-bal
 	if err != nil {
 		if _, ok := err.(Error); ok {
-			return 0, err
+			return []abeutil.Amount{}, err
 		}
 		str := "failed iterating unspent outputs"
-		return 0, storeError(ErrDatabase, str, err)
+		return []abeutil.Amount{}, storeError(ErrDatabase, str, err)
 	}
 
 	// If unmined outputs are included, increment the balance for each
@@ -2946,7 +2947,7 @@ func (s *Store) BalanceAbe(ns walletdb.ReadBucket, minConf int32, syncHeight int
 	//	}
 	//}
 
-	return bal, nil
+	return []abeutil.Amount{allBal,bal,immatureBal}, nil
 }
 
 // PutTxLabel validates transaction labels and writes them to disk if they

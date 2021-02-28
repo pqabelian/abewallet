@@ -1878,16 +1878,16 @@ func (w *Wallet) CalculateBalance(confirms int32) (abeutil.Amount, error) {
 	})
 	return balance, err
 }
-func (w *Wallet) CalculateBalanceAbe(confirms int32) (abeutil.Amount, error) {
-	var balance abeutil.Amount
+func (w *Wallet) CalculateBalanceAbe(confirms int32) ([]abeutil.Amount, error) {
+	var balances []abeutil.Amount
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		var err error
 		blk := w.ManagerAbe.SyncedTo()
-		balance, err = w.TxStore.BalanceAbe(txmgrNs, confirms, blk.Height)
+		balances, err = w.TxStore.BalanceAbe(txmgrNs, confirms, blk.Height)
 		return err
 	})
-	return balance, err
+	return balances, err
 }
 
 // Balances records total, spendable (by policy), and immature coinbase

@@ -69,26 +69,26 @@ var rpcHandlers = map[string]struct {
 }{
 	//	todo(ABE): The supported RPC requests are here. We need to remove some that are not supported any more.
 	// Reference implementation wallet methods (implemented)
-	"addmultisigaddress":     {handler: addMultiSigAddress},
-	"addpayee":               {handler: addPayee},
-	"createmultisig":         {handler: createMultiSig},
-	"dumpprivkey":            {handler: dumpPrivKey},
-	"getaccount":             {handler: getAccount},
-	"getaccountaddress":      {handler: getAccountAddress},
-	"getaddressesbyaccount":  {handler: getAddressesByAccount},
-	"getbalance":             {handler: getBalance},
-	"getbalancesabe":             {handler: getBalanceAbe},
-	"getbestblockhash":       {handler: getBestBlockHash},
-	"getblockcount":          {handler: getBlockCount},
-	"getinfo":                {handlerWithChain: getInfo},
-	"getnewaddress":          {handler: getNewAddress},
-	"getrawchangeaddress":    {handler: getRawChangeAddress},
-	"getreceivedbyaccount":   {handler: getReceivedByAccount},
-	"getreceivedbyaddress":   {handler: getReceivedByAddress},
-	"gettransaction":         {handler: getTransaction},
-	"help":                   {handler: helpNoChainRPC, handlerWithChain: helpWithChainRPC},
-	"importprivkey":          {handler: importPrivKey},
-	"keypoolrefill":          {handler: keypoolRefill},
+	"addmultisigaddress":    {handler: addMultiSigAddress},
+	"addpayee":              {handler: addPayee},
+	"createmultisig":        {handler: createMultiSig},
+	"dumpprivkey":           {handler: dumpPrivKey},
+	"getaccount":            {handler: getAccount},
+	"getaccountaddress":     {handler: getAccountAddress},
+	"getaddressesbyaccount": {handler: getAddressesByAccount},
+	"getbalance":            {handler: getBalance},
+	"getbalancesabe":        {handler: getBalanceAbe},
+	"getbestblockhash":      {handler: getBestBlockHash},
+	"getblockcount":         {handler: getBlockCount},
+	"getinfo":               {handlerWithChain: getInfo},
+	"getnewaddress":         {handler: getNewAddress},
+	"getrawchangeaddress":   {handler: getRawChangeAddress},
+	"getreceivedbyaccount":  {handler: getReceivedByAccount},
+	"getreceivedbyaddress":  {handler: getReceivedByAddress},
+	"gettransaction":        {handler: getTransaction},
+	"help":                  {handler: helpNoChainRPC, handlerWithChain: helpWithChainRPC},
+	"importprivkey":         {handler: importPrivKey},
+	"keypoolrefill":         {handler: keypoolRefill},
 	//"listaccounts":           {handler: listAccounts},    //TODO(abe):we have concept of "account"
 	"listlockunspent":        {handler: listLockUnspent},
 	"listreceivedbyaccount":  {handler: listReceivedByAccount},
@@ -96,12 +96,12 @@ var rpcHandlers = map[string]struct {
 	"listsinceblock":         {handlerWithChain: listSinceBlock},
 	"listtransactions":       {handler: listTransactions},
 	"listunspent":            {handler: listUnspent},
-	"listunspentabe":            {handler: listUnspent},
+	"listunspentabe":         {handler: listUnspent},
 	"lockunspent":            {handler: lockUnspent},
 	"sendfrom":               {handlerWithChain: sendFrom},
 	"sendmany":               {handler: sendMany},
 	"sendtoaddress":          {handler: sendToAddress},
-	"sendtopayee":          {handler: sendToPayees},
+	"sendtopayee":            {handler: sendToPayees},
 	"settxfee":               {handler: setTxFee},
 	"signmessage":            {handler: signMessage},
 	"signrawtransaction":     {handlerWithChain: signRawTransaction},
@@ -357,11 +357,11 @@ func addPayee(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	if cmd.Name == "" {
 		return nil, errors.New("the name is empty")
 	}
-	err:=w.AddPayee(cmd.Name, cmd.MasterPubKey)
-	if err!=nil{
-		return err.Error(),err
+	err := w.AddPayee(cmd.Name, cmd.MasterPubKey)
+	if err != nil {
+		return err.Error(), err
 	}
-	return fmt.Sprintf("successful!"),nil
+	return fmt.Sprintf("successful!"), nil
 }
 
 // createMultiSig handles an createmultisig request by returning a
@@ -477,13 +477,13 @@ func getBalance(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 func getBalanceAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.GetBalancesAbeCmd)
 
-	var balance abeutil.Amount
+	var balance []abeutil.Amount
 	var err error
 	balance, err = w.CalculateBalanceAbe(int32(*cmd.Minconf))
 	if err != nil {
-			return nil, err
-		}
-	return balance.ToABE(), nil
+		return nil, err
+	}
+	return []float64{balance[0].ToABE(),balance[1].ToABE(),balance[2].ToABE()}, nil
 }
 
 // getBestBlock handles a getbestblock request by returning a JSON object
@@ -538,7 +538,7 @@ func getInfo(icmd interface{}, w *wallet.Wallet, chainClient *chain.RPCClient) (
 	// TODO(davec): This should probably have a database version as opposed
 	// to using the manager version.
 	info.WalletVersion = int32(waddrmgr.LatestMgrVersion)
-	info.Balance = bal.ToABE()
+	info.Balance = bal[1].ToABE()
 	info.PaytxFee = float64(txrules.DefaultRelayFeePerKb)
 	// We don't set the following since they don't make much sense in the
 	// wallet architecture:
@@ -1426,31 +1426,31 @@ func makeOutputs(pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) 
 }
 
 func makeOutputsAbe(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) ([]*wire.TxOutAbe, error) {
-	outputs := make([]*wire.TxOutAbe,0)
-	coinValues:=[]int64{500,200,100,50,20,10,5,2,1}
+	outputs := make([]*wire.TxOutAbe, 0)
+	coinValues := []int64{500, 200, 100, 50, 20, 10, 5, 2, 1}
 	for name, amt := range pairs {
 		payeeManager, err := w.FetchPayeeManager(name)
-		if payeeManager==nil{
-			return nil,err
+		if payeeManager == nil {
+			return nil, err
 		}
 		addr, err := payeeManager.ChooseMAddr()
 		if err != nil {
 			return nil, fmt.Errorf("cannot get an address from given payee: %s", err)
 		}
-		targetAmount:=int64(amt)
-		for targetAmount !=0{
-			i:=0
-			for targetAmount < coinValues[i]* abeutil.NeutrinoPerAbe{
+		targetAmount := int64(amt)
+		for targetAmount != 0 {
+			i := 0
+			for targetAmount < coinValues[i]*abeutil.NeutrinoPerAbe {
 				i++
 			}
-			targetAmount -=coinValues[i]* abeutil.NeutrinoPerAbe
+			targetAmount -= coinValues[i] * abeutil.NeutrinoPerAbe
 			txOut := wire.TxOutAbe{}
 			pkScript, err := txscript.PayToAddressScriptAbe(addr)
 			if err != nil {
 				return nil, fmt.Errorf("cannot create txout script: %s", err)
 			}
 			txOut.AddressScript = pkScript
-			txOut.ValueScript=coinValues[i]* abeutil.NeutrinoPerAbe
+			txOut.ValueScript = coinValues[i] * abeutil.NeutrinoPerAbe
 			outputs = append(outputs, &txOut)
 		}
 	}
@@ -1501,7 +1501,7 @@ func sendPairsAbe(w *wallet.Wallet, amounts map[string]abeutil.Amount,
 	if err != nil {
 		return "", err
 	}
-	tx, err := w.SendOutputsAbe(outputs,minconf, feeSatPerKb, "")    // TODO(abe): what's label?
+	tx, err := w.SendOutputsAbe(outputs, minconf, feeSatPerKb, "") // TODO(abe): what's label?
 	if err != nil {
 		if err == txrules.ErrAmountNegative {
 			return "", ErrNeedPositiveAmount
@@ -1554,6 +1554,7 @@ func sendToPayees(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 
 	return sendPairsAbe(w, pairs, minConf, txrules.DefaultRelayFeePerKb)
 }
+
 // sendFrom handles a sendfrom RPC request by creating a new transaction
 // spending unspent transaction outputs for a wallet to another payment
 // address.  Leftover inputs not sent to the payment address or a fee for
@@ -2065,6 +2066,7 @@ func signRawTransactionAbe(icmd interface{}, w *wallet.Wallet, chainClient *chai
 		Errors:   signErrors,
 	}, nil
 }
+
 // validateAddress handles the validateaddress command.
 func validateAddress(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.ValidateAddressCmd)
