@@ -1440,10 +1440,10 @@ func makeOutputsAbe(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainPara
 		targetAmount := int64(amt)
 		for targetAmount != 0 {
 			i := 0
-			for targetAmount < coinValues[i]*abeutil.NeutrinoPerAbe {
+			for targetAmount*abeutil.NeutrinoPerAbe < coinValues[i]*abeutil.NeutrinoPerAbe {
 				i++
 			}
-			targetAmount -= coinValues[i] * abeutil.NeutrinoPerAbe
+			targetAmount -= coinValues[i]
 			txOut := wire.TxOutAbe{}
 			pkScript, err := txscript.PayToAddressScriptAbe(addr)
 			if err != nil {
