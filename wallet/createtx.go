@@ -100,9 +100,9 @@ func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO, rings map[chainhash.Hash]
 				}
 			}
 			currentTotal += abeutil.Amount(nextUTXO.Amount)
-			nextInput.SerialNumber[0]=byte(index)
+			nextInput.SerialNumber[0]=byte(index) //index is set
 			currentInputs = append(currentInputs, nextInput)
-			amount, _ := abeutil.NewAmount(float64(nextUTXO.Amount))
+			amount, _ := abeutil.NewAmountAbe(float64(nextUTXO.Amount))
 			currentInputValues = append(currentInputValues, amount)
 		}
 		return currentTotal, currentInputs, currentInputValues, currentScripts, nil
@@ -499,7 +499,7 @@ func (w *Wallet) findEligibleOutputs(dbtx walletdb.ReadTx, account uint32, minco
 
 // TODO(abe):we should request the unspent transaction output from tx manager
 func (w *Wallet) findEligibleOutputsAbe(txmgrNs walletdb.ReadBucket, minconf int32, bs *waddrmgr.BlockStamp) ([]wtxmgr.UnspentUTXO, map[chainhash.Hash]*wtxmgr.Ring, error) {
-	unspent, err := w.TxStore.UnspentOutputsAbe(txmgrNs)
+	unspent, err := w.TxStore.UnspentOutputsAbe(txmgrNs) // In ABE, this result will be spendable for the logic of store
 	if err != nil {
 		return nil, nil, err
 	}
@@ -508,9 +508,9 @@ func (w *Wallet) findEligibleOutputsAbe(txmgrNs walletdb.ReadBucket, minconf int
 	// Because one of these filters requires matching the output script to
 	// the desired account, this change depends on making wtxmgr a waddrmgr
 	// dependancy and requesting unspent outputs for a single account.
-	eligible := make([]wtxmgr.UnspentUTXO, 0, len(*unspent))
-	for i := range *unspent {
-		output := (*unspent)[i]
+	eligible := make([]wtxmgr.UnspentUTXO, 0, len(unspent))
+	for i := range unspent {
+		output := unspent[i]
 
 		// Only include this output if it meets the required number of
 		// confirmations.  Coinbase transactions must have have reached
@@ -530,15 +530,16 @@ func (w *Wallet) findEligibleOutputsAbe(txmgrNs walletdb.ReadBucket, minconf int
 	rings := make(map[chainhash.Hash]*wtxmgr.Ring)
 
 	for i := 0; i < len(eligible); i++ {
-		if chainhash.ZeroHash.IsEqual(&eligible[i].RingHash) { //if the hash is zero, it means that this output is unspentable
-			eligible = append(eligible[:i], eligible[i+1:]...)
-			i--
-			continue
-		}
+		// Due to logic of storing, the ringhash of output can't be zerohash
+		//if chainhash.ZeroHash.IsEqual(&eligible[i].RingHash) { //if the hash is zero, it means that this output is unspentable
+		//	eligible = append(eligible[:i], eligible[i+1:]...)
+		//	i--
+		//	continue
+		//}
 		_, ok := rings[eligible[i].RingHash]
 		if !ok {
 			ring, err := wtxmgr.FetchRingDetails(txmgrNs, eligible[i].RingHash[:])
-			if ring==nil && err.Error()=="the pair is not exist"{     // it means that this outpoint is not contained in a ring
+			if ring==nil && err==fmt.Errorf("the pair is not exist"){     // it means that this outpoint is not contained in a ring
 				continue
 			}else if err!=nil{
 				return nil,nil,err

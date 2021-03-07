@@ -18,6 +18,14 @@ github.com/abesuite/abec v0.0.2-0.20210226141103-e3ac2ae40bfb h1:5mc/N7WgcqQ6E9f
 github.com/abesuite/abec v0.0.2-0.20210226141103-e3ac2ae40bfb/go.mod h1:buqHVmxEXRzLdoleecLMH/I5i0UnyBsOVR378ev2IOU=
 github.com/abesuite/abec v0.0.2-0.20210227064419-9d1ddca2ceca h1:Bi3gKrjyWBWEthJ3xjAbITkNWPLILI/EYv3wDHuclNw=
 github.com/abesuite/abec v0.0.2-0.20210227064419-9d1ddca2ceca/go.mod h1:buqHVmxEXRzLdoleecLMH/I5i0UnyBsOVR378ev2IOU=
+github.com/abesuite/abec v0.0.2-beta.0.20210307102030-23ac7b5e117c h1:j24Gt06EDZXY4EwngkUZFUjU1g5Jst7YLBOSR/XzXHE=
+github.com/abesuite/abec v0.0.2-beta.0.20210307102030-23ac7b5e117c/go.mod h1:buqHVmxEXRzLdoleecLMH/I5i0UnyBsOVR378ev2IOU=
+github.com/abesuite/abec v0.0.2-beta.0.20210307102647-cbf87f6df9f2 h1:f5iAvLnqDyZQ3ZUFLWPzjy418RprPRQJ9o79eClPdj8=
+github.com/abesuite/abec v0.0.2-beta.0.20210307102647-cbf87f6df9f2/go.mod h1:buqHVmxEXRzLdoleecLMH/I5i0UnyBsOVR378ev2IOU=
+github.com/abesuite/abec v0.0.2-beta.0.20210307110248-1dd0f34a8bb5 h1:4rbEk4YjoaGiakfZHn9JSl0Vtq+gs9Z8bYM/ci9wH+o=
+github.com/abesuite/abec v0.0.2-beta.0.20210307110248-1dd0f34a8bb5/go.mod h1:buqHVmxEXRzLdoleecLMH/I5i0UnyBsOVR378ev2IOU=
+github.com/abesuite/abec v0.0.2-beta.0.20210307110609-37134a1afdf9 h1:yUdngH01v6WBCYYX+xBw7Y7wD4hdwF1+OHnWwaU561U=
+github.com/abesuite/abec v0.0.2-beta.0.20210307110609-37134a1afdf9/go.mod h1:buqHVmxEXRzLdoleecLMH/I5i0UnyBsOVR378ev2IOU=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd h1:BNI2MkhhtofxM0sTP8WmdcT4chaAKZOsyhspB58DSrM=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd/go.mod h1:eo8+6JwPaqdnrzzGmGXEH3nOYknOkk8GtuXw7Bo+f08=
 github.com/abesuite/go-spew v1.1.1 h1:8v1IQu/pRuElOpgwrBLmtxsSTEEK+fCBBOw4VYE9fx8=

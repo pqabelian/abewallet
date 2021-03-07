@@ -253,7 +253,7 @@ func (l *Loader) createNewWalletAbe(pubPassphrase, privPassphrase,
 		if err!=nil{
 			return err
 		}
-		err = w.TxStore.InsertGenesisBlockAbe(txmgrNs, genesisBlockRecords, mpk, msvk)
+		err = w.TxStore.InsertGenesisBlockAbeNew(txmgrNs, genesisBlockRecords, mpk, msvk)
 		if err != nil {
 			log.Error("Fail to create wallet due to:",err)
 		}

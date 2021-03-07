@@ -68,23 +68,31 @@ var (
 	bucketLockedOutputs  = []byte("lo")
 
 	//TODO(abe):bucket design
-	bucketBlockAbes       = []byte("blocksabe")
-	bucketBlockOutputs    = []byte("blockoutputs")
-	bucketBlockInputs     = []byte("blockinputs")
-	bucketUnspentTXO      = []byte("unspenttxo")
-	bucketSpentButUnmined = []byte("spentbutumined")
-	bucketSpentConfirmed  = []byte("spentconfirmed")
-	bucketUTXORing        = []byte("utxoring")
-	bucketRingDetails     = []byte("utxoringdetails") //TODO(abe):we should add a block height in database, meaning that the txo in ring had consumed completely .
+	bucketBlockAbes    = []byte("blocksabe")
+	bucketBlockOutputs = []byte("blockoutputs")
+	bucketBlockInputs  = []byte("blockinputs")
+
+	bucketImmaturedCoinbaseOutput = []byte("immaturedcoinbaseoutput")
+	bucketImmaturedOutput         = []byte("immaturedeoutput")
+	bucketMaturedOutput           = []byte("maturedoutput")
+	bucketUnspentTXO              = []byte("unspenttxo") // Will be discord
+	bucketSpentButUnmined         = []byte("spentbutumined")
+	bucketSpentConfirmed          = []byte("spentconfirmed")
+
+	bucketNeedUpdateUTXORing = []byte("needupdateutxoring")
+	bucketUTXORing           = []byte("utxoring")
+	bucketRingDetails        = []byte("utxoringdetails") //TODO(abe):we should add a block height in database, meaning that the txo in ring had consumed completely .
 
 	bucketUnminedAbe = []byte("unminedtx")
 )
 
 // Root (namespace) bucket keys
 var (
-	rootCreateDate   = []byte("date")
-	rootVersion      = []byte("vers")
-	rootMinedBalance = []byte("bal")
+	rootCreateDate       = []byte("date")
+	rootVersion          = []byte("vers")
+	rootMinedBalance     = []byte("bal") // will be discard
+	rootSpendableBalance = []byte("spendablebal")
+	rootFreezedBalance   = []byte("freezedbal")
 )
 
 // The root bucket's mined balance k/v pair records the total balance for all
@@ -106,6 +114,46 @@ func putMinedBalance(ns walletdb.ReadWriteBucket, amt abeutil.Amount) error {
 	v := make([]byte, 8)
 	byteOrder.PutUint64(v, uint64(amt))
 	err := ns.Put(rootMinedBalance, v)
+	if err != nil {
+		str := "failed to put balance"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+func fetchSpenableBalance(ns walletdb.ReadBucket) (abeutil.Amount, error) {
+	v := ns.Get(rootSpendableBalance)
+	if len(v) != 8 {
+		str := fmt.Sprintf("balance: short read (expected 8 bytes, "+
+			"read %v)", len(v))
+		return 0, storeError(ErrData, str, nil)
+	}
+	return abeutil.Amount(byteOrder.Uint64(v)), nil
+}
+
+func putSpenableBalance(ns walletdb.ReadWriteBucket, amt abeutil.Amount) error {
+	v := make([]byte, 8)
+	byteOrder.PutUint64(v, uint64(amt))
+	err := ns.Put(rootSpendableBalance, v)
+	if err != nil {
+		str := "failed to put balance"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+func fetchFreezedBalance(ns walletdb.ReadBucket) (abeutil.Amount, error) {
+	v := ns.Get(rootFreezedBalance)
+	if len(v) != 8 {
+		str := fmt.Sprintf("balance: short read (expected 8 bytes, "+
+			"read %v)", len(v))
+		return 0, storeError(ErrData, str, nil)
+	}
+	return abeutil.Amount(byteOrder.Uint64(v)), nil
+}
+
+func putFreezedBalance(ns walletdb.ReadWriteBucket, amt abeutil.Amount) error {
+	v := make([]byte, 8)
+	byteOrder.PutUint64(v, uint64(amt))
+	err := ns.Put(rootFreezedBalance, v)
 	if err != nil {
 		str := "failed to put balance"
 		return storeError(ErrDatabase, str, err)
@@ -267,22 +315,22 @@ func deleteRawBlockAbe(ns walletdb.ReadWriteBucket, height int32, hash chainhash
 	k := canonicalBlockAbe(height, hash)
 	return ns.NestedReadWriteBucket(bucketBlockAbes).Delete(k)
 }
-func deleteRawBlockAbeWithBlockHeight(ns walletdb.ReadWriteBucket, height int32) (*BlockAbeRecord,error) {
+func deleteRawBlockAbeWithBlockHeight(ns walletdb.ReadWriteBucket, height int32) (*BlockAbeRecord, error) {
 	// iterator the blockabe bucket
 	var block *BlockAbeRecord
 	err := ns.NestedReadBucket(bucketBlockAbes).ForEach(func(k, v []byte) error {
 
 		if height == int32(byteOrder.Uint32(k[0:4])) {
-			block=new(BlockAbeRecord)
+			block = new(BlockAbeRecord)
 			err := readBlockAbeBlockAbeRecord(k, v, block)
-			if err !=nil{
+			if err != nil {
 				return err
 			}
 			return ns.NestedReadWriteBucket(bucketBlockAbes).Delete(k)
 		}
 		return nil
 	})
-	return block,err
+	return block, err
 }
 
 // appendRawBlockRecord returns a new block record value with a transaction
@@ -1058,16 +1106,16 @@ func fetchBlockAbeOutputWithHeight(ns walletdb.ReadBucket, height int32) ([]*wir
 		h := byteOrder.Uint32(key)
 		if h == uint32(height) {
 			copy(k, key)
-			v=make([]byte,len(value))
-			copy(v,value)
+			v = make([]byte, len(value))
+			copy(v, value)
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	if v == nil {   // it means that there is zero outputs controlled by wallet in this block
-		return nil,nil
+	if v == nil { // it means that there is zero outputs controlled by wallet in this block
+		return nil, nil
 	}
 	n := byteOrder.Uint32(v[:4])
 	if len(v) < int(n*33+4) {
@@ -1230,6 +1278,180 @@ func deleteBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) error {
 	err := ns.NestedReadWriteBucket(bucketBlockInputs).Delete(k)
 	if err != nil {
 		str := "failed to delete block input"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+
+// block height || block hash -> []UnspentTXO 【txhash + index + amount + generationTime + ringhash】
+func valueImmaturedCoinbaseOutput(immatured map[wire.OutPointAbe]*UnspentUTXO) []byte {
+	res := make([]byte, len(immatured)*(32+1+8+8+32))
+	offset := 0
+	for _, utxo := range immatured {
+		copy(res[offset:offset+32], utxo.TxOutput.TxHash[:])
+		offset += 32
+		res[offset] = utxo.TxOutput.Index
+		offset += 1
+		byteOrder.PutUint64(res[offset:offset+8], uint64(utxo.Amount))
+		offset += 8
+		byteOrder.PutUint64(res[offset:offset+8], uint64(utxo.GenerationTime.Unix()))
+		offset += 8
+		copy(res[offset:offset+32], utxo.RingHash[:])
+		offset += 32
+	}
+	return res
+}
+func putRawImmaturedCoinbaseOutput(ns walletdb.ReadWriteBucket, k, v []byte) error {
+	err := ns.NestedReadWriteBucket(bucketImmaturedCoinbaseOutput).Put(k, v)
+	if err != nil {
+		str := "failed to put immature coinbase output"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+func fetchImmaturedCoinbaseOutput(ns walletdb.ReadBucket, height int32, hash chainhash.Hash) (map[wire.OutPointAbe]*UnspentUTXO, error) {
+
+	k := canonicalBlockAbe(height, hash)
+	v := ns.NestedReadBucket(bucketImmaturedCoinbaseOutput).Get(k)
+	op := make(map[wire.OutPointAbe]*UnspentUTXO)
+	offset := 0
+	for i := 0; i < len(v)/(32+1+8+8+32); i++ {
+		tmp := new(UnspentUTXO)
+		copy(tmp.TxOutput.TxHash[:], v[offset:offset+32])
+		offset += 32
+		tmp.TxOutput.Index = v[offset]
+		offset += 1
+		tmp.FromCoinBase = true
+		tmp.Amount = int64(byteOrder.Uint64(v[offset : offset+8]))
+		offset += 8
+		tmp.GenerationTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
+		offset += 8
+		copy(tmp.RingHash[:], v[offset:offset+32])
+		offset += 32
+		op[tmp.TxOutput] = tmp
+	}
+	return op, nil
+}
+
+func existsRawImmaturedCoinbaseOutput(ns walletdb.ReadBucket, k []byte) (v []byte) {
+	return ns.NestedReadBucket(bucketImmaturedCoinbaseOutput).Get(k)
+}
+
+func deleteImmaturedCoinbaseOutput(ns walletdb.ReadWriteBucket, k []byte) error {
+	err := ns.NestedReadWriteBucket(bucketImmaturedCoinbaseOutput).Delete(k)
+	if err != nil {
+		str := "failed to delete immature coinbase output"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+
+// block height || block hash -> []UnspentTXO 【txhash + index + amount + generationTime + ringhash】
+func valueImmaturedOutput(immatured map[wire.OutPointAbe]*UnspentUTXO) []byte {
+	res := make([]byte, len(immatured)*(32+1+8+8+32))
+	offset := 0
+	for _, utxo := range immatured {
+		copy(res[offset:offset+32], utxo.TxOutput.TxHash[:])
+		offset += 32
+		res[offset] = utxo.TxOutput.Index
+		offset += 1
+		byteOrder.PutUint64(res[offset:offset+8], uint64(utxo.Amount))
+		offset += 8
+		byteOrder.PutUint64(res[offset:offset+8], uint64(utxo.GenerationTime.Unix()))
+		offset += 8
+		copy(res[offset:offset+32], utxo.RingHash[:])
+		offset += 32
+	}
+	return res
+}
+func putRawImmaturedOutput(ns walletdb.ReadWriteBucket, k, v []byte) error {
+	err := ns.NestedReadWriteBucket(bucketImmaturedOutput).Put(k, v)
+	if err != nil {
+		str := "failed to put immature output"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+func fetchImmaturedOutput(ns walletdb.ReadBucket, height int32, hash chainhash.Hash) (map[wire.OutPointAbe]*UnspentUTXO, error) {
+
+	k := canonicalBlockAbe(height, hash)
+	v := ns.NestedReadBucket(bucketImmaturedOutput).Get(k)
+	op := make(map[wire.OutPointAbe]*UnspentUTXO)
+	offset := 0
+	for i := 0; i < len(v)/(32+1+8+8+32); i++ {
+		tmp := new(UnspentUTXO)
+		copy(tmp.TxOutput.TxHash[:], v[offset:offset+32])
+		offset += 32
+		tmp.TxOutput.Index = v[offset]
+		offset += 1
+		tmp.FromCoinBase = false
+		tmp.Amount = int64(byteOrder.Uint64(v[offset : offset+8]))
+		offset += 8
+		tmp.GenerationTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
+		offset += 8
+		copy(tmp.RingHash[:], v[offset:offset+32])
+		offset += 32
+		op[tmp.TxOutput] = tmp
+	}
+	return op, nil
+}
+
+func existsRawImmaturedOutput(ns walletdb.ReadBucket, k []byte) (v []byte) {
+	return ns.NestedReadBucket(bucketImmaturedOutput).Get(k)
+}
+
+func deleteImmaturedOutput(ns walletdb.ReadWriteBucket, k []byte) error {
+	err := ns.NestedReadWriteBucket(bucketImmaturedOutput).Delete(k)
+	if err != nil {
+		str := "failed to delete immature output"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+
+func valueMaturedOutput(fromCoinBase bool, height int32, amount int64, generationTime time.Time, ringHash chainhash.Hash) []byte {
+	size := 4 + 1 + 8 + 8 + 32
+	v := make([]byte, size)
+	offset := 0
+	byteOrder.PutUint32(v[offset:offset+4], uint32(height))
+	offset += 4
+	if fromCoinBase {
+		v[offset] = byte(1)
+	} else {
+		v[offset] = byte(0)
+	}
+	offset += 1
+	byteOrder.PutUint64(v[offset:offset+8], uint64(amount))
+	offset += 8
+	byteOrder.PutUint64(v[offset:offset+8], uint64(generationTime.Unix()))
+	offset += 8
+	copy(v[offset:offset+32], ringHash[:])
+	return v
+}
+func putRawMaturedOutput(ns walletdb.ReadWriteBucket, k, v []byte) error {
+	err := ns.NestedReadWriteBucket(bucketMaturedOutput).Put(k, v)
+	if err != nil {
+		str := "failed to put unspent output"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+func fetchMaturedOutput(ns walletdb.ReadBucket, hash chainhash.Hash, index uint8) (*UnspentUTXO, error) {
+	k := canonicalOutPointAbe(hash, index)
+	v := ns.NestedReadBucket(bucketMaturedOutput).Get(k)
+	op := new(UnspentUTXO)
+	err := op.Deserialize(&wire.OutPointAbe{TxHash: hash, Index: index}, v)
+	return op, err
+}
+
+func existsRawMaturedOutput(ns walletdb.ReadBucket, k []byte) (v []byte) {
+	return ns.NestedReadBucket(bucketMaturedOutput).Get(k)
+}
+
+func deleteMaturedOutput(ns walletdb.ReadWriteBucket, k []byte) error {
+	err := ns.NestedReadWriteBucket(bucketMaturedOutput).Delete(k)
+	if err != nil {
+		str := "failed to delete unspent output"
 		return storeError(ErrDatabase, str, err)
 	}
 	return nil
@@ -1455,7 +1677,66 @@ func deleteSpentConfirmedTXO(ns walletdb.ReadWriteBucket, k []byte) error {
 	}
 	return nil
 }
-
+func ConfirmSpentTXO(ns walletdb.ReadWriteBucket,txHash chainhash.Hash,index uint8,sn chainhash.Hash ) error {
+	k := canonicalOutPointAbe(txHash,index)
+	balance, err := fetchMinedBalance(ns)
+	if err != nil {
+		return err
+	}
+	spendableBal, err := fetchSpenableBalance(ns)
+	if err != nil {
+		return err
+	}
+	// if this output is in unspent txo bucket
+	v := existsRawMaturedOutput(ns, k)
+	if v != nil { //from the MaturedOutput
+		//otherwise it has been moved to spentButUnmined bucket
+		// update the balances
+		amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
+		if err != nil {
+			return err
+		}
+		balance -= amt
+		spendableBal -= amt
+		v = append(v, sn[:]...)
+		var confirmTime [8]byte
+		byteOrder.PutUint64(confirmTime[:], uint64(time.Now().Unix()))
+		v = append(v, confirmTime[:]...) //spentTime
+		v = append(v, confirmTime[:]...) // confirm time
+		err = deleteMaturedOutput(ns, k)
+		if err != nil {
+			return err
+		}
+	} else {//from the spentButUnmined bucket
+		v = existsRawSpentButUnminedTXO(ns, k)
+		if v != nil { //otherwise it has been moved to spentButUnmined bucket
+			amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
+			if err != nil {
+				return err
+			}
+			balance -= amt
+			// freezedBal -= amt
+			v = append(v, sn[:]...)
+			var confirmTime [8]byte
+			byteOrder.PutUint64(confirmTime[:], uint64(time.Now().Unix()))
+			v = append(v, confirmTime[:]...)
+			err = deleteSpentButUnminedTXO(ns, k)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	// update confirm bucket
+	err = putRawSpentConfirmedTXO(ns, k, v)
+	if err != nil {
+		return err
+	}
+	err = putSpenableBalance(ns, spendableBal)
+	if err != nil {
+		return err
+	}
+	return putMinedBalance(ns, balance)
+}
 //All the relevant UTXORingAbe are keyed as such:
 //
 //    [0:32] RingHash(32 bytes)
@@ -1513,6 +1794,35 @@ func updateDeletedHeightRingDetails(ns walletdb.ReadWriteBucket, k []byte, heigh
 	return nil
 }
 
+func putRawNeedUpdateUTXORing(ns walletdb.ReadWriteBucket, k, v []byte) error {
+	err := ns.NestedReadWriteBucket(bucketNeedUpdateUTXORing).Put(k, v)
+	if err != nil {
+		str := "failed to put ring details"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+
+func FetchNeedUpdateUTXORing(ns walletdb.ReadBucket, k []byte) (bool, error) {
+	v := ns.NestedReadBucket(bucketNeedUpdateUTXORing).Get(k)
+	if v!=nil && v[0]==1{
+		return true,nil
+	}else{
+		return false,fmt.Errorf("can not read the key %v from bucketNeedUpdateUTXORing" ,k)
+	}
+}
+func ForEachNeedUpdateUTXORing(ns walletdb.ReadBucket,fun func(k, v []byte) error)  error {
+	return ns.NestedReadBucket(bucketNeedUpdateUTXORing).ForEach(fun)
+}
+func DeleteNeedUpdateUTXORing(ns walletdb.ReadWriteBucket, k []byte) error {
+	err := ns.NestedReadWriteBucket(bucketNeedUpdateUTXORing).Delete(k)
+	if err != nil {
+		str := "failed to delete ring details"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+
 //All the relevant ring are keyed as such:
 //
 //    [0:32] RingHash(32 bytes)
@@ -1521,14 +1831,14 @@ func valueUTXORing(u *UTXORingAbe) []byte {
 	return u.Serialize()[32:]
 }
 func existsUTXORing(ns walletdb.ReadBucket, hash chainhash.Hash) (k, v []byte) {
-	k=make([]byte,32)
+	k = make([]byte, 32)
 	copy(k[:], hash[:])
 	v = ns.NestedReadBucket(bucketUTXORing).Get(k)
 	return
 }
-func PutUTXORing(ns walletdb.ReadWriteBucket, k []byte,utxoring *UTXORingAbe)  error {
+func PutUTXORing(ns walletdb.ReadWriteBucket, k []byte, utxoring *UTXORingAbe) error {
 	v := valueUTXORing(utxoring)
-	return putRawUTXORing(ns, k,v)
+	return putRawUTXORing(ns, k, v)
 }
 func putRawUTXORing(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	err := ns.NestedReadWriteBucket(bucketUTXORing).Put(k, v)
@@ -2298,6 +2608,20 @@ func createStore(ns walletdb.ReadWriteBucket) error {
 		str := "failed to write zero balance"
 		return storeError(ErrDatabase, str, err)
 	}
+	// Write a zero balance.
+	byteOrder.PutUint64(v[:], 0)
+	err = ns.Put(rootSpendableBalance, v[:])
+	if err != nil {
+		str := "failed to write zero spendable balance"
+		return storeError(ErrDatabase, str, err)
+	}
+	// Write a zero balance.
+	byteOrder.PutUint64(v[:], 0)
+	err = ns.Put(rootFreezedBalance, v[:])
+	if err != nil {
+		str := "failed to write zero freezed balance"
+		return storeError(ErrDatabase, str, err)
+	}
 
 	// Finally, create all of our required descendant buckets.
 	return createBuckets(ns)
@@ -2355,6 +2679,18 @@ func createBuckets(ns walletdb.ReadWriteBucket) error {
 		str := "fialed to create block output bucket"
 		return storeError(ErrDatabase, str, err)
 	}
+	if _, err := ns.CreateBucket(bucketImmaturedCoinbaseOutput); err != nil {
+		str := "fialed to create immature coinbase txo bucket"
+		return storeError(ErrDatabase, str, err)
+	}
+	if _, err := ns.CreateBucket(bucketImmaturedOutput); err != nil {
+		str := "fialed to create immature txo bucket"
+		return storeError(ErrDatabase, str, err)
+	}
+	if _, err := ns.CreateBucket(bucketMaturedOutput); err != nil {
+		str := "fialed to create mature txo bucket"
+		return storeError(ErrDatabase, str, err)
+	}
 	if _, err := ns.CreateBucket(bucketUnspentTXO); err != nil {
 		str := "fialed to create unspent txo bucket"
 		return storeError(ErrDatabase, str, err)
@@ -2365,6 +2701,10 @@ func createBuckets(ns walletdb.ReadWriteBucket) error {
 	}
 	if _, err := ns.CreateBucket(bucketSpentConfirmed); err != nil {
 		str := "fialed to create spent and confirmed bucket"
+		return storeError(ErrDatabase, str, err)
+	}
+	if _, err := ns.CreateBucket(bucketNeedUpdateUTXORing); err != nil {
+		str := "fialed to create needupdatedutxoring bucket"
 		return storeError(ErrDatabase, str, err)
 	}
 	if _, err := ns.CreateBucket(bucketUTXORing); err != nil {
@@ -2425,35 +2765,51 @@ func deleteBuckets(ns walletdb.ReadWriteBucket) error {
 	}
 	//TODO(abe):change the name of bucket
 	if err := ns.DeleteNestedBucket(bucketBlockAbes); err != nil {
-		str := "fialed to create blockabe bucket"
+		str := "fialed to delete blockabe bucket"
 		return storeError(ErrDatabase, str, err)
 	}
 	if err := ns.DeleteNestedBucket(bucketBlockInputs); err != nil {
-		str := "fialed to create block input bucket"
+		str := "fialed to delete block input bucket"
 		return storeError(ErrDatabase, str, err)
 	}
 	if err := ns.DeleteNestedBucket(bucketBlockOutputs); err != nil {
-		str := "fialed to create block output bucket"
+		str := "fialed to delete block output bucket"
+		return storeError(ErrDatabase, str, err)
+	}
+	if err := ns.DeleteNestedBucket(bucketImmaturedCoinbaseOutput); err != nil {
+		str := "fialed to delete immature coinbase txo bucket"
+		return storeError(ErrDatabase, str, err)
+	}
+	if err := ns.DeleteNestedBucket(bucketImmaturedOutput); err != nil {
+		str := "fialed to delete immature txo bucket"
+		return storeError(ErrDatabase, str, err)
+	}
+	if err := ns.DeleteNestedBucket(bucketMaturedOutput); err != nil {
+		str := "fialed to delete mature txo bucket"
 		return storeError(ErrDatabase, str, err)
 	}
 	if err := ns.DeleteNestedBucket(bucketUnspentTXO); err != nil {
-		str := "fialed to create unspent txo bucket"
+		str := "fialed to delete unspent txo bucket"
 		return storeError(ErrDatabase, str, err)
 	}
 	if err := ns.DeleteNestedBucket(bucketSpentButUnmined); err != nil {
-		str := "fialed to create spent but unmined txo bucket"
+		str := "fialed to delete spent but unmined txo bucket"
 		return storeError(ErrDatabase, str, err)
 	}
 	if err := ns.DeleteNestedBucket(bucketSpentConfirmed); err != nil {
-		str := "fialed to create spent and confirmed txo bucket"
+		str := "fialed to delete spent and confirmed txo bucket"
+		return storeError(ErrDatabase, str, err)
+	}
+	if err := ns.DeleteNestedBucket(bucketNeedUpdateUTXORing); err != nil {
+		str := "fialed to delete needupdatedutxo ring bucket"
 		return storeError(ErrDatabase, str, err)
 	}
 	if err := ns.DeleteNestedBucket(bucketUTXORing); err != nil {
-		str := "fialed to create utxo ring bucket"
+		str := "fialed to delete utxo ring bucket"
 		return storeError(ErrDatabase, str, err)
 	}
 	if err := ns.DeleteNestedBucket(bucketRingDetails); err != nil {
-		str := "fialed to create utxo details bucket"
+		str := "fialed to delete utxo details bucket"
 		return storeError(ErrDatabase, str, err)
 	}
 

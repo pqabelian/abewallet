@@ -110,6 +110,7 @@ type Wallet struct {
 
 	// Channels for the manager locker.
 	unlockRequests     chan unlockRequest
+	refreshRequests    chan refreshRequest
 	lockRequests       chan struct{}
 	holdUnlockRequests chan chan heldUnlock
 	lockState          chan bool
@@ -344,7 +345,7 @@ func (w *Wallet) activeData(dbtx walletdb.ReadWriteTx) ([]abeutil.Address, []wtx
 }
 
 //TODO(abe):we just provide unspent txo
-func (w *Wallet) activeDataAbe(dbtx walletdb.ReadWriteTx) (*[]wtxmgr.UnspentUTXO, error) {
+func (w *Wallet) activeDataAbe(dbtx walletdb.ReadWriteTx) ([]wtxmgr.UnspentUTXO, error) {
 	//addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
 
@@ -1599,6 +1600,11 @@ type (
 		lockAfter  <-chan time.Time // nil prevents the timeout.
 		err        chan error
 	}
+	refreshRequest struct {
+		passphrase []byte
+		refreshed  chan bool // refreshed channel
+		err        chan error
+	}
 
 	changePassphraseRequest struct {
 		old, new []byte
@@ -1623,6 +1629,7 @@ type (
 // walletLocker manages the locked/unlocked state of a wallet.
 func (w *Wallet) walletLocker() {
 	var timeout <-chan time.Time
+	var refreshed chan bool
 	holdChan := make(heldUnlock)
 	quit := w.quitChan()
 out:
@@ -1646,7 +1653,141 @@ out:
 			}
 			req.err <- nil
 			continue
+		case req := <-w.refreshRequests:
+			err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+				addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+				//return w.Manager.Unlock(addrmgrNs, req.passphrase)
+				return w.ManagerAbe.Unlock(addrmgrNs, req.passphrase)
+			})
+			if err != nil {
+				req.err <- err
+				continue
+			}
+			//
+			refreshed = req.refreshed
+			if refreshed != nil {
+				log.Info("The wallet has been temporarily unlocked for refreshing")
+			}
 
+			err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+				waddrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+				wtxmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
+				if w.ManagerAbe.IsLocked() {
+					return fmt.Errorf("the wallet is locked")
+				}
+				mpkEncBytes, msvkEncBytes, msskEncBytes, err := w.ManagerAbe.FetchMasterKeyEncAbe(waddrmgrNs)
+				if err != nil {
+					return err
+				}
+				msskBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPrivate, msskEncBytes)
+				if err != nil {
+					return err
+				}
+				msvkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, msvkEncBytes) //TODO(abe):zero the master key byte
+				if err != nil {
+					return err
+				}
+				mpkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, mpkEncBytes)
+				if err != nil {
+					return err
+				}
+				mssk, err := abesalrs.DeseralizeMasterSecretSignKey(msskBytes)
+				if err != nil {
+					return err
+				}
+				msvk, err := abesalrs.DeseralizeMasterSecretViewKey(msvkBytes)
+				if err != nil {
+					return err
+				}
+				mpk, err := abesalrs.DeseralizeMasterPubKey(mpkBytes)
+				if err != nil {
+					return err
+				}
+				msg := []byte("this is a test")
+				err = wtxmgr.ForEachNeedUpdateUTXORing(wtxmgrNs, func(k, v []byte) error {
+					utxoring, err := wtxmgr.FetchUTXORing(wtxmgrNs, k)
+					if err != nil {
+						return err
+					}
+					ring, err := wtxmgr.FetchRingDetails(wtxmgrNs, k)
+					if err != nil {
+						return err
+					}
+					dpkRing := new(abesalrs.DpkRing)
+					dpkRing.R = len(ring.TxHashes)
+					for i := 0; i < len(ring.AddrScript); i++ {
+						derivedAddr, err := txscript.ExtractAddressFromScriptAbe(ring.AddrScript[i]) //add the dpk into dpkring
+						if err != nil {
+							return err
+						}
+						dpk := derivedAddr.DerivedPubKey()
+						dpkRing.Dpks = append(dpkRing.Dpks, *dpk)
+					}
+					for i := 0; i < len(ring.AddrScript); i++ {
+						sn := utxoring.OriginSerialNumberes[uint8(i)]
+						if utxoring.IsMy[i] && sn.IsEqual(&chainhash.ZeroHash) {
+							//generate sn
+							sig, err := abesalrs.Sign(msg, dpkRing, &dpkRing.Dpks[i], mpk, msvk, mssk)
+							if err != nil {
+								return err
+							}
+							k, b, err := abesalrs.Verify(msg, dpkRing, sig)
+							if !b || err != nil {
+								return fmt.Errorf("error in generating the key image:%v", err)
+							}
+							if utxoring.OriginSerialNumberes == nil {
+								utxoring.OriginSerialNumberes = make(map[uint8]chainhash.Hash)
+							}
+							sn := chainhash.DoubleHashH(k.Serialize())
+							utxoring.OriginSerialNumberes[uint8(i)] = sn
+
+							// check whether the sn occur in chain
+							for j := 0; j < len(utxoring.GotSerialNumberes); j++ {
+								tmp := utxoring.GotSerialNumberes[j]
+								if utxoring.IsMy[i] && tmp.IsEqual(&sn) {
+									// move the utxo to SpentAndConfirm bucket
+									err = wtxmgr.ConfirmSpentTXO(wtxmgrNs, utxoring.TxHashes[i], utxoring.OutputIndexes[i], tmp)
+									if err != nil {
+										return err
+									}
+									utxoring.Spent[i] = true
+									break
+								}
+							}
+							utxoring.AllSpent = true
+							for i := 0; i < len(utxoring.IsMy); i++ {
+								if utxoring.IsMy[i] && !utxoring.Spent[i] {
+									utxoring.AllSpent = false
+									break
+								}
+							}
+						}
+					}
+					if !utxoring.AllSpent {
+						err = wtxmgr.PutUTXORing(wtxmgrNs, k, utxoring) //record this serial number
+						if err != nil {
+							return err
+						}
+					}
+					// delete from bucket needUpadte
+					err = wtxmgr.DeleteNeedUpdateUTXORing(wtxmgrNs, k)
+					if err != nil {
+						return err
+					}
+					return nil
+				})
+				if err != nil {
+					return err
+				}
+				return nil
+			})
+			if err != nil {
+				req.err <- err
+			} else {
+				req.err <- nil
+			}
+			refreshed <- true
+			continue
 		case req := <-w.changePassphrase:
 			err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 				addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
@@ -1695,8 +1836,10 @@ out:
 			// select runs.
 			select {
 			case <-timeout:
-				// Let the top level select fallthrough so the
-				// wallet is locked.
+			// Let the top level select fallthrough so the
+			// wallet is locked.
+			case <-refreshed:
+				//after refreshed, lock the wallet
 			default:
 				continue
 			}
@@ -1711,11 +1854,13 @@ out:
 
 		case <-w.lockRequests:
 		case <-timeout:
+		case <-refreshed:
 		}
 
 		// Select statement fell through by an explicit lock or the
 		// timer expiring.  Lock the manager here.
 		timeout = nil
+		refreshed = nil
 		//err := w.Manager.Lock()
 		err := w.ManagerAbe.Lock()
 		if err != nil && !waddrmgr.IsError(err, waddrmgr.ErrLocked) {
@@ -1737,6 +1882,16 @@ func (w *Wallet) Unlock(passphrase []byte, lock <-chan time.Time) error {
 	w.unlockRequests <- unlockRequest{
 		passphrase: passphrase,
 		lockAfter:  lock,
+		err:        err,
+	}
+	return <-err
+}
+func (w *Wallet) Refresh(passphrase []byte) error {
+	err := make(chan error, 1)
+	refreshed := make(chan bool, 1)
+	w.refreshRequests <- refreshRequest{
+		passphrase: passphrase,
+		refreshed:  refreshed,
 		err:        err,
 	}
 	return <-err
@@ -1878,16 +2033,22 @@ func (w *Wallet) CalculateBalance(confirms int32) (abeutil.Amount, error) {
 	})
 	return balance, err
 }
-func (w *Wallet) CalculateBalanceAbe(confirms int32) ([]abeutil.Amount, error) {
+func (w *Wallet) CalculateBalanceAbe(confirms int32) ([]abeutil.Amount, int, error) {
 	var balances []abeutil.Amount
+	var needUpdateNum int
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		var err error
 		blk := w.ManagerAbe.SyncedTo()
-		balances, err = w.TxStore.BalanceAbe(txmgrNs, confirms, blk.Height)
+		//balances, err = w.TxStore.BalanceAbe(txmgrNs, confirms, blk.Height)
+		balances, err = w.TxStore.BalanceAbeNew(txmgrNs, confirms, blk.Height)
+		if err != nil {
+			return err
+		}
+		needUpdateNum, err = w.TxStore.NeedUpdateNum(txmgrNs)
 		return err
 	})
-	return balances, err
+	return balances, needUpdateNum, err
 }
 
 // Balances records total, spendable (by policy), and immature coinbase
@@ -2214,7 +2375,8 @@ func (w *Wallet) RenameAccount(scope waddrmgr.KeyScope, account uint32, newName 
 	}
 	return err
 }
- //TODO(abe):add log information in log file
+
+//TODO(abe):add log information in log file
 func (w *Wallet) AddPayee(name string, masterPubKey string) error {
 	mAddr, err := abeutil.DecodeMasterAddressAbe(masterPubKey)
 	if err != nil {
@@ -2226,7 +2388,7 @@ func (w *Wallet) AddPayee(name string, masterPubKey string) error {
 	}
 	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 		addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
-		if manager==nil{
+		if manager == nil {
 			manager, err = w.ManagerAbe.FetchPayeeManagerFromDB(addrmgrNs, name)
 		}
 		if manager == nil {
@@ -4225,7 +4387,7 @@ func (w *Wallet) reliablyPublishTransactionAbe(tx *wire.MsgTxAbe,
 		// If there is a label we should write, get the namespace key
 		// and record it in the tx store.
 		txmgrNs := dbTx.ReadWriteBucket(wtxmgrNamespaceKey)
-		return w.TxStore.PutTxLabel(txmgrNs, tx.TxHash(), label)   // use the label to explain the tx?
+		return w.TxStore.PutTxLabel(txmgrNs, tx.TxHash(), label) // use the label to explain the tx?
 	})
 	if err != nil {
 		return nil, err
@@ -4523,7 +4685,7 @@ func (w *Wallet) publishTransactionAbe(tx *wire.MsgTxAbe) (*chainhash.Hash, erro
 	// This error is returned when broadcasting a transaction that has
 	// already confirmed to a bitcoind node over the P2P network.
 	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L648
-	case match(err, "txn-already-known"):   //update the utxo set
+	case match(err, "txn-already-known"): //update the utxo set
 		dbErr := walletdb.Update(w.db, func(dbTx walletdb.ReadWriteTx) error {
 			txmgrNs := dbTx.ReadWriteBucket(wtxmgrNamespaceKey)
 			txRec, err := wtxmgr.NewTxRecordAbeFromMsgTxAbe(tx, time.Now())
@@ -4858,6 +5020,7 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 		createTxRequests:    make(chan createTxRequest),
 		createTxAbeRequests: make(chan createTxAbeRequest),
 		unlockRequests:      make(chan unlockRequest),
+		refreshRequests:     make(chan refreshRequest),
 		lockRequests:        make(chan struct{}),
 		holdUnlockRequests:  make(chan chan heldUnlock),
 		lockState:           make(chan bool),

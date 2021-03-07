@@ -108,6 +108,7 @@ var rpcHandlers = map[string]struct {
 	"validateaddress":        {handler: validateAddress},
 	"verifymessage":          {handler: verifyMessage},
 	"walletlock":             {handler: walletLock},
+	"freshen":       {handler: freshen},
 	"walletpassphrase":       {handler: walletPassphrase},
 	"walletpassphrasechange": {handler: walletPassphraseChange},
 
@@ -477,13 +478,14 @@ func getBalance(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 func getBalanceAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.GetBalancesAbeCmd)
 
-	var balance []abeutil.Amount
+	var balances []abeutil.Amount
+	var needUpdateNum int
 	var err error
-	balance, err = w.CalculateBalanceAbe(int32(*cmd.Minconf))
+	balances,needUpdateNum, err = w.CalculateBalanceAbe(int32(*cmd.Minconf))
 	if err != nil {
 		return nil, err
 	}
-	return []float64{balance[0].ToABE(),balance[1].ToABE(),balance[2].ToABE()}, nil
+	return []float64{balances[0].ToABE(), balances[1].ToABE(), balances[2].ToABE(), balances[3].ToABE(),float64(needUpdateNum)}, nil
 }
 
 // getBestBlock handles a getbestblock request by returning a JSON object
@@ -528,9 +530,9 @@ func getInfo(icmd interface{}, w *wallet.Wallet, chainClient *chain.RPCClient) (
 	if err != nil {
 		return nil, err
 	}
-
+	// TODO(abe):need add the update number into result struct
 	//bal, err := w.CalculateBalance(1)  // switch to calculateBalanceAbe
-	bal, err := w.CalculateBalanceAbe(1)
+	bal,_,err := w.CalculateBalanceAbe(1)
 	if err != nil {
 		return nil, err
 	}
@@ -1424,7 +1426,7 @@ func makeOutputs(pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) 
 	}
 	return outputs, nil
 }
-
+//TODO(abe):add the chainPramas into the decoding of address
 func makeOutputsAbe(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) ([]*wire.TxOutAbe, error) {
 	outputs := make([]*wire.TxOutAbe, 0)
 	coinValues := []int64{500, 200, 100, 50, 20, 10, 5, 2, 1}
@@ -1440,7 +1442,7 @@ func makeOutputsAbe(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainPara
 		targetAmount := int64(amt)
 		for targetAmount != 0 {
 			i := 0
-			for targetAmount*abeutil.NeutrinoPerAbe < coinValues[i]*abeutil.NeutrinoPerAbe {
+			for targetAmount < coinValues[i] {
 				i++
 			}
 			targetAmount -= coinValues[i]
@@ -1542,7 +1544,7 @@ func sendToPayees(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 		return nil, ErrNeedPositiveMinconf
 	}
 
-	// Recreate address/amount pairs, using dcrutil.Amount.
+	// Recreate address/amount pairs, using abeutil.Amount.
 	pairs := make(map[string]abeutil.Amount, len(cmd.Amounts))
 	for k, v := range cmd.Amounts {
 		amt, err := abeutil.NewAmountAbe(float64(v))
@@ -2219,6 +2221,12 @@ func walletPassphrase(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 		unlockAfter = time.After(timeout)
 	}
 	err := w.Unlock([]byte(cmd.Passphrase), unlockAfter)
+	return nil, err
+}
+func freshen(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.FreshenCmd)
+
+	err := w.Refresh([]byte(cmd.Passphrase))
 	return nil, err
 }
 

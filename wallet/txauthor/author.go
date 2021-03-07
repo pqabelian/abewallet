@@ -39,7 +39,7 @@ func SumOutputValuesAbe(outputs []*wire.TxOutAbe) (totalOutput abeutil.Amount) {
 type InputSource func(target abeutil.Amount) (total abeutil.Amount, inputs []*wire.TxIn,
 	inputValues []abeutil.Amount, scripts [][]byte, err error)
 type InputSourceAbe func(target abeutil.Amount) (total abeutil.Amount, inputs []*wire.TxInAbe,
-	inputValues []abeutil.Amount, scripts [][]byte,err error)
+	inputValues []abeutil.Amount, scripts [][]byte, err error)
 
 // InputSourceError describes the failure to provide enough input value from
 // unspent transaction outputs to meet a target amount.  A typed error is used
@@ -76,6 +76,7 @@ type AuthoredTxAbe struct {
 	TotalInput      abeutil.Amount
 	ChangeIndex     int // negative if no change
 }
+
 // ChangeSource provides P2PKH change output scripts for transaction creation.
 type ChangeSource func() ([]byte, error)
 
@@ -173,6 +174,7 @@ func NewUnsignedTransaction(outputs []*wire.TxOut, relayFeePerKb abeutil.Amount,
 		}, nil
 	}
 }
+
 //TODO(abe):the logic of this function need to be verified
 //TODO(abe):if failed to create a transaction due to insufficient funds, the result should contain all spendable coin values.
 func
@@ -180,11 +182,11 @@ NewUnsignedTransactionAbe(outputs []*wire.TxOutAbe, relayFeePerKb abeutil.Amount
 	fetchInputs InputSourceAbe, fetchChange ChangeSource) (*AuthoredTxAbe, error) {
 	// TODO(osy):the strategy of choosing otxos will be optimized
 	targetAmount := SumOutputValuesAbe(outputs)
-	estimatedSize := txsizes.EstimateVirtualSizeAbe(nil,outputs, true) //TODO(abe):about the tx fee, we can assign a value for testing
-	targetFee := txrules.FeeForSerializeSizeAbe(relayFeePerKb, estimatedSize)      // to compute the required tx fee
+	estimatedSize := txsizes.EstimateVirtualSizeAbe(nil, outputs, true)       //TODO(abe):about the tx fee, we can assign a value for testing
+	targetFee := txrules.FeeForSerializeSizeAbe(relayFeePerKb, estimatedSize) // to compute the required tx fee
 
 	for {
-		inputAmount, inputs, inputValues, scripts , err := fetchInputs(targetAmount + targetFee)
+		inputAmount, inputs, inputValues, scripts, err := fetchInputs(targetAmount + targetFee)
 		if err != nil {
 			return nil, err
 		}
@@ -196,7 +198,7 @@ NewUnsignedTransactionAbe(outputs []*wire.TxOutAbe, relayFeePerKb abeutil.Amount
 		// We count the types of inputs, which we'll use to estimate
 		// the vsize of the transaction.
 		//TODO(abe):there should add a input size and output size to constrain the block size
-		maxSignedSize := txsizes.EstimateVirtualSizeAbe(inputs,outputs, true)
+		maxSignedSize := txsizes.EstimateVirtualSizeAbe(inputs, outputs, true)
 		maxRequiredFee := txrules.FeeForSerializeSizeAbe(relayFeePerKb, maxSignedSize)
 		remainingAmount := inputAmount - targetAmount
 		if remainingAmount < maxRequiredFee {
@@ -205,10 +207,10 @@ NewUnsignedTransactionAbe(outputs []*wire.TxOutAbe, relayFeePerKb abeutil.Amount
 		}
 
 		unsignedTransaction := &wire.MsgTxAbe{
-			Version:  wire.TxVersion,
-			TxIns:     inputs,
-			TxOuts:    outputs,
-			TxFee: int64(maxRequiredFee),
+			Version: wire.TxVersion,
+			TxIns:   inputs,
+			TxOuts:  outputs,
+			TxFee:   int64(maxRequiredFee),
 			TxWitness: &wire.TxWitnessAbe{
 				Witnesses: []wire.Witness{},
 			},
@@ -216,25 +218,25 @@ NewUnsignedTransactionAbe(outputs []*wire.TxOutAbe, relayFeePerKb abeutil.Amount
 		changeIndex := -1
 		changeAmount := inputAmount - targetAmount - maxRequiredFee
 		//TODO(abe): to simply the process, the value will be change to integer.
-		actualChargeAmount:=changeAmount/abeutil.NeutrinoPerAbe *abeutil.NeutrinoPerAbe
-		unsignedTransaction.TxFee+=int64(changeAmount-actualChargeAmount)
-		actual:=int64(actualChargeAmount)
-		if actual!=0{
+		actualChargeAmount := changeAmount / abeutil.NeutrinoPerAbe * abeutil.NeutrinoPerAbe
+		unsignedTransaction.TxFee += int64(changeAmount - actualChargeAmount)
+		actual := int64(actualChargeAmount)
+		if actual != 0 {
 			changeIndex = 1
-			coinValues:=[]int64{500,200,100,50,20,10,5,2,1}
-			for actual !=0{
+			coinValues := []int64{500, 200, 100, 50, 20, 10, 5, 2, 1}
+			for actual != 0 {
 				changeScript, err := fetchChange()
 				if err != nil {
 					return nil, err
-						}
-				i:=0
-				for actual < coinValues[i]* abeutil.NeutrinoPerAbe{
+				}
+				i := 0
+				for actual < coinValues[i]*abeutil.NeutrinoPerAbe {
 					i++
 				}
-				actual -=coinValues[i]* abeutil.NeutrinoPerAbe
+				actual -= coinValues[i] * abeutil.NeutrinoPerAbe
 				txOut := wire.TxOutAbe{}
 				txOut.AddressScript = changeScript
-				txOut.ValueScript=coinValues[i]* abeutil.NeutrinoPerAbe
+				txOut.ValueScript = coinValues[i] * abeutil.NeutrinoPerAbe
 				unsignedTransaction.TxOuts = append(unsignedTransaction.TxOuts, &txOut)
 			}
 		}
@@ -265,6 +267,7 @@ NewUnsignedTransactionAbe(outputs []*wire.TxOutAbe, relayFeePerKb abeutil.Amount
 		}, nil
 	}
 }
+
 // RandomizeOutputPosition randomizes the position of a transaction's output by
 // swapping it with a random output.  The new index is returned.  This should be
 // done before signing.
@@ -287,6 +290,7 @@ func (tx *AuthoredTx) RandomizeChangePosition() {
 func (tx *AuthoredTxAbe) RandomizeChangePosition() {
 	tx.ChangeIndex = RandomizeOutputAbePosition(tx.Tx.TxOuts, tx.ChangeIndex)
 }
+
 // SecretsSource provides private keys and redeem scripts necessary for
 // constructing transaction input signatures.  Secrets are looked up by the
 // corresponding Address for the previous output script.  Addresses for lookup
@@ -481,91 +485,106 @@ func spendNestedWitnessPubKeyHash(txIn *wire.TxIn, pkScript []byte,
 func (tx *AuthoredTx) AddAllInputScripts(secrets SecretsSource) error {
 	return AddAllInputScripts(tx.Tx, tx.PrevScripts, tx.PrevInputValues, secrets)
 }
-func (tx *AuthoredTxAbe) AddAllInputScripts(msg []byte,m *waddrmgr.ManagerAbe, waddrmgrNs walletdb.ReadBucket,wtxmgrNs walletdb.ReadWriteBucket) error {
+func (tx *AuthoredTxAbe) AddAllInputScripts(msg []byte, m *waddrmgr.ManagerAbe, waddrmgrNs walletdb.ReadBucket, wtxmgrNs walletdb.ReadWriteBucket) error {
 	// acquire the key
 	//TODO(abe): this process of acquire master key will be abstract to a interface
 	if m.IsLocked() {
 		return fmt.Errorf("the wallet is locked")
 	}
 	mpkEncBytes, msvkEncBytes, msskEncBytes, err := m.FetchMasterKeyEncAbe(waddrmgrNs)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	msskBytes, err := m.Decrypt(waddrmgr.CKTPrivate, msskEncBytes)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
-	msvkBytes, err := m.Decrypt(waddrmgr.CKTPublic, msvkEncBytes)   //TODO(abe):zero the master key byte
-	if err!=nil {
+	msvkBytes, err := m.Decrypt(waddrmgr.CKTPublic, msvkEncBytes) //TODO(abe):zero the master key byte
+	if err != nil {
 		return err
 	}
 	mpkBytes, err := m.Decrypt(waddrmgr.CKTPublic, mpkEncBytes)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	mssk, err := abesalrs.DeseralizeMasterSecretSignKey(msskBytes)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
-	msvk,err:=abesalrs.DeseralizeMasterSecretViewKey(msvkBytes)
-	if err!=nil {
+	msvk, err := abesalrs.DeseralizeMasterSecretViewKey(msvkBytes)
+	if err != nil {
 		return err
 	}
-	mpk,err:=abesalrs.DeseralizeMasterPubKey(mpkBytes)
-	if err!=nil {
+	mpk, err := abesalrs.DeseralizeMasterPubKey(mpkBytes)
+	if err != nil {
 		return err
 	}
-	for i:=0;i<len(tx.Tx.TxIns);i++{  //each input
+	for i := 0; i < len(tx.Tx.TxIns); i++ { //each input
 		//TODO(abe):when signature, what is the message?  temporary, it uses "this is a test"
 		//TODO(abe):1-get the all and own dpk from script
-		ringHash:=tx.Tx.TxIns[i].PreviousOutPointRing.Hash()
+		ringHash := tx.Tx.TxIns[i].PreviousOutPointRing.Hash()
 		//utxoRing, err := wtxmgr.FetchUTXORing(waddrmgrNs, ringHash[:])
-		ring, err := wtxmgr.FetchRingDetails(wtxmgrNs, ringHash[:])    //fetch a ring detail
-		if err!=nil{
+		ring, err := wtxmgr.FetchRingDetails(wtxmgrNs, ringHash[:]) //fetch a ring detail
+		if err != nil {
 			return err
 		}
-		utxoring,err:=wtxmgr.FetchUTXORing(wtxmgrNs,ringHash[:])
-		if err!=nil{
+		utxoring, err := wtxmgr.FetchUTXORing(wtxmgrNs, ringHash[:])
+		if err != nil {
 			return err
 		}
-		dpkRing:=new(abesalrs.DpkRing)
-		dpkRing.R=len(ring.TxHashes)
-		mydpk:=new(abesalrs.DerivedPubKey)
+		dpkRing := new(abesalrs.DpkRing)
+		dpkRing.R = len(ring.TxHashes)
+		mydpk := new(abesalrs.DerivedPubKey)
 
-		for j:=0;j<len(ring.AddrScript);j++{
-			derivedAddr, err := txscript.ExtractAddressFromScriptAbe(ring.AddrScript[j])  //add the dpk into dpkring
-			if err!=nil{
+		for j := 0; j < len(ring.AddrScript); j++ {
+			derivedAddr, err := txscript.ExtractAddressFromScriptAbe(ring.AddrScript[j]) //add the dpk into dpkring
+			if err != nil {
 				return err
 			}
 			dpk := derivedAddr.DerivedPubKey()
-			dpkRing.Dpks=append(dpkRing.Dpks,*dpk)
-			if bytes.Equal(ring.AddrScript[j],tx.PrevScripts[i]) {   // find the owned dpk
-				mydpk=dpk
+			dpkRing.Dpks = append(dpkRing.Dpks, *dpk)
+			if bytes.Equal(ring.AddrScript[j], tx.PrevScripts[i]) { // find the owned dpk
+				mydpk = dpk
 			}
 		}
 
-		if mydpk !=nil{
-			sig, err :=abesalrs.Sign(msg,dpkRing,mydpk,mpk,msvk,mssk)
-			if err!=nil{
+		if mydpk != nil {
+			sig, err := abesalrs.Sign(msg, dpkRing, mydpk, mpk, msvk, mssk)
+			if err != nil {
 				return err
 			}
-			tx.Tx.TxWitness.Witnesses=append(tx.Tx.TxWitness.Witnesses,sig.Serialize())
-			k,b,err:=abesalrs.Verify(msg,dpkRing,sig)
-			if !b||err!=nil{
-				return fmt.Errorf("error in generating the key image:%v",err)
+			tx.Tx.TxWitness.Witnesses = append(tx.Tx.TxWitness.Witnesses, sig.Serialize())
+			k, b, err := abesalrs.Verify(msg, dpkRing, sig)
+			if !b || err != nil {
+				return fmt.Errorf("error in generating the key image:%v", err)
 			}
-			index:=tx.Tx.TxIns[i].SerialNumber[0]
-			tx.Tx.TxIns[i].SerialNumber=chainhash.DoubleHashH(k.Serialize())
-			if utxoring.OriginSerialNumberes==nil{
-				utxoring.OriginSerialNumberes=make(map[uint8]chainhash.Hash)
+			index := tx.Tx.TxIns[i].SerialNumber[0]
+			tx.Tx.TxIns[i].SerialNumber = chainhash.DoubleHashH(k.Serialize())
+			if utxoring.OriginSerialNumberes == nil {
+				utxoring.OriginSerialNumberes = make(map[uint8]chainhash.Hash)
 			}
-			utxoring.OriginSerialNumberes[index]=tx.Tx.TxIns[i].SerialNumber
-			err = wtxmgr.PutUTXORing(wtxmgrNs, ringHash[:], utxoring)  //record this serial number
-			if err!=nil{
+			utxoring.OriginSerialNumberes[index] = tx.Tx.TxIns[i].SerialNumber
+			// check whether the utxoring need to update yet
+			flag := true
+			for i := 0; i < len(utxoring.IsMy); i++ {
+				tmp := utxoring.OriginSerialNumberes[uint8(i)]
+				if utxoring.IsMy[i] && tmp.IsEqual(&chainhash.ZeroHash) {
+					flag = false
+					break
+				}
+			}
+			if flag {
+				err = wtxmgr.DeleteNeedUpdateUTXORing(wtxmgrNs, ringHash[:])
+				if err != nil {
+					return err
+				}
+			}
+			err = wtxmgr.PutUTXORing(wtxmgrNs, ringHash[:], utxoring) //record this serial number
+			if err != nil {
 				return err
 			}
 			//TODO(abe):need to update the database such as unspentTxo...
-		}else{
+		} else {
 			return fmt.Errorf("the tx input do not contain a output belonging to wallet")
 		}
 	}

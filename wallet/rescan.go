@@ -3,6 +3,7 @@ package wallet
 import (
 	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/abeutil"
+	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abec/wire"
 	"github.com/abesuite/abewallet/chain"
@@ -380,7 +381,17 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 				if err != nil {
 					return err
 				}
-				b, err := client.GetBlockAbe(hash)
+				var maturedBlockHash *chainhash.Hash
+				if i>=6{
+					maturedBlockHash,err=client.GetBlockHash(int64(i-6))
+					if err != nil {
+						return err
+					}
+				}else{ // if no this statement, there is error for nil pointer
+					maturedBlockHash=&chainhash.ZeroHash
+				}
+				var b *wire.MsgBlockAbe
+				b, err = client.GetBlockAbe(hash)
 				if err != nil {
 					return err
 				}
@@ -388,7 +399,8 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 				if err != nil {
 					return err
 				}
- 				err = w.TxStore.InsertBlockAbe(txmgrNs,blockAbeDetail,mpk,msvk)
+ 				//err = w.TxStore.InsertBlockAbe(txmgrNs,blockAbeDetail,*maturedBlockHash, mpk,msvk)
+ 				err = w.TxStore.InsertBlockAbeNew(txmgrNs,blockAbeDetail,*maturedBlockHash, mpk,msvk)
 				if err != nil {
 					return err
 				}

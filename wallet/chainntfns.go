@@ -74,6 +74,13 @@ func (w *Wallet) handleChainNotifications() {
 				if err != nil {
 					return err
 				}
+				var maturedBlockHash *chainhash.Hash
+				if i>=6{
+					maturedBlockHash,err=client.GetBlockHash(int64(i-6))
+					if err != nil {
+						return err
+					}
+				}
 				b, err := chainClient.GetBlockAbe(hash)
 				if err != nil {
 					return err
@@ -82,7 +89,8 @@ func (w *Wallet) handleChainNotifications() {
 				if err != nil {
 					return err
 				}
-				err = w.TxStore.InsertBlockAbe(txmgrNs, blockAbeDetail, mpk, msvk)
+				//err = w.TxStore.InsertBlockAbe(txmgrNs, blockAbeDetail,*maturedBlockHash, mpk, msvk)
+				err = w.TxStore.InsertBlockAbeNew(txmgrNs, blockAbeDetail,*maturedBlockHash, mpk, msvk)
 				if err != nil {
 					return err
 				}
@@ -158,6 +166,7 @@ func (w *Wallet) handleChainNotifications() {
 				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 					return w.connectBlockAbe(tx, wtxmgr.BlockMeta(n))
 				})
+				go w.resendUnminedTxAbes()
 				notificationName = "block abe connected"
 			case chain.BlockDisconnected:
 				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
@@ -304,13 +313,24 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 	}
 	block, err := w.chainClient.GetBlockAbe(&b.Hash)
 	br, err := wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(block)
+	if err != nil {
+		return err
+	}
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
 
 	// At the moment all notified transactions are assumed to actually be
 	// relevant.  This assumption will not hold true when SPV support is
 	// added, but until then, simply insert the transaction because there
 	// should either be one or more relevant inputs or outputs.
-	err = w.TxStore.InsertBlockAbe(txmgrNs, br, mpk, msvk)
+	var maturedBlockHash *chainhash.Hash
+	if br.Height>=6{
+		maturedBlockHash,err=w.chainClient.GetBlockHash(int64(br.Height-6))
+		if err != nil {
+			return err
+		}
+	}
+	//err = w.TxStore.InsertBlockAbe(txmgrNs, br,*maturedBlockHash, mpk, msvk)
+	err = w.TxStore.InsertBlockAbeNew(txmgrNs, br,*maturedBlockHash, mpk, msvk)
 	if err != nil {
 		return err
 	}
