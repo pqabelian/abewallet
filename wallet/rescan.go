@@ -221,7 +221,7 @@ out:
 				"%s, height %d)", len(addrs), noun, n.Hash,
 				n.Height)
 
-			go w.resendUnminedTxs()     //TODO(abe):will be deleted or change the name
+			//go w.resendUnminedTxs()     //TODO(abe):will be deleted or change the name
 			go w.resendUnminedTxAbes()
 
 		case <-quit:

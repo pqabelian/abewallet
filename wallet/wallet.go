@@ -3729,6 +3729,9 @@ func (w *Wallet) resendUnminedTxAbes() {
 			"resend: %v", err)
 		return
 	}
+	if txs==nil || len(txs)==0{
+		return
+	}
 
 	for _, tx := range txs {
 		txHash, err := w.publishTransactionAbe(tx)

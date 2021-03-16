@@ -328,6 +328,8 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 		if err != nil {
 			return err
 		}
+	}else{
+		maturedBlockHash=&chainhash.ZeroHash
 	}
 	//err = w.TxStore.InsertBlockAbe(txmgrNs, br,*maturedBlockHash, mpk, msvk)
 	err = w.TxStore.InsertBlockAbeNew(txmgrNs, br,*maturedBlockHash, mpk, msvk)

@@ -1725,6 +1725,11 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 	// handle with the transfer transactions
 	for i := 1; i < len(block.TxRecordAbes); i++ { // trace every tx in this block
 		txi := block.TxRecordAbes[i].MsgTx
+		txhash:=txi.TxHash()
+		err := deleteRawUnminedAbe(ns, txhash[:])
+		if err != nil {
+			return err
+		}
 		// handle the inputs,TODO:need to check for this section
 		for j := 0; j < len(txi.TxIns); j++ {
 			// compute the ring hash of each input in every transaction to match the utxo in the database
