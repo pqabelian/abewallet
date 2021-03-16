@@ -26,6 +26,8 @@ github.com/abesuite/abec v0.0.2-beta.0.20210307110248-1dd0f34a8bb5 h1:4rbEk4Yjoa
 github.com/abesuite/abec v0.0.2-beta.0.20210307110248-1dd0f34a8bb5/go.mod h1:buqHVmxEXRzLdoleecLMH/I5i0UnyBsOVR378ev2IOU=
 github.com/abesuite/abec v0.0.2-beta.0.20210307110609-37134a1afdf9 h1:yUdngH01v6WBCYYX+xBw7Y7wD4hdwF1+OHnWwaU561U=
 github.com/abesuite/abec v0.0.2-beta.0.20210307110609-37134a1afdf9/go.mod h1:buqHVmxEXRzLdoleecLMH/I5i0UnyBsOVR378ev2IOU=
+github.com/abesuite/abec v0.0.3-beta.0.20210316062306-92814ba0fa60 h1:OHrJENZgTuDd5ho+w0Ptl91g6wrnyxvPLqvUhZw+b7A=
+github.com/abesuite/abec v0.0.3-beta.0.20210316062306-92814ba0fa60/go.mod h1:buqHVmxEXRzLdoleecLMH/I5i0UnyBsOVR378ev2IOU=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd h1:BNI2MkhhtofxM0sTP8WmdcT4chaAKZOsyhspB58DSrM=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd/go.mod h1:eo8+6JwPaqdnrzzGmGXEH3nOYknOkk8GtuXw7Bo+f08=
 github.com/abesuite/go-spew v1.1.1 h1:8v1IQu/pRuElOpgwrBLmtxsSTEEK+fCBBOw4VYE9fx8=
