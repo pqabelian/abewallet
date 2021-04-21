@@ -381,14 +381,20 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 				if err != nil {
 					return err
 				}
-				var maturedBlockHash *chainhash.Hash
-				if i>=6{
-					maturedBlockHash,err=client.GetBlockHash(int64(i-6))
+				maturedBlockHashs :=make([]*chainhash.Hash,3)
+				if i>=int32(w.chainParams.CoinbaseMaturity)+2 && i%3==2{
+					maturedBlockHashs[0],err=client.GetBlockHash(int64(i-int32(w.chainParams.CoinbaseMaturity)))
 					if err != nil {
 						return err
 					}
-				}else{ // if no this statement, there is error for nil pointer
-					maturedBlockHash=&chainhash.ZeroHash
+					maturedBlockHashs[1],err=client.GetBlockHash(int64(i-int32(w.chainParams.CoinbaseMaturity)-1))
+					if err != nil {
+						return err
+					}
+					maturedBlockHashs[2],err=client.GetBlockHash(int64(i-int32(w.chainParams.CoinbaseMaturity)-2))
+					if err != nil {
+						return err
+					}
 				}
 				var b *wire.MsgBlockAbe
 				b, err = client.GetBlockAbe(hash)
@@ -399,8 +405,8 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 				if err != nil {
 					return err
 				}
- 				//err = w.TxStore.InsertBlockAbe(txmgrNs,blockAbeDetail,*maturedBlockHash, mpk,msvk)
- 				err = w.TxStore.InsertBlockAbeNew(txmgrNs,blockAbeDetail,*maturedBlockHash, mpk,msvk)
+ 				//err = w.TxStore.InsertBlockAbe(txmgrNs,blockAbeDetail,*maturedBlockHashs, mpk,msvk)
+ 				err = w.TxStore.InsertBlockAbeNew(txmgrNs,blockAbeDetail,maturedBlockHashs, mpk,msvk)
 				if err != nil {
 					return err
 				}

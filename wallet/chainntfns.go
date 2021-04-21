@@ -74,9 +74,17 @@ func (w *Wallet) handleChainNotifications() {
 				if err != nil {
 					return err
 				}
-				var maturedBlockHash *chainhash.Hash
-				if i>=6{
-					maturedBlockHash,err=client.GetBlockHash(int64(i-6))
+				maturedBlockHashs :=make([]*chainhash.Hash,3)
+				if i>=int32(w.chainParams.CoinbaseMaturity)+2 && i%3==2{
+					maturedBlockHashs[0],err=client.GetBlockHash(int64(i-int32(w.chainParams.CoinbaseMaturity)))
+					if err != nil {
+						return err
+					}
+					maturedBlockHashs[1],err=client.GetBlockHash(int64(i-int32(w.chainParams.CoinbaseMaturity)-1))
+					if err != nil {
+						return err
+					}
+					maturedBlockHashs[2],err=client.GetBlockHash(int64(i-int32(w.chainParams.CoinbaseMaturity)-2))
 					if err != nil {
 						return err
 					}
@@ -90,7 +98,7 @@ func (w *Wallet) handleChainNotifications() {
 					return err
 				}
 				//err = w.TxStore.InsertBlockAbe(txmgrNs, blockAbeDetail,*maturedBlockHash, mpk, msvk)
-				err = w.TxStore.InsertBlockAbeNew(txmgrNs, blockAbeDetail,*maturedBlockHash, mpk, msvk)
+				err = w.TxStore.InsertBlockAbeNew(txmgrNs, blockAbeDetail,maturedBlockHashs, mpk, msvk)
 				if err != nil {
 					return err
 				}
@@ -322,17 +330,23 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 	// relevant.  This assumption will not hold true when SPV support is
 	// added, but until then, simply insert the transaction because there
 	// should either be one or more relevant inputs or outputs.
-	var maturedBlockHash *chainhash.Hash
-	if br.Height>=6{
-		maturedBlockHash,err=w.chainClient.GetBlockHash(int64(br.Height-6))
+	maturedBlockHashs :=make([]*chainhash.Hash,3)
+	if br.Height>=int32(w.chainParams.CoinbaseMaturity)+2 && br.Height%3==2{
+		maturedBlockHashs[0],err=w.chainClient.GetBlockHash(int64(br.Height-int32(w.chainParams.CoinbaseMaturity)))
 		if err != nil {
 			return err
 		}
-	}else{
-		maturedBlockHash=&chainhash.ZeroHash
+		maturedBlockHashs[1],err=w.chainClient.GetBlockHash(int64(br.Height-int32(w.chainParams.CoinbaseMaturity)-1))
+		if err != nil {
+			return err
+		}
+		maturedBlockHashs[2],err=w.chainClient.GetBlockHash(int64(br.Height-int32(w.chainParams.CoinbaseMaturity)-2))
+		if err != nil {
+			return err
+		}
 	}
 	//err = w.TxStore.InsertBlockAbe(txmgrNs, br,*maturedBlockHash, mpk, msvk)
-	err = w.TxStore.InsertBlockAbeNew(txmgrNs, br,*maturedBlockHash, mpk, msvk)
+	err = w.TxStore.InsertBlockAbeNew(txmgrNs, br,maturedBlockHashs, mpk, msvk)
 	if err != nil {
 		return err
 	}

@@ -609,6 +609,7 @@ func (u *UTXORingAbe) Deserialize(b []byte) error {
 		}
 	}
 	gotSnSize := int(b[offset])
+	offset+=1
 	u.GotSerialNumberes = make([]chainhash.Hash, gotSnSize)
 	for i := 0; i < gotSnSize; i++ {
 		copy(u.GotSerialNumberes[i][:], b[offset:offset+32])
@@ -1655,7 +1656,7 @@ func (s *Store) InsertBlockAbe(ns walletdb.ReadWriteBucket, block *BlockAbeRecor
 	// update the balances
 	return putMinedBalance(ns, balance)
 }
-func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRecord, maturedBlockHash chainhash.Hash, mpk *abesalrs.MasterPubKey, msvk *abesalrs.MasterSecretViewKey) error {
+func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRecord, maturedBlockHashs []*chainhash.Hash, mpk *abesalrs.MasterPubKey, msvk *abesalrs.MasterSecretViewKey) error {
 	balance, err := fetchMinedBalance(ns)
 	if err != nil {
 		return err
@@ -2185,22 +2186,27 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 		}
 	}
 
+	// Fix for spending immarture coinbase transaction output: move it to spendable utxo bucket every 3 blocks
 	// fetch the matured coinbase output block.Height-Maturity
-	utxo, err := fetchImmaturedCoinbaseOutput(ns, block.Height-int32(s.chainParams.CoinbaseMaturity), maturedBlockHash)
-	if err != nil {
-		return err
-	}
-	for op, utxo := range utxo {
-		v := valueUnspentTXO(false, block.Height-int32(s.chainParams.CoinbaseMaturity), utxo.Amount, utxo.GenerationTime, utxo.RingHash)
-		amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
-		if err != nil {
-			return err
-		}
-		spendableBal += amt
-		freezedBal -= amt
-		err = putRawMaturedOutput(ns, canonicalOutPointAbe(op.TxHash, op.Index), v)
-		if err != nil {
-			return err
+	if block.Height>=int32(s.chainParams.CoinbaseMaturity)+2 && block.Height%3==2 {
+		for i := 0; i < len(maturedBlockHashs); i++ {
+			utxo, err := fetchImmaturedCoinbaseOutput(ns, block.Height-int32(s.chainParams.CoinbaseMaturity)-int32(i), *maturedBlockHashs[i])
+			if err != nil {
+				return err
+			}
+			for op, utxo := range utxo {
+				v := valueUnspentTXO(true, block.Height-int32(s.chainParams.CoinbaseMaturity), utxo.Amount, utxo.GenerationTime, utxo.RingHash)
+				amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
+				if err != nil {
+					return err
+				}
+				spendableBal += amt
+				freezedBal -= amt
+				err = putRawMaturedOutput(ns, canonicalOutPointAbe(op.TxHash, op.Index), v)
+				if err != nil {
+					return err
+				}
+			}
 		}
 	}
 	// update the balances
@@ -2414,7 +2420,7 @@ func (s *Store) RemoveUnminedTxAbe(ns walletdb.ReadWriteBucket, rec *TxRecordAbe
 			}
 			// delete the sn
 			if snIndex != -1 {
-				u.GotSerialNumberes = append(u.GotSerialNumberes[:], u.GotSerialNumberes[i+1:]...)
+				u.GotSerialNumberes = append(u.GotSerialNumberes[:snIndex], u.GotSerialNumberes[snIndex+1:]...)
 			}
 			utxoIndex := -1
 			for index, flag := range u.IsMy {
