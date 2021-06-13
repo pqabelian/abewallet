@@ -1229,7 +1229,7 @@ func putRawBlockAbeInput(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	return nil
 }
 
-func fetchBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) ([]*UTXORingAbe, [][]*chainhash.Hash, error) {
+func fetchBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) ([]*UTXORingAbe, [][][]byte, error) {
 	if len(k) < 32 {
 		str := fmt.Sprintf("%s: short read (expected %d bytes, read %d)",
 			bucketBlockInputs, 32, len(k))
@@ -1244,7 +1244,7 @@ func fetchBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) ([]*UTXORingAbe, 
 	offset += 4
 	utxoRingN := int(byteOrder.Uint16(v[offset : offset+2]))
 	utxoRings := make([]*UTXORingAbe, utxoRingN)
-	serialNs := make([][]*chainhash.Hash, utxoRingN)
+	serialNs := make([][][]byte, utxoRingN)
 	offset += 2
 	for i := 0; i < utxoRingN; i++ {
 		utxoRings[i] = new(UTXORingAbe)
@@ -1265,7 +1265,7 @@ func fetchBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) ([]*UTXORingAbe, 
 		}
 		offset += uSize
 		addedSNs := int(v[offset])
-		serialNs[i] = make([]*chainhash.Hash, addedSNs)
+		serialNs[i] = make([][]byte, addedSNs)
 		offset += 1
 		for j := 0; j < addedSNs; j++ {
 			copy(serialNs[i][j][:], v[offset:offset+32])
@@ -1677,8 +1677,8 @@ func deleteSpentConfirmedTXO(ns walletdb.ReadWriteBucket, k []byte) error {
 	}
 	return nil
 }
-func ConfirmSpentTXO(ns walletdb.ReadWriteBucket,txHash chainhash.Hash,index uint8,sn chainhash.Hash ) error {
-	k := canonicalOutPointAbe(txHash,index)
+func ConfirmSpentTXO(ns walletdb.ReadWriteBucket, txHash chainhash.Hash, index uint8, sn []byte) error {
+	k := canonicalOutPointAbe(txHash, index)
 	balance, err := fetchMinedBalance(ns)
 	if err != nil {
 		return err
@@ -1707,7 +1707,7 @@ func ConfirmSpentTXO(ns walletdb.ReadWriteBucket,txHash chainhash.Hash,index uin
 		if err != nil {
 			return err
 		}
-	} else {//from the spentButUnmined bucket
+	} else { //from the spentButUnmined bucket
 		v = existsRawSpentButUnminedTXO(ns, k)
 		if v != nil { //otherwise it has been moved to spentButUnmined bucket
 			amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
@@ -1737,6 +1737,7 @@ func ConfirmSpentTXO(ns walletdb.ReadWriteBucket,txHash chainhash.Hash,index uin
 	}
 	return putMinedBalance(ns, balance)
 }
+
 //All the relevant UTXORingAbe are keyed as such:
 //
 //    [0:32] RingHash(32 bytes)
@@ -1805,13 +1806,13 @@ func putRawNeedUpdateUTXORing(ns walletdb.ReadWriteBucket, k, v []byte) error {
 
 func FetchNeedUpdateUTXORing(ns walletdb.ReadBucket, k []byte) (bool, error) {
 	v := ns.NestedReadBucket(bucketNeedUpdateUTXORing).Get(k)
-	if v!=nil && v[0]==1{
-		return true,nil
-	}else{
-		return false,fmt.Errorf("can not read the key %v from bucketNeedUpdateUTXORing" ,k)
+	if v != nil && v[0] == 1 {
+		return true, nil
+	} else {
+		return false, fmt.Errorf("can not read the key %v from bucketNeedUpdateUTXORing", k)
 	}
 }
-func ForEachNeedUpdateUTXORing(ns walletdb.ReadBucket,fun func(k, v []byte) error)  error {
+func ForEachNeedUpdateUTXORing(ns walletdb.ReadBucket, fun func(k, v []byte) error) error {
 	return ns.NestedReadBucket(bucketNeedUpdateUTXORing).ForEach(fun)
 }
 func DeleteNeedUpdateUTXORing(ns walletdb.ReadWriteBucket, k []byte) error {

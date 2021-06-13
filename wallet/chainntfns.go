@@ -3,7 +3,6 @@ package wallet
 import (
 	"bytes"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abec/wire"
@@ -58,14 +57,14 @@ func (w *Wallet) handleChainNotifications() {
 			if err != nil {
 				return err
 			}
-			msvk, err := abesalrs.DeseralizeMasterSecretViewKey(msvkBytes)
-			if err != nil {
-				return err
-			}
-			mpk, err := abesalrs.DeseralizeMasterPubKey(mpkBytes)
-			if err != nil {
-				return err
-			}
+			//msvk, err := abesalrs.DeseralizeMasterSecretViewKey(msvkBytes)
+			//if err != nil {
+			//	return err
+			//}
+			//mpk, err := abesalrs.DeseralizeMasterPubKey(mpkBytes)
+			//if err != nil {
+			//	return err
+			//}
 			//startBlock := w.Manager.SyncedTo()
 			startBlock := w.ManagerAbe.SyncedTo()
 
@@ -74,17 +73,17 @@ func (w *Wallet) handleChainNotifications() {
 				if err != nil {
 					return err
 				}
-				maturedBlockHashs :=make([]*chainhash.Hash,3)
-				if i>=int32(w.chainParams.CoinbaseMaturity)+2 && i%3==2{
-					maturedBlockHashs[0],err=client.GetBlockHash(int64(i-int32(w.chainParams.CoinbaseMaturity)))
+				maturedBlockHashs := make([]*chainhash.Hash, 3)
+				if i >= int32(w.chainParams.CoinbaseMaturity)+2 && i%3 == 2 {
+					maturedBlockHashs[0], err = client.GetBlockHash(int64(i - int32(w.chainParams.CoinbaseMaturity)))
 					if err != nil {
 						return err
 					}
-					maturedBlockHashs[1],err=client.GetBlockHash(int64(i-int32(w.chainParams.CoinbaseMaturity)-1))
+					maturedBlockHashs[1], err = client.GetBlockHash(int64(i - int32(w.chainParams.CoinbaseMaturity) - 1))
 					if err != nil {
 						return err
 					}
-					maturedBlockHashs[2],err=client.GetBlockHash(int64(i-int32(w.chainParams.CoinbaseMaturity)-2))
+					maturedBlockHashs[2], err = client.GetBlockHash(int64(i - int32(w.chainParams.CoinbaseMaturity) - 2))
 					if err != nil {
 						return err
 					}
@@ -98,7 +97,7 @@ func (w *Wallet) handleChainNotifications() {
 					return err
 				}
 				//err = w.TxStore.InsertBlockAbe(txmgrNs, blockAbeDetail,*maturedBlockHash, mpk, msvk)
-				err = w.TxStore.InsertBlockAbeNew(txmgrNs, blockAbeDetail,maturedBlockHashs, mpk, msvk)
+				err = w.TxStore.InsertBlockAbeNew(txmgrNs, blockAbeDetail, maturedBlockHashs, mpkBytes, msvkBytes)
 				if err != nil {
 					return err
 				}
@@ -302,14 +301,14 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 	if err != nil {
 		return err
 	}
-	mpk, err := abesalrs.DeseralizeMasterPubKey(serializedMPK)
-	if err != nil {
-		return err
-	}
-	msvk, err := abesalrs.DeseralizeMasterSecretViewKey(serializedMSVK)
-	if err != nil {
-		return err
-	}
+	//mpk, err := abepqringct.MasterPublicKeyIfc(serializedMPK)
+	//if err != nil {
+	//	return err
+	//}
+	//msvk, err := abesalrs.DeseralizeMasterSecretViewKey(serializedMSVK)
+	//if err != nil {
+	//	return err
+	//}
 	bs := waddrmgr.BlockStamp{
 		Height:    b.Height,
 		Hash:      b.Hash,
@@ -330,23 +329,23 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 	// relevant.  This assumption will not hold true when SPV support is
 	// added, but until then, simply insert the transaction because there
 	// should either be one or more relevant inputs or outputs.
-	maturedBlockHashs :=make([]*chainhash.Hash,3)
-	if br.Height>=int32(w.chainParams.CoinbaseMaturity)+2 && br.Height%3==2{
-		maturedBlockHashs[0],err=w.chainClient.GetBlockHash(int64(br.Height-int32(w.chainParams.CoinbaseMaturity)))
+	maturedBlockHashs := make([]*chainhash.Hash, 3)
+	if br.Height >= int32(w.chainParams.CoinbaseMaturity)+2 && br.Height%3 == 2 {
+		maturedBlockHashs[0], err = w.chainClient.GetBlockHash(int64(br.Height - int32(w.chainParams.CoinbaseMaturity)))
 		if err != nil {
 			return err
 		}
-		maturedBlockHashs[1],err=w.chainClient.GetBlockHash(int64(br.Height-int32(w.chainParams.CoinbaseMaturity)-1))
+		maturedBlockHashs[1], err = w.chainClient.GetBlockHash(int64(br.Height - int32(w.chainParams.CoinbaseMaturity) - 1))
 		if err != nil {
 			return err
 		}
-		maturedBlockHashs[2],err=w.chainClient.GetBlockHash(int64(br.Height-int32(w.chainParams.CoinbaseMaturity)-2))
+		maturedBlockHashs[2], err = w.chainClient.GetBlockHash(int64(br.Height - int32(w.chainParams.CoinbaseMaturity) - 2))
 		if err != nil {
 			return err
 		}
 	}
 	//err = w.TxStore.InsertBlockAbe(txmgrNs, br,*maturedBlockHash, mpk, msvk)
-	err = w.TxStore.InsertBlockAbeNew(txmgrNs, br,maturedBlockHashs, mpk, msvk)
+	err = w.TxStore.InsertBlockAbeNew(txmgrNs, br, maturedBlockHashs, serializedMPK, serializedMSVK)
 	if err != nil {
 		return err
 	}
@@ -417,7 +416,7 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
 
-	if !w.ChainSynced() {        // if the wallet is syncing with backend, wait for it...
+	if !w.ChainSynced() { // if the wallet is syncing with backend, wait for it...
 		return nil
 	}
 
@@ -444,7 +443,7 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 				return err
 			}
 
-			bs.Timestamp = header.Timestamp                  //if fail to detach, it will be not commited
+			bs.Timestamp = header.Timestamp //if fail to detach, it will be not commited
 			err = w.ManagerAbe.SetSyncedTo(addrmgrNs, &bs)
 			if err != nil {
 				return err

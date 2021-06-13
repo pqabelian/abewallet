@@ -84,7 +84,7 @@ func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO, rings map[chainhash.Hash]
 				BlockHashs: []*chainhash.Hash{},
 				OutPoints:  []*wire.OutPointAbe{},
 			})
-			index:=-1
+			index := -1
 			for i := 0; i < len(rings[nextUTXO.RingHash].BlockHashes); i++ { // fill up the blockhashes field
 				nextInput.PreviousOutPointRing.BlockHashs = append(nextInput.PreviousOutPointRing.BlockHashs, &rings[nextUTXO.RingHash].BlockHashes[i])
 			}
@@ -96,11 +96,11 @@ func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO, rings map[chainhash.Hash]
 				//which input in ring is spent
 				if rings[nextUTXO.RingHash].TxHashes[i] == nextUTXO.TxOutput.TxHash && rings[nextUTXO.RingHash].Index[i] == nextUTXO.TxOutput.Index {
 					currentScripts = append(currentScripts, rings[nextUTXO.RingHash].AddrScript[i])
-					index=i
+					index = i
 				}
 			}
 			currentTotal += abeutil.Amount(nextUTXO.Amount)
-			nextInput.SerialNumber[0]=byte(index) //index is set
+			nextInput.SerialNumber[0] = byte(index) //index is set
 			currentInputs = append(currentInputs, nextInput)
 			amount, _ := abeutil.NewAmountAbe(float64(nextUTXO.Amount))
 			currentInputValues = append(currentInputValues, amount)
@@ -375,6 +375,7 @@ func (w *Wallet) txAbeToOutputs(outputs []*wire.TxOutAbe, minconf int32, feeSatP
 	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
 		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
+		// TODO 20210520: the signed message will be the hash of the transaction information without signature
 		err = unsignedTx.AddAllInputScripts([]byte("this is a test"), w.ManagerAbe, addrmgrNs, txmgrNs)
 		if err != nil {
 			return nil
@@ -410,7 +411,7 @@ func (w *Wallet) txAbeToOutputs(outputs []*wire.TxOutAbe, minconf int32, feeSatP
 	//if err!=nil{
 	//	return nil,err
 	//}
-	return unsignedTx,nil
+	return unsignedTx, nil
 	//return unsignedTx, nil
 	//
 	//if err := dbtx.Commit(); err != nil {
@@ -539,10 +540,10 @@ func (w *Wallet) findEligibleOutputsAbe(txmgrNs walletdb.ReadBucket, minconf int
 		_, ok := rings[eligible[i].RingHash]
 		if !ok {
 			ring, err := wtxmgr.FetchRingDetails(txmgrNs, eligible[i].RingHash[:])
-			if ring==nil && err==fmt.Errorf("the pair is not exist"){     // it means that this outpoint is not contained in a ring
+			if ring == nil && err == fmt.Errorf("the pair is not exist") { // it means that this outpoint is not contained in a ring
 				continue
-			}else if err!=nil{
-				return nil,nil,err
+			} else if err != nil {
+				return nil, nil, err
 			}
 			rings[eligible[i].RingHash] = ring
 		}

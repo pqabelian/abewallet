@@ -5,6 +5,8 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"fmt"
+	"github.com/abesuite/abec/abecrypto"
+	"github.com/abesuite/abec/abecrypto/abepqringct"
 	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/chaincfg"
@@ -200,11 +202,11 @@ func (m *ManagerAbe) FetchPayeeManagerFromDB(ns walletdb.ReadBucket, name string
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 	manager, err := fetchPayeeManager(ns, name)
-	if manager==nil||err!=nil{
-		return nil,err
+	if manager == nil || err != nil {
+		return nil, err
 	}
-	m.payeeManagers=append(m.payeeManagers,manager)
-	return manager,err
+	m.payeeManagers = append(m.payeeManagers, manager)
+	return manager, err
 }
 
 func (m *ManagerAbe) FetchMasterKeyEncAbe(ns walletdb.ReadBucket) ([]byte, []byte, []byte, error) {
@@ -213,37 +215,39 @@ func (m *ManagerAbe) FetchMasterKeyEncAbe(ns walletdb.ReadBucket) ([]byte, []byt
 	return fetchMasterKeyEncsAbe(ns)
 }
 
-func (m *ManagerAbe) IsMyAddress(ns walletdb.ReadBucket,
-	dpk *abesalrs.DerivedPubKey) (bool, error) {
-	/// TODO(abe): we should design error type tp help handle a address
-	m.mtx.RLock()
-	defer m.mtx.RUnlock()
-	mpkEnc, msvkEnc, _, err := fetchMasterKeyEncsAbe(ns)
-	if err != nil {
-		return false, err
-	}
-	serializedMPK, err := m.Decrypt(CKTPublic, mpkEnc)
-	if err != nil {
-		return false, err
-	}
-
-	serializedMSVK, err := m.Decrypt(CKTPublic, msvkEnc)
-	if err != nil {
-		return false, err
-	}
-	mpk, err := abesalrs.DeseralizeMasterPubKey(serializedMPK)
-	if err != nil {
-		return false, err
-	}
-	msvk, err := abesalrs.DeseralizeMasterSecretViewKey(serializedMSVK)
-	if err != nil {
-		return false, err
-	}
-
-	// We'll iterate through each of the known scoped managers, and see if
-	// any of them now of the target address.
-	return abesalrs.CheckDerivedPubKeyAttribute(dpk, mpk, msvk)
-}
+// TODO(osy) 20200608 use txoReceive "replace" the IsMyAddress OR discard this function
+//  Which means that the ManagerAbe just store the master key pair
+//func (m *ManagerAbe) IsMyAddress(ns walletdb.ReadBucket,
+//	dpk *abepqringct.DerivedPubKey) (bool, error) {
+//	/// TODO(abe): we should design error type tp help handle a address
+//	m.mtx.RLock()
+//	defer m.mtx.RUnlock()
+//	mpkEnc, msvkEnc, _, err := fetchMasterKeyEncsAbe(ns)
+//	if err != nil {
+//		return false, err
+//	}
+//	serializedMPK, err := m.Decrypt(CKTPublic, mpkEnc)
+//	if err != nil {
+//		return false, err
+//	}
+//
+//	serializedMSVK, err := m.Decrypt(CKTPublic, msvkEnc)
+//	if err != nil {
+//		return false, err
+//	}
+//	mpk, err := abesalrs.DeseralizeMasterPubKey(serializedMPK)
+//	if err != nil {
+//		return false, err
+//	}
+//	msvk, err := abesalrs.DeseralizeMasterSecretViewKey(serializedMSVK)
+//	if err != nil {
+//		return false, err
+//	}
+//
+//	// We'll iterate through each of the known scoped managers, and see if
+//	// any of them now of the target address.
+//	return abesalrs.CheckDerivedPubKeyAttribute(dpk, mpk, msvk)
+//}
 
 // ChainParams returns the chain parameters for this address manager.
 func (m *ManagerAbe) ChainParams() *chaincfg.Params {
@@ -482,18 +486,17 @@ func (m *ManagerAbe) NewChangeAddress(ns walletdb.ReadBucket) ([]byte, error) {
 		return nil, err
 	}
 
-
-	b := make([]byte,0)
-	for i:=0;i<2;i++{
-		b=append(b,0)
+	b := make([]byte, 0)
+	for i := 0; i < 2; i++ {
+		b = append(b, 0)
 	}
-	b=append(b,mpk.Serialize()...)
-	hashB:=chainhash.DoubleHashB(b)
-	b=append(b,hashB...)
-	maddrStr:=hex.EncodeToString(b)
-	maddr,err:=abeutil.DecodeMasterAddressAbe(maddrStr)
-	if err!=nil{
-		return nil,err
+	b = append(b, mpk.Serialize()...)
+	hashB := chainhash.DoubleHashB(b)
+	b = append(b, hashB...)
+	maddrStr := hex.EncodeToString(b)
+	maddr, err := abeutil.DecodeMasterAddressAbe(maddrStr)
+	if err != nil {
+		return nil, err
 	}
 	return txscript.PayToAddressScriptAbe(maddr)
 }
@@ -808,16 +811,16 @@ func loadManagerAbe(ns walletdb.ReadBucket, pubPassphrase []byte,
 	// Next, we'll need to load all known manager scopes from disk. Each
 	// scope is on a distinct top-level path within our HD key chain.
 	payeeManagers := *new([]*PayeeManager)
-	err= forEachPayee(ns, func(name string) error {
-		payeeMgr,err:=fetchPayeeManager(ns,name)
-		if err!=nil{
+	err = forEachPayee(ns, func(name string) error {
+		payeeMgr, err := fetchPayeeManager(ns, name)
+		if err != nil {
 			return err
 		}
-		payeeManagers=append(payeeManagers,payeeMgr)
+		payeeManagers = append(payeeManagers, payeeMgr)
 		return nil
 	})
-	if err!=nil{
-		return nil,err
+	if err != nil {
+		return nil, err
 	}
 	//scopedManagers := make(map[KeyScope]*ScopedKeyManager)
 	//err = forEachKeyScope(ns, func(scope KeyScope) error {
@@ -1043,17 +1046,22 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 		//	str := "failed to neuter master extended key"
 		//	return managerError(ErrKeyChain, str, err)
 		//}
-		mpk, msvk, mssk, _, err := abesalrs.GenerateMasterKey(seed)
+		_, mpk, msvk, mssk, err := abepqringct.MasterKeyGen(seed, abecrypto.CryptoSchemePQRINGCT)
 		if err != nil {
 			return fmt.Errorf("failed to generate master key")
 		}
 		var b []byte
-		for i:=0;i<2;i++{
-			b=append(b,0)
+		for i := 0; i < 32; i += 8 {
+			b = append(b, (abecrypto.CryptoSchemePQRINGCT>>i)&0xFF)
 		}
-		b=append(b,mpk.Serialize()[:]...)
-		hash:=chainhash.DoubleHashB(b)
-		b=append(b,hash...)
+		//for i:=0;i<2;i++{
+		//	b=append(b,0)
+		//}
+		// append the master public key
+		b = append(b, mpk[:]...)
+		// generate the hash of (abecrypto.CryptoSchemePQRINGCT || serialized master public key)
+		hash := chainhash.DoubleHashB(b)
+		b = append(b, hash...)
 		fmt.Println(`Please remember the following master address:`)
 		fmt.Println(hex.EncodeToString(b))
 		// Next, for each registers default manager scope, we'll
@@ -1084,17 +1092,17 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 		//	return maybeConvertDbError(err)
 		//}
 		masterSecretSignKeyEnc, err :=
-			cryptoKeyPriv.Encrypt(mssk.Serialize())
+			cryptoKeyPriv.Encrypt(mssk)
 		if err != nil {
 			return maybeConvertDbError(err)
 		}
 		masterSecretViewKeyEnc, err :=
-			cryptoKeyPub.Encrypt(msvk.Serialize())
+			cryptoKeyPub.Encrypt(msvk)
 		if err != nil {
 			return maybeConvertDbError(err)
 		}
 		masterPubKeyEnc, err :=
-			cryptoKeyPub.Encrypt(mpk.Serialize())
+			cryptoKeyPub.Encrypt(mpk)
 		if err != nil {
 			return maybeConvertDbError(err)
 		}

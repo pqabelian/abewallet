@@ -5,7 +5,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto/abesalrs"
+	"github.com/abesuite/abec/abecrypto"
+	"github.com/abesuite/abec/abecrypto/abepqringct"
 	"github.com/abesuite/abec/abejson"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/abeutil/hdkeychain"
@@ -1691,19 +1692,6 @@ out:
 				if err != nil {
 					return err
 				}
-				mssk, err := abesalrs.DeseralizeMasterSecretSignKey(msskBytes)
-				if err != nil {
-					return err
-				}
-				msvk, err := abesalrs.DeseralizeMasterSecretViewKey(msvkBytes)
-				if err != nil {
-					return err
-				}
-				mpk, err := abesalrs.DeseralizeMasterPubKey(mpkBytes)
-				if err != nil {
-					return err
-				}
-				msg := []byte("this is a test")
 				err = wtxmgr.ForEachNeedUpdateUTXORing(wtxmgrNs, func(k, v []byte) error {
 					utxoring, err := wtxmgr.FetchUTXORing(wtxmgrNs, k)
 					if err != nil {
@@ -1713,38 +1701,24 @@ out:
 					if err != nil {
 						return err
 					}
-					dpkRing := new(abesalrs.DpkRing)
-					dpkRing.R = len(ring.TxHashes)
-					for i := 0; i < len(ring.AddrScript); i++ {
-						derivedAddr, err := txscript.ExtractAddressFromScriptAbe(ring.AddrScript[i]) //add the dpk into dpkring
-						if err != nil {
-							return err
-						}
-						dpk := derivedAddr.DerivedPubKey()
-						dpkRing.Dpks = append(dpkRing.Dpks, *dpk)
-					}
-					for i := 0; i < len(ring.AddrScript); i++ {
-						sn := utxoring.OriginSerialNumberes[uint8(i)]
-						if utxoring.IsMy[i] && sn.IsEqual(&chainhash.ZeroHash) {
-							//generate sn
-							sig, err := abesalrs.Sign(msg, dpkRing, &dpkRing.Dpks[i], mpk, msvk, mssk)
+					for i := 0; i < len(utxoring.IsMy); i++ {
+						if utxoring.IsMy[i] && (utxoring.OriginSerialNumberes == nil || bytes.Equal(utxoring.OriginSerialNumberes[uint8(i)], chainhash.ZeroHash[:])) {
+							sn, err := abepqringct.TxoSerialNumberGen(&wire.TxOutAbe{
+								Version:   ring.Version,
+								TxoScript: ring.TxoScripts[i],
+							}, mpkBytes, msvkBytes, msskBytes)
 							if err != nil {
 								return err
 							}
-							k, b, err := abesalrs.Verify(msg, dpkRing, sig)
-							if !b || err != nil {
-								return fmt.Errorf("error in generating the key image:%v", err)
-							}
 							if utxoring.OriginSerialNumberes == nil {
-								utxoring.OriginSerialNumberes = make(map[uint8]chainhash.Hash)
+								utxoring.OriginSerialNumberes = make(map[uint8][]byte)
 							}
-							sn := chainhash.DoubleHashH(k.Serialize())
 							utxoring.OriginSerialNumberes[uint8(i)] = sn
 
 							// check whether the sn occur in chain
 							for j := 0; j < len(utxoring.GotSerialNumberes); j++ {
 								tmp := utxoring.GotSerialNumberes[j]
-								if utxoring.IsMy[i] && tmp.IsEqual(&sn) {
+								if utxoring.IsMy[i] && bytes.Equal(tmp, sn[:]) {
 									// move the utxo to SpentAndConfirm bucket
 									err = wtxmgr.ConfirmSpentTXO(wtxmgrNs, utxoring.TxHashes[i], utxoring.OutputIndexes[i], tmp)
 									if err != nil {
@@ -1754,13 +1728,13 @@ out:
 									break
 								}
 							}
-							utxoring.AllSpent = true
-							for i := 0; i < len(utxoring.IsMy); i++ {
-								if utxoring.IsMy[i] && !utxoring.Spent[i] {
-									utxoring.AllSpent = false
-									break
-								}
-							}
+						}
+						utxoring.AllSpent = true
+					}
+					for i := 0; i < len(utxoring.IsMy); i++ {
+						if utxoring.IsMy[i] && !utxoring.Spent[i] {
+							utxoring.AllSpent = false
+							break
 						}
 					}
 					if !utxoring.AllSpent {
@@ -1769,6 +1743,7 @@ out:
 							return err
 						}
 					}
+
 					// delete from bucket needUpadte
 					err = wtxmgr.DeleteNeedUpdateUTXORing(wtxmgrNs, k)
 					if err != nil {
@@ -3729,7 +3704,7 @@ func (w *Wallet) resendUnminedTxAbes() {
 			"resend: %v", err)
 		return
 	}
-	if txs==nil || len(txs)==0{
+	if txs == nil || len(txs) == 0 {
 		return
 	}
 
@@ -4924,15 +4899,16 @@ func createAbe(db walletdb.DB, pubPass, privPass, seed []byte,
 			//	Or generating
 			//hdSeed, err := hdkeychain.GenerateSeed(
 			//	hdkeychain.RecommendedSeedLen)
-			salrsSeed, err := abesalrs.GenerateSeed(abesalrs.RecommendedSeedLen)
+			//salrsSeed, err := abesalrs.GenerateSeed(abesalrs.RecommendedSeedLen)
+			pqringctSeed, _, _, _, err := abepqringct.MasterKeyGen(nil, abecrypto.CryptoSchemePQRINGCT)
 			if err != nil {
 				return err
 			}
-			seed = salrsSeed
+			seed = pqringctSeed
 		}
-		if len(seed) < abesalrs.MinSeedBytes || len(seed) > abesalrs.MaxSeedBytes {
-			return abesalrs.ErrInvalidSeedLen
-		}
+		//if len(seed) < abesalrs.MinSeedBytes || len(seed) > abesalrs.MaxSeedBytes {
+		//	return abesalrs.ErrInvalidSeedLen
+		//}
 
 	}
 

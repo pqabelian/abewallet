@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/abesuite/abec/abecrypto/abepqringct"
 	"github.com/abesuite/abec/abejson"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abewallet/wallet/txrules"
@@ -108,7 +109,7 @@ var rpcHandlers = map[string]struct {
 	"validateaddress":        {handler: validateAddress},
 	"verifymessage":          {handler: verifyMessage},
 	"walletlock":             {handler: walletLock},
-	"freshen":       {handler: freshen},
+	"freshen":                {handler: freshen},
 	"walletpassphrase":       {handler: walletPassphrase},
 	"walletpassphrasechange": {handler: walletPassphraseChange},
 
@@ -481,11 +482,11 @@ func getBalanceAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	var balances []abeutil.Amount
 	var needUpdateNum int
 	var err error
-	balances,needUpdateNum, err = w.CalculateBalanceAbe(int32(*cmd.Minconf))
+	balances, needUpdateNum, err = w.CalculateBalanceAbe(int32(*cmd.Minconf))
 	if err != nil {
 		return nil, err
 	}
-	return []float64{balances[0].ToABE(), balances[1].ToABE(), balances[2].ToABE(), balances[3].ToABE(),float64(needUpdateNum)}, nil
+	return []float64{balances[0].ToABE(), balances[1].ToABE(), balances[2].ToABE(), balances[3].ToABE(), float64(needUpdateNum)}, nil
 }
 
 // getBestBlock handles a getbestblock request by returning a JSON object
@@ -532,7 +533,7 @@ func getInfo(icmd interface{}, w *wallet.Wallet, chainClient *chain.RPCClient) (
 	}
 	// TODO(abe):need add the update number into result struct
 	//bal, err := w.CalculateBalance(1)  // switch to calculateBalanceAbe
-	bal,_,err := w.CalculateBalanceAbe(1)
+	bal, _, err := w.CalculateBalanceAbe(1)
 	if err != nil {
 		return nil, err
 	}
@@ -1426,10 +1427,11 @@ func makeOutputs(pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) 
 	}
 	return outputs, nil
 }
+
 //TODO(abe):add the chainPramas into the decoding of address
 func makeOutputsAbe(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) ([]*wire.TxOutAbe, error) {
-	outputs := make([]*wire.TxOutAbe, 0)
-	coinValues := []int64{500, 200, 100, 50, 20, 10, 5, 2, 1}
+	outputs := make([]*wire.TxOutAbe, 0, len(pairs))
+	//coinValues := []int64{500, 200, 100, 50, 20, 10, 5, 2, 1}
 	for name, amt := range pairs {
 		payeeManager, err := w.FetchPayeeManager(name)
 		if payeeManager == nil {
@@ -1439,22 +1441,8 @@ func makeOutputsAbe(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainPara
 		if err != nil {
 			return nil, fmt.Errorf("cannot get an address from given payee: %s", err)
 		}
-		targetAmount := int64(amt)
-		for targetAmount != 0 {
-			i := 0
-			for targetAmount < coinValues[i] {
-				i++
-			}
-			targetAmount -= coinValues[i]
-			txOut := wire.TxOutAbe{}
-			pkScript, err := txscript.PayToAddressScriptAbe(addr)
-			if err != nil {
-				return nil, fmt.Errorf("cannot create txout script: %s", err)
-			}
-			txOut.AddressScript = pkScript
-			txOut.ValueScript = coinValues[i] * abeutil.NeutrinoPerAbe
-			outputs = append(outputs, &txOut)
-		}
+		targetAmount := uint64(amt)
+		abepqringct.NewAbeTxOutDesc(addr, targetAmount)
 	}
 	return outputs, nil
 }

@@ -44,12 +44,12 @@ type PayeeManager struct {
 func (p PayeeManager) Name() string {
 	return p.name
 }
-func (p PayeeManager) ChooseMAddr() (abeutil.MasterAddress, error) {
-	if len(p.mpks)==0{
-		return nil,errors.New("this payee has no master address, please add it.")
+func (p PayeeManager) ChooseMAddr() ([]byte, error) {
+	if len(p.mpks) == 0 {
+		return nil, errors.New("this payee has no master address, please add it.")
 	}
 	i := mathrand.Intn(len(p.mpks))
-	return p.mpks[i], nil
+	return p.mpks[i].Serialize(), nil
 }
 func (p *PayeeManager) ChangeName(ns walletdb.ReadWriteBucket, newName string) error {
 	p.name = newName
