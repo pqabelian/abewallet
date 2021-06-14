@@ -1447,6 +1447,26 @@ func makeOutputsAbe(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainPara
 	return outputs, nil
 }
 
+func makeOutputDescs(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) ([]*abepqringct.AbeTxOutDesc, error) {
+	outputDescs := make([]*abepqringct.AbeTxOutDesc, 0, len(pairs))
+	//coinValues := []int64{500, 200, 100, 50, 20, 10, 5, 2, 1}
+	for name, amt := range pairs {
+		payeeManager, err := w.FetchPayeeManager(name)
+		if payeeManager == nil {
+			return nil, err
+		}
+		addr, err := payeeManager.ChooseMAddr()
+		if err != nil {
+			return nil, fmt.Errorf("cannot get an address from given payee: %s", err)
+		}
+		targetAmount := uint64(amt)
+		outputDesc := abepqringct.NewAbeTxOutDesc(addr, targetAmount)
+
+		outputDescs = append(outputDescs, outputDesc)
+	}
+	return outputDescs, nil
+}
+
 // sendPairs creates and sends payment transactions.
 // It returns the transaction hash in string format upon success
 // All errors are returned in abejson.RPCError format
@@ -1487,11 +1507,12 @@ func isNilOrEmpty(s *string) bool {
 func sendPairsAbe(w *wallet.Wallet, amounts map[string]abeutil.Amount,
 	minconf int32, feeSatPerKb abeutil.Amount) (string, error) {
 
-	outputs, err := makeOutputsAbe(w, amounts, w.ChainParams())
+	//outputs, err := makeOutputsAbe(w, amounts, w.ChainParams())
+	outputDescs, err := makeOutputDescs(w, amounts, w.ChainParams())
 	if err != nil {
 		return "", err
 	}
-	tx, err := w.SendOutputsAbe(outputs, minconf, feeSatPerKb, "") // TODO(abe): what's label?
+	tx, err := w.SendOutputsAbe(outputDescs, minconf, feeSatPerKb, "") // TODO(abe): what's label?
 	if err != nil {
 		if err == txrules.ErrAmountNegative {
 			return "", ErrNeedPositiveAmount

@@ -2,6 +2,7 @@ package wallet
 
 import (
 	"fmt"
+	"github.com/abesuite/abec/abecrypto/abepqringct"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/btcec"
 	"github.com/abesuite/abec/chainhash"
@@ -54,6 +55,63 @@ func makeInputSource(eligible []wtxmgr.Credit) txauthor.InputSource {
 		return currentTotal, currentInputs, currentInputValues, currentScripts, nil
 	}
 }
+
+/*func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO, rings map[chainhash.Hash]*wtxmgr.Ring) txauthor.InputSourceAbe {
+	// Pick largest outputs first.  This is only done for compatibility with
+	// previous tx creation code, not because it's a good idea.
+	sort.Sort(sort.Reverse(byAmountAbe(eligible)))
+
+	// Current inputs and their total value.  These are closed over by the
+	// returned input source and reused across multiple calls.
+	currentTotal := abeutil.Amount(0)                        // total amount
+	currentInputs := make([]*wire.TxInAbe, 0, len(eligible)) //Inputs
+	currentScripts := make([][]byte, 0, len(eligible))
+	currentInputValues := make([]abeutil.Amount, 0, len(eligible)) //input value
+
+	return func(target abeutil.Amount) (abeutil.Amount, []*wire.TxInAbe,
+		[]abeutil.Amount, [][]byte, error) {
+		//TODO(abe): Add a serialNumber to NewTXInAbe
+		for currentTotal < target && len(eligible) != 0 {
+			nextUTXO := &eligible[0]
+			eligible = eligible[1:]
+			// TODO(abe):delete it due to we must use dpk ring to generate script, so we do not get the index
+			//index:=0
+			//for ;index<len(rings[nextUTXO.RingHash].TxHashes);index++{
+			//	if rings[nextUTXO.RingHash].TxHashes[index].IsEqual(&nextUTXO.TxOutput.TxHash) &&
+			//		rings[nextUTXO.RingHash].Index[index]==nextUTXO.TxOutput.Index{
+			//		break
+			//	}
+			//}
+			nextInput := wire.NewTxInAbe(&chainhash.Hash{}, &wire.OutPointRing{ // the outpoint index has be put in the serialNumber field
+				BlockHashs: []*chainhash.Hash{},
+				OutPoints:  []*wire.OutPointAbe{},
+			})
+			index := -1
+			for i := 0; i < len(rings[nextUTXO.RingHash].BlockHashes); i++ { // fill up the blockhashes field
+				nextInput.PreviousOutPointRing.BlockHashs = append(nextInput.PreviousOutPointRing.BlockHashs, &rings[nextUTXO.RingHash].BlockHashes[i])
+			}
+			for i := 0; i < len(rings[nextUTXO.RingHash].TxHashes); i++ { //fill up the outpoint field
+				nextInput.PreviousOutPointRing.OutPoints = append(nextInput.PreviousOutPointRing.OutPoints, &wire.OutPointAbe{
+					TxHash: rings[nextUTXO.RingHash].TxHashes[i],
+					Index:  rings[nextUTXO.RingHash].Index[i],
+				})
+				//which input in ring is spent
+				if rings[nextUTXO.RingHash].TxHashes[i] == nextUTXO.TxOutput.TxHash && rings[nextUTXO.RingHash].Index[i] == nextUTXO.TxOutput.Index {
+					currentScripts = append(currentScripts, rings[nextUTXO.RingHash].AddrScript[i])
+					index = i
+				}
+			}
+			currentTotal += abeutil.Amount(nextUTXO.Amount)
+			nextInput.SerialNumber[0] = byte(index) //index is set
+			currentInputs = append(currentInputs, nextInput)
+			amount, _ := abeutil.NewAmountAbe(float64(nextUTXO.Amount))
+			currentInputValues = append(currentInputValues, amount)
+		}
+		return currentTotal, currentInputs, currentInputValues, currentScripts, nil
+	}
+}*/
+
+//	todo: written by AliceBobScorpio on 2021.06.14, need to be confirm-ed
 func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO, rings map[chainhash.Hash]*wtxmgr.Ring) txauthor.InputSourceAbe {
 	// Pick largest outputs first.  This is only done for compatibility with
 	// previous tx creation code, not because it's a good idea.
@@ -80,7 +138,7 @@ func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO, rings map[chainhash.Hash]
 			//		break
 			//	}
 			//}
-			nextInput := wire.NewTxInAbe(&chainhash.Hash{}, &wire.OutPointRing{ // the outpoint index has be put in the seriaalNummber field
+			nextInput := wire.NewTxInAbe(&chainhash.Hash{}, &wire.OutPointRing{ // the outpoint index has be put in the serialNumber field
 				BlockHashs: []*chainhash.Hash{},
 				OutPoints:  []*wire.OutPointAbe{},
 			})
@@ -310,7 +368,7 @@ func (w *Wallet) txToOutputs(outputs []*wire.TxOut, account uint32,
 }
 
 // TODO(abe): compute the transaction fee
-func (w *Wallet) txAbeToOutputs(outputs []*wire.TxOutAbe, minconf int32, feeSatPerKb abeutil.Amount, dryRun bool) (
+func (w *Wallet) txAbeToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, minconf int32, feeSatPerKb abeutil.Amount, dryRun bool) (
 	unsignedTx *txauthor.AuthoredTxAbe, err error) {
 
 	chainClient, err := w.requireChainClient()

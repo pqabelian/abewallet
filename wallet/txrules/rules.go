@@ -5,6 +5,7 @@ package txrules
 
 import (
 	"errors"
+	"github.com/abesuite/abec/abecrypto/abepqringct"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abec/wire"
@@ -54,7 +55,7 @@ func IsDustOutput(output *wire.TxOut, relayFeePerKb abeutil.Amount) bool {
 	return IsDustAmount(abeutil.Amount(output.Value), len(output.PkScript),
 		relayFeePerKb)
 }
-func IsDustOutputAbe(output *wire.TxOutAbe, relayFeePerKb abeutil.Amount) bool {
+func IsDustOutputAbe(outputDesc *abepqringct.AbeTxOutDesc, relayFeePerKb abeutil.Amount) bool {
 	// Unspendable outputs which solely carry data are not checked for dust.
 	//if txscript.GetScriptClass(output.PkScript) == txscript.NullDataTy {
 	//	return false
@@ -65,8 +66,10 @@ func IsDustOutputAbe(output *wire.TxOutAbe, relayFeePerKb abeutil.Amount) bool {
 	//	return true
 	//}
 
-	return IsDustAmount(abeutil.Amount(output.ValueScript), len(output.AddressScript),
-		relayFeePerKb)
+	//	return IsDustAmount(abeutil.Amount(output.ValueScript), len(output.AddressScript), relayFeePerKb)
+	// todo(ABE): In ABE, the sizes of TXOs are the same.
+	//	IsDust may be determined only by the value.
+	return false
 }
 
 // Transaction rule violations
@@ -91,18 +94,22 @@ func CheckOutput(output *wire.TxOut, relayFeePerKb abeutil.Amount) error {
 	return nil
 }
 
-func CheckOutputAbe(output *wire.TxOutAbe, relayFeePerKb abeutil.Amount) error {
-	if output.ValueScript < 0 {
+func CheckOutputDescAbe(outputDesc *abepqringct.AbeTxOutDesc, relayFeePerKb abeutil.Amount) error {
+	value := outputDesc.GetValue()
+
+	if value < 0 {
 		return ErrAmountNegative
 	}
-	if output.ValueScript > abeutil.MaxSatoshi {
+	if value > abeutil.MaxNeutrino {
 		return ErrAmountExceedsMax
 	}
-	if IsDustOutputAbe(output, relayFeePerKb) {
+
+	if IsDustOutputAbe(outputDesc, relayFeePerKb) {
 		return ErrOutputIsDust
 	}
 	return nil
 }
+
 // FeeForSerializeSize calculates the required fee for a transaction of some
 // arbitrary size given a mempool's relay fee policy.
 func FeeForSerializeSize(relayFeePerKb abeutil.Amount, txSerializeSize int) abeutil.Amount {
@@ -118,6 +125,7 @@ func FeeForSerializeSize(relayFeePerKb abeutil.Amount, txSerializeSize int) abeu
 
 	return fee
 }
+
 // TODO(abe):about the transaction fee we should design.
 func FeeForSerializeSizeAbe(relayFeePerKb abeutil.Amount, txSerializeSize int) abeutil.Amount {
 	fee := relayFeePerKb * abeutil.Amount(txSerializeSize) / 1000
@@ -132,4 +140,3 @@ func FeeForSerializeSizeAbe(relayFeePerKb abeutil.Amount, txSerializeSize int) a
 
 	return fee
 }
-

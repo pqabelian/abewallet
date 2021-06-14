@@ -1486,7 +1486,7 @@ type (
 		resp        chan createTxResponse
 	}
 	createTxAbeRequest struct {
-		outputs     []*wire.TxOutAbe
+		txOutDescs  []*abepqringct.AbeTxOutDesc
 		minconf     int32
 		feeSatPerKB abeutil.Amount
 		dryRun      bool
@@ -1544,7 +1544,7 @@ out:
 				txr.resp <- createTxAbeResponse{nil, err}
 				continue
 			}
-			tx, err := w.txAbeToOutputs(txr.outputs, txr.minconf, txr.feeSatPerKB, txr.dryRun)
+			tx, err := w.txAbeToOutputs(txr.txOutDescs, txr.minconf, txr.feeSatPerKB, txr.dryRun)
 			heldUnlock.release()
 			txr.resp <- createTxAbeResponse{tx, err}
 		case <-quit:
@@ -1580,11 +1580,11 @@ func (w *Wallet) CreateSimpleTx(account uint32, outputs []*wire.TxOut,
 	return resp.tx, resp.err
 }
 
-func (w *Wallet) CreateSimpleTxAbe(outputs []*wire.TxOutAbe, minconf int32,
+func (w *Wallet) CreateSimpleTxAbe(outputDescs []*abepqringct.AbeTxOutDesc, minconf int32,
 	satPerKb abeutil.Amount, dryRun bool) (*txauthor.AuthoredTxAbe, error) {
 
 	req := createTxAbeRequest{
-		outputs:     outputs,
+		txOutDescs:  outputDescs,
 		minconf:     minconf,
 		feeSatPerKB: satPerKb,
 		dryRun:      dryRun,
@@ -4048,13 +4048,13 @@ func (w *Wallet) SendOutputs(outputs []*wire.TxOut, account uint32,
 	return createdTx.Tx, nil
 }
 
-func (w *Wallet) SendOutputsAbe(outputs []*wire.TxOutAbe, minconf int32, satPerKb abeutil.Amount, label string) (*wire.MsgTxAbe, error) {
+func (w *Wallet) SendOutputsAbe(outputDescs []*abepqringct.AbeTxOutDesc, minconf int32, satPerKb abeutil.Amount, label string) (*wire.MsgTxAbe, error) {
 
 	// Ensure the outputs to be created adhere to the network's consensus
 	// rules.
-	for _, output := range outputs {
-		err := txrules.CheckOutputAbe(
-			output, txrules.DefaultRelayFeePerKb,
+	for _, txOutDesc := range outputDescs {
+		err := txrules.CheckOutputDescAbe(
+			txOutDesc, txrules.DefaultRelayFeePerKb,
 		)
 		if err != nil {
 			return nil, err
@@ -4065,7 +4065,7 @@ func (w *Wallet) SendOutputsAbe(outputs []*wire.TxOutAbe, minconf int32, satPerK
 	// transaction will be added to the database in order to ensure that we
 	// continue to re-broadcast the transaction upon restarts until it has
 	// been confirmed.
-	createdTx, err := w.CreateSimpleTxAbe(outputs, minconf, satPerKb, false)
+	createdTx, err := w.CreateSimpleTxAbe(outputDescs, minconf, satPerKb, false)
 	if err != nil {
 		return nil, err
 	}
