@@ -1,8 +1,10 @@
 package wallet
 
 import (
+	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abecrypto/abepqringct"
+	"github.com/abesuite/abec/abecrypto/pqringctparam"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/btcec"
 	"github.com/abesuite/abec/chainhash"
@@ -15,6 +17,8 @@ import (
 	"sort"
 )
 
+const ChangeThreshold abeutil.Amount = 1000
+
 // byAmount defines the methods needed to satisify sort.Interface to
 // sort credits by their output amount.
 type byAmount []wtxmgr.Credit
@@ -25,9 +29,17 @@ func (s byAmount) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 type byAmountAbe []wtxmgr.UnspentUTXO
 
-func (s byAmountAbe) Len() int           { return len(s) }
-func (s byAmountAbe) Less(i, j int) bool { return s[i].Amount < s[j].Amount }
-func (s byAmountAbe) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+func (s byAmountAbe) Len() int { return len(s) }
+func (s byAmountAbe) Less(i, j int) bool {
+	if s[i].Version < s[j].Version {
+		return true
+	} else if s[i].Version > s[j].Version {
+		return false
+	} else {
+		return s[i].Amount < s[j].Amount
+	}
+}
+func (s byAmountAbe) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 func makeInputSource(eligible []wtxmgr.Credit) txauthor.InputSource {
 	// Pick largest outputs first.  This is only done for compatibility with
 	// previous tx creation code, not because it's a good idea.
@@ -112,75 +124,75 @@ func makeInputSource(eligible []wtxmgr.Credit) txauthor.InputSource {
 }*/
 
 //	todo: written by AliceBobScorpio on 2021.06.14, need to be confirm-ed
-func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO) txauthor.InputSourceAbe {
-	// Pick largest outputs first.  This is only done for compatibility with
-	// previous tx creation code, not because it's a good idea.
-	sort.Sort(sort.Reverse(byAmountAbe(eligible)))
-
-	// Current inputs and their total value.  These are closed over by the
-	// returned input source and reused across multiple calls.
-	currentTotal := abeutil.Amount(0)                        // total amount
-	currentInputs := make([]*wire.TxInAbe, 0, len(eligible)) //Inputs
-	currentScripts := make([][]byte, 0, len(eligible))
-	currentInputValues := make([]abeutil.Amount, 0, len(eligible)) //input value
-
-	return func(target abeutil.Amount) (abeutil.Amount, []*wire.TxIn,
-		[]abeutil.Amount, [][]byte, error) {
-
-		for currentTotal < target && len(eligible) != 0 {
-			nextCredit := &eligible[0]
-			eligible = eligible[1:]
-			nextInput := wire.NewTxIn(&nextCredit.OutPoint, nil, nil)
-			currentTotal += nextCredit.Amount
-			currentInputs = append(currentInputs, nextInput)
-			currentScripts = append(currentScripts, nextCredit.PkScript)
-			currentInputValues = append(currentInputValues, nextCredit.Amount)
-		}
-		return currentTotal, currentInputs, currentInputValues, currentScripts, nil
-	}
-
-	/*	return func(target abeutil.Amount) (abeutil.Amount, []*wire.TxInAbe,
-		[]abeutil.Amount, [][]byte, error) {
-		//TODO(abe): Add a serialNumber to NewTXInAbe
-		for currentTotal < target && len(eligible) != 0 {
-			nextUTXO := &eligible[0]
-			eligible = eligible[1:]
-			// TODO(abe):delete it due to we must use dpk ring to generate script, so we do not get the index
-			//index:=0
-			//for ;index<len(rings[nextUTXO.RingHash].TxHashes);index++{
-			//	if rings[nextUTXO.RingHash].TxHashes[index].IsEqual(&nextUTXO.TxOutput.TxHash) &&
-			//		rings[nextUTXO.RingHash].Index[index]==nextUTXO.TxOutput.Index{
-			//		break
-			//	}
-			//}
-			nextInput := wire.NewTxInAbe(&chainhash.Hash{}, &wire.OutPointRing{ // the outpoint index has be put in the serialNumber field
-				BlockHashs: []*chainhash.Hash{},
-				OutPoints:  []*wire.OutPointAbe{},
-			})
-			index := -1
-			for i := 0; i < len(rings[nextUTXO.RingHash].BlockHashes); i++ { // fill up the blockhashes field
-				nextInput.PreviousOutPointRing.BlockHashs = append(nextInput.PreviousOutPointRing.BlockHashs, &rings[nextUTXO.RingHash].BlockHashes[i])
-			}
-			for i := 0; i < len(rings[nextUTXO.RingHash].TxHashes); i++ { //fill up the outpoint field
-				nextInput.PreviousOutPointRing.OutPoints = append(nextInput.PreviousOutPointRing.OutPoints, &wire.OutPointAbe{
-					TxHash: rings[nextUTXO.RingHash].TxHashes[i],
-					Index:  rings[nextUTXO.RingHash].Index[i],
-				})
-				//which input in ring is spent
-				if rings[nextUTXO.RingHash].TxHashes[i] == nextUTXO.TxOutput.TxHash && rings[nextUTXO.RingHash].Index[i] == nextUTXO.TxOutput.Index {
-					currentScripts = append(currentScripts, rings[nextUTXO.RingHash].AddrScript[i])
-					index = i
-				}
-			}
-			currentTotal += abeutil.Amount(nextUTXO.Amount)
-			nextInput.SerialNumber[0] = byte(index) //index is set
-			currentInputs = append(currentInputs, nextInput)
-			amount, _ := abeutil.NewAmountAbe(float64(nextUTXO.Amount))
-			currentInputValues = append(currentInputValues, amount)
-		}
-		return currentTotal, currentInputs, currentInputValues, currentScripts, nil
-	}*/
-}
+//func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO) txauthor.InputSourceAbe {
+//	// Pick largest outputs first.  This is only done for compatibility with
+//	// previous tx creation code, not because it's a good idea.
+//	sort.Sort(sort.Reverse(byAmountAbe(eligible)))
+//
+//	// Current inputs and their total value.  These are closed over by the
+//	// returned input source and reused across multiple calls.
+//	currentTotal := abeutil.Amount(0)                        // total amount
+//	currentInputs := make([]*wire.TxInAbe, 0, len(eligible)) //Inputs
+//	currentScripts := make([][]byte, 0, len(eligible))
+//	currentInputValues := make([]abeutil.Amount, 0, len(eligible)) //input value
+//
+//	return func(target abeutil.Amount) (abeutil.Amount, []*wire.TxIn,
+//		[]abeutil.Amount, [][]byte, error) {
+//
+//		for currentTotal < target && len(eligible) != 0 {
+//			nextCredit := &eligible[0]
+//			eligible = eligible[1:]
+//			nextInput := wire.NewTxIn(&nextCredit.OutPoint, nil, nil)
+//			currentTotal += nextCredit.Amount
+//			currentInputs = append(currentInputs, nextInput)
+//			currentScripts = append(currentScripts, nextCredit.PkScript)
+//			currentInputValues = append(currentInputValues, nextCredit.Amount)
+//		}
+//		return currentTotal, currentInputs, currentInputValues, currentScripts, nil
+//	}
+//
+//	/*	return func(target abeutil.Amount) (abeutil.Amount, []*wire.TxInAbe,
+//		[]abeutil.Amount, [][]byte, error) {
+//		//TODO(abe): Add a serialNumber to NewTXInAbe
+//		for currentTotal < target && len(eligible) != 0 {
+//			nextUTXO := &eligible[0]
+//			eligible = eligible[1:]
+//			// TODO(abe):delete it due to we must use dpk ring to generate script, so we do not get the index
+//			//index:=0
+//			//for ;index<len(rings[nextUTXO.RingHash].TxHashes);index++{
+//			//	if rings[nextUTXO.RingHash].TxHashes[index].IsEqual(&nextUTXO.TxOutput.TxHash) &&
+//			//		rings[nextUTXO.RingHash].Index[index]==nextUTXO.TxOutput.Index{
+//			//		break
+//			//	}
+//			//}
+//			nextInput := wire.NewTxInAbe(&chainhash.Hash{}, &wire.OutPointRing{ // the outpoint index has be put in the serialNumber field
+//				BlockHashs: []*chainhash.Hash{},
+//				OutPoints:  []*wire.OutPointAbe{},
+//			})
+//			index := -1
+//			for i := 0; i < len(rings[nextUTXO.RingHash].BlockHashes); i++ { // fill up the blockhashes field
+//				nextInput.PreviousOutPointRing.BlockHashs = append(nextInput.PreviousOutPointRing.BlockHashs, &rings[nextUTXO.RingHash].BlockHashes[i])
+//			}
+//			for i := 0; i < len(rings[nextUTXO.RingHash].TxHashes); i++ { //fill up the outpoint field
+//				nextInput.PreviousOutPointRing.OutPoints = append(nextInput.PreviousOutPointRing.OutPoints, &wire.OutPointAbe{
+//					TxHash: rings[nextUTXO.RingHash].TxHashes[i],
+//					Index:  rings[nextUTXO.RingHash].Index[i],
+//				})
+//				//which input in ring is spent
+//				if rings[nextUTXO.RingHash].TxHashes[i] == nextUTXO.TxOutput.TxHash && rings[nextUTXO.RingHash].Index[i] == nextUTXO.TxOutput.Index {
+//					currentScripts = append(currentScripts, rings[nextUTXO.RingHash].AddrScript[i])
+//					index = i
+//				}
+//			}
+//			currentTotal += abeutil.Amount(nextUTXO.Amount)
+//			nextInput.SerialNumber[0] = byte(index) //index is set
+//			currentInputs = append(currentInputs, nextInput)
+//			amount, _ := abeutil.NewAmountAbe(float64(nextUTXO.Amount))
+//			currentInputValues = append(currentInputValues, amount)
+//		}
+//		return currentTotal, currentInputs, currentInputValues, currentScripts, nil
+//	}*/
+//}
 
 // secretSource is an implementation of txauthor.SecretSource for the wallet's
 // address manager.
@@ -383,138 +395,138 @@ func (w *Wallet) txToOutputs(outputs []*wire.TxOut, account uint32,
 }
 
 // TODO(abe): compute the transaction fee
-func (w *Wallet) txAbeToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, minconf int32, feeSatPerKb abeutil.Amount, dryRun bool) (
-	unsignedTx *txauthor.AuthoredTxAbe, err error) {
-
-	chainClient, err := w.requireChainClient()
-	if err != nil {
-		return nil, err
-	}
-	bs, err := chainClient.BlockStamp()
-	if err != nil {
-		return nil, err
-	}
-	// TODO(abe):should use a db.View to spend, if successful, use db.Update
-	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
-		eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
-		if err != nil {
-			return err
-		}
-		inputSource := makeInputSourceAbe(eligible, rings)
-		changeSource := func() ([]byte, error) {
-			// Derive the change output script. We'll use the default key
-			// scope responsible for P2WPKH addresses to do so. As a hack to
-			// allow spending from the imported account, change addresses
-			// are created from account 0.
-			return w.ManagerAbe.NewChangeAddress(addrmgrNs)
-		}
-		unsignedTx, err = txauthor.NewUnsignedTransactionAbe(outputs, feeSatPerKb,
-			inputSource, changeSource)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	// Get current block's height and hash.
-	//bs:=w.ManagerAbe.SyncedTo()
-
-	// use db.View to spent coins, if successful, use db.Update to update the database
-
-	// get the unspent transaction output
-
-	// Randomize change position, if change exists, before signing.  This
-	// doesn't affect the serialize size, so the change amount will still
-	// be valid.
-	if unsignedTx.ChangeIndex >= 0 {
-		unsignedTx.RandomizeChangePosition()
-	}
-
-	// If a dry run was requested, we return now before adding the input
-	// scripts, and don't commit the database transaction. The DB will be
-	// rolled back when this method returns to ensure the dry run didn't
-	// alter the DB in any way.
-	if dryRun {
-		return unsignedTx, nil
-	}
-
-	// TODO(abe):refresh the utxo ring
-	//   todo
-	// TODO(abe):need to get serialNumber and signature for all input in new transaction
-	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-		// TODO 20210520: the signed message will be the hash of the transaction information without signature
-		err = unsignedTx.AddAllInputScripts([]byte("this is a test"), w.ManagerAbe, addrmgrNs, txmgrNs)
-		if err != nil {
-			return nil
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	//	todo(ABE): Is this necessary?
-	// TODO(osy): temporary ignore it
-	//err = validateMsgTx(tx.Tx, tx.PrevScripts, tx.PrevInputValues)
-	//if err != nil {
-	//	return nil, err
-	//}
-
-	// TODO(abe):up to here, the transaction will be successful created, so the spent utxo should be marked used and move to SpentButUmined Bucket.
-	//   and modify the utxo ring bucket.
-
-	//txRecordAbe, err := wtxmgr.NewTxRecordAbeFromMsgTxAbe(unsignedTx.Tx, time.Now())
-	//if err != nil {
-	//	return nil, err
-	//}
-	//
-	//err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-	//	txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-	//	err = w.TxStore.InsertTxAbe(txmgrNs, txRecordAbe, nil)
-	//	if err != nil {
-	//		return err
-	//	}
-	//	return nil
-	//})
-	//if err!=nil{
-	//	return nil,err
-	//}
-	return unsignedTx, nil
-	//return unsignedTx, nil
-	//
-	//if err := dbtx.Commit(); err != nil {
-	//	return nil, err
-	//}
-	//
-	////if tx.ChangeIndex >= 0 && account == waddrmgr.ImportedAddrAccount {
-	////	changeAmount := abeutil.Amount(tx.Tx.TxOuts[tx.ChangeIndex].ValueScript)
-	////	log.Warnf("Spend from imported account produced change: moving"+
-	////		" %v from imported account into default account.", changeAmount)
-	////}
-	//
-	//// Finally, we'll request the backend to notify us of the transaction
-	//// that pays to the change address, if there is one, when it confirms.
-	////TODO(abe): this process will be ignore, because we can not spend this change output before this transaction is mined into the chain
-	////if tx.ChangeIndex >= 0 {
-	////	changePkScript := tx.Tx.TxOuts[tx.ChangeIndex].AddressScript
-	////	_, addrs, _, err := txscript.ExtractPkScriptAddrs(
-	////		changePkScript, w.chainParams,
-	////	)
-	////	if err != nil {
-	////		return nil, err
-	////	}
-	////	if err := chainClient.NotifyReceived(addrs); err != nil {
-	////		return nil, err
-	////	}
-	////}
-	//
-	//return tx, nil
-}
+//func (w *Wallet) txAbeToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, minconf int32, feeSatPerKb abeutil.Amount, dryRun bool) (
+//	unsignedTx *txauthor.AuthoredTxAbe, err error) {
+//
+//	chainClient, err := w.requireChainClient()
+//	if err != nil {
+//		return nil, err
+//	}
+//	bs, err := chainClient.BlockStamp()
+//	if err != nil {
+//		return nil, err
+//	}
+//	// TODO(abe):should use a db.View to spend, if successful, use db.Update
+//	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+//		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+//		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+//		eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
+//		if err != nil {
+//			return err
+//		}
+//		inputSource := makeInputSourceAbe(eligible, rings)
+//		changeSource := func() ([]byte, error) {
+//			// Derive the change output script. We'll use the default key
+//			// scope responsible for P2WPKH addresses to do so. As a hack to
+//			// allow spending from the imported account, change addresses
+//			// are created from account 0.
+//			return w.ManagerAbe.NewChangeAddress(addrmgrNs)
+//		}
+//		unsignedTx, err = txauthor.NewUnsignedTransactionAbe(txOutDescs, feeSatPerKb,
+//			inputSource, changeSource)
+//		if err != nil {
+//			return err
+//		}
+//		return nil
+//	})
+//	if err != nil {
+//		return nil, err
+//	}
+//	// Get current block's height and hash.
+//	//bs:=w.ManagerAbe.SyncedTo()
+//
+//	// use db.View to spent coins, if successful, use db.Update to update the database
+//
+//	// get the unspent transaction output
+//
+//	// Randomize change position, if change exists, before signing.  This
+//	// doesn't affect the serialize size, so the change amount will still
+//	// be valid.
+//	if unsignedTx.ChangeIndex >= 0 {
+//		unsignedTx.RandomizeChangePosition()
+//	}
+//
+//	// If a dry run was requested, we return now before adding the input
+//	// scripts, and don't commit the database transaction. The DB will be
+//	// rolled back when this method returns to ensure the dry run didn't
+//	// alter the DB in any way.
+//	if dryRun {
+//		return unsignedTx, nil
+//	}
+//
+//	// TODO(abe):refresh the utxo ring
+//	//   todo
+//	// TODO(abe):need to get serialNumber and signature for all input in new transaction
+//	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+//		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+//		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
+//		// TODO 20210520: the signed message will be the hash of the transaction information without signature
+//		err = unsignedTx.AddAllInputScripts([]byte("this is a test"), w.ManagerAbe, addrmgrNs, txmgrNs)
+//		if err != nil {
+//			return nil
+//		}
+//		return nil
+//	})
+//	if err != nil {
+//		return nil, err
+//	}
+//	//	todo(ABE): Is this necessary?
+//	// TODO(osy): temporary ignore it
+//	//err = validateMsgTx(tx.Tx, tx.PrevScripts, tx.PrevInputValues)
+//	//if err != nil {
+//	//	return nil, err
+//	//}
+//
+//	// TODO(abe):up to here, the transaction will be successful created, so the spent utxo should be marked used and move to SpentButUmined Bucket.
+//	//   and modify the utxo ring bucket.
+//
+//	//txRecordAbe, err := wtxmgr.NewTxRecordAbeFromMsgTxAbe(unsignedTx.Tx, time.Now())
+//	//if err != nil {
+//	//	return nil, err
+//	//}
+//	//
+//	//err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+//	//	txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
+//	//	err = w.TxStore.InsertTxAbe(txmgrNs, txRecordAbe, nil)
+//	//	if err != nil {
+//	//		return err
+//	//	}
+//	//	return nil
+//	//})
+//	//if err!=nil{
+//	//	return nil,err
+//	//}
+//	return unsignedTx, nil
+//	//return unsignedTx, nil
+//	//
+//	//if err := dbtx.Commit(); err != nil {
+//	//	return nil, err
+//	//}
+//	//
+//	////if tx.ChangeIndex >= 0 && account == waddrmgr.ImportedAddrAccount {
+//	////	changeAmount := abeutil.Amount(tx.Tx.TxOuts[tx.ChangeIndex].ValueScript)
+//	////	log.Warnf("Spend from imported account produced change: moving"+
+//	////		" %v from imported account into default account.", changeAmount)
+//	////}
+//	//
+//	//// Finally, we'll request the backend to notify us of the transaction
+//	//// that pays to the change address, if there is one, when it confirms.
+//	////TODO(abe): this process will be ignore, because we can not spend this change output before this transaction is mined into the chain
+//	////if tx.ChangeIndex >= 0 {
+//	////	changePkScript := tx.Tx.TxOuts[tx.ChangeIndex].AddressScript
+//	////	_, addrs, _, err := txscript.ExtractPkScriptAddrs(
+//	////		changePkScript, w.chainParams,
+//	////	)
+//	////	if err != nil {
+//	////		return nil, err
+//	////	}
+//	////	if err := chainClient.NotifyReceived(addrs); err != nil {
+//	////		return nil, err
+//	////	}
+//	////}
+//	//
+//	//return tx, nil
+//}
 
 func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, dryRun bool) (
 	unsignedTx *txauthor.AuthoredTxAbe, err error) {
@@ -537,10 +549,32 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 	if targetValue < 0 || targetValue > abeutil.MaxNeutrino {
 		return nil, fmt.Errorf("target output value %v exceeds the maximum allowd value %v", targetValue, abeutil.MaxNeutrino)
 	}
-
+	var selectedTxos []*wtxmgr.UnspentUTXO
+	var currentTotal abeutil.Amount
+	var selectedRings []*wtxmgr.Ring
+	var txFee abeutil.Amount
+	var mpkBytes, msvkBytes, msskBytes []byte
+	flag := false //whether need to make a change
 	// TODO(abe):should use a db.View to spend, if successful, use db.Update
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		//addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
 		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+		mpkEncBytes, msvkEncBytes, msskEncBytes, err := w.ManagerAbe.FetchMasterKeyEncAbe(addrmgrNs)
+		if err != nil {
+			return err
+		}
+		mpkBytes, err = w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, mpkEncBytes)
+		if err != nil {
+			return err
+		}
+		msvkBytes, err = w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, msvkEncBytes)
+		if err != nil {
+			return err
+		}
+		msskBytes, err = w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, msskEncBytes)
+		if err != nil {
+			return err
+		}
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
 		eligible, err := w.findEligibleTxosAbe(txmgrNs, minconf, bs)
@@ -551,18 +585,20 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 		if len(eligible) == 0 {
 			return err
 		}
-		// todo: order by version-then-amount
+		// todo_DONE: order by version-then-amount
 		//	pick utxos to spend
 		sort.Sort(sort.Reverse(byAmountAbe(eligible)))
+		//TODO check the feeSpecified and feePerKbSpecified
 
+		// fix the transaction fee
 		if feeSpecified > 0 {
+			txFee = feeSpecified
 			currentVersion := eligible[0].Version
-			selectedTxos := make([]*wtxmgr.UnspentUTXO, 0, len(eligible))
-			currentTotal := abeutil.Amount(0) // total amount
+			selectedTxos = make([]*wtxmgr.UnspentUTXO, 0, len(eligible))
+			currentTotal = abeutil.Amount(0) // total amount
 			selectedRingSizes := make([]uint8, 0, len(eligible))
 			for len(eligible) != 0 {
 				nextUtxo := &eligible[0]
-
 				if nextUtxo.Version != currentVersion {
 					currentVersion = nextUtxo.Version
 					selectedTxos = make([]*wtxmgr.UnspentUTXO, 0, len(eligible))
@@ -570,7 +606,6 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 					selectedRingSizes = make([]uint8, 0, len(eligible))
 					continue
 				}
-
 				eligible = eligible[1:]
 
 				currentTotal = currentTotal + abeutil.Amount(nextUtxo.Amount)
@@ -579,15 +614,32 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 				selectedRingSizes = append(selectedRingSizes, nextUtxo.RingSize)
 
 				if currentTotal >= targetValue+feeSpecified {
+					selectedRings = make([]*wtxmgr.Ring, 0, len(selectedTxos))
 					// todo: read selected rings, form the TxIn and the inputDesc, call TxGen
-					break
+					rings := make(map[chainhash.Hash]*wtxmgr.Ring)
+					for _, txo := range selectedTxos {
+						_, ok := rings[txo.RingHash]
+						if !ok {
+							ring, err := wtxmgr.FetchRingDetails(txmgrNs, txo.RingHash[:])
+							if err != nil {
+								return err
+							}
+							rings[txo.RingHash] = ring
+
+						}
+						selectedRings = append(selectedRings, rings[txo.RingHash])
+					}
+					if currentTotal > targetValue+feeSpecified {
+						flag = true
+					}
+					return nil
 				}
 			}
 		} else if feePerKbSpecified > 0 {
 			currentVersion := eligible[0].Version
-			selectedTxos := make([]*wtxmgr.UnspentUTXO, 0, len(eligible))
-			currentTotal := abeutil.Amount(0) // total amount
-			selectedRingSizes := make([]uint8, 0, len(eligible))
+			selectedTxos = make([]*wtxmgr.UnspentUTXO, 0, len(eligible))
+			currentTotal = abeutil.Amount(0) // total amount
+			selectedRingSizes := make([]int, 0, len(eligible))
 			for len(eligible) != 0 {
 				nextUtxo := &eligible[0]
 
@@ -595,7 +647,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 					currentVersion = nextUtxo.Version
 					selectedTxos = make([]*wtxmgr.UnspentUTXO, 0, len(eligible))
 					currentTotal = abeutil.Amount(0)
-					selectedRingSizes = make([]uint8, 0, len(eligible))
+					selectedRingSizes = make([]int, 0, len(eligible))
 					continue
 				}
 
@@ -604,9 +656,67 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 				currentTotal = currentTotal + abeutil.Amount(nextUtxo.Amount)
 				selectedTxos = append(selectedTxos, nextUtxo)
 
-				selectedRingSizes = append(selectedRingSizes, nextUtxo.RingSize)
+				selectedRingSizes = append(selectedRingSizes, int(nextUtxo.RingSize))
 
 				// todo: compute tx size and witness, computes the fee, check amount, compare with changeThreshold
+
+				if currentTotal > targetValue {
+					txVersion := wire.GetCurrentTxVersion()
+					// compute the tx size with witness
+					txoSizes := pqringctparam.GetTxoSerializeSize(txVersion) * uint32(len(txOutDescs))
+					witnessSize := pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs)))
+					fee, err := abeutil.NewAmountAbe(float64(txoSizes+witnessSize) * feePerKbSpecified.ToUnit(abeutil.AmountNeutrino))
+					if err != nil {
+						return err
+					}
+					if targetValue+fee < currentTotal {
+						if currentTotal-targetValue-fee < ChangeThreshold {
+							txFee = currentTotal - targetValue - fee
+							// read the ring
+							selectedRings = make([]*wtxmgr.Ring, 0, len(selectedTxos))
+							// todo: read selected rings, form the TxIn and the inputDesc, call TxGen
+							rings := make(map[chainhash.Hash]*wtxmgr.Ring)
+							for _, txo := range selectedTxos {
+								_, ok := rings[txo.RingHash]
+								if !ok {
+									ring, err := wtxmgr.FetchRingDetails(txmgrNs, txo.RingHash[:])
+									if err != nil {
+										return err
+									}
+									rings[txo.RingHash] = ring
+
+								}
+								selectedRings = append(selectedRings, rings[txo.RingHash])
+							}
+							return nil
+						} else {
+							// need to make a change
+							flag = true
+							txoSizes = pqringctparam.GetTxoSerializeSize(txVersion) * uint32(len(txOutDescs)+1)
+							witnessSize = pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs)))
+							fee, err = abeutil.NewAmountAbe(float64(txoSizes+witnessSize) * feePerKbSpecified.ToUnit(abeutil.AmountNeutrino))
+							if targetValue+fee < currentTotal {
+								txFee = currentTotal - targetValue - fee
+								selectedRings = make([]*wtxmgr.Ring, 0, len(selectedTxos))
+								// todo: read selected rings, form the TxIn and the inputDesc, call TxGen
+								rings := make(map[chainhash.Hash]*wtxmgr.Ring)
+								for _, txo := range selectedTxos {
+									_, ok := rings[txo.RingHash]
+									if !ok {
+										ring, err := wtxmgr.FetchRingDetails(txmgrNs, txo.RingHash[:])
+										if err != nil {
+											return err
+										}
+										rings[txo.RingHash] = ring
+
+									}
+									selectedRings = append(selectedRings, rings[txo.RingHash])
+								}
+								return nil
+							}
+						}
+					}
+				}
 				// if over changethreshold, compute tx size and witheness witness with one more output, then check the amount.
 
 				/*			approxTxSize := wire.PrecomputeTrTxConSize(wire.GetCurrentWireVersion(),  )
@@ -617,40 +727,10 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 							}*/
 			}
 		}
-
-		currentInputs := make([]*wire.TxInAbe, 0, len(eligible)) //Inputs
-		currentScripts := make([][]byte, 0, len(eligible))
-		currentInputValues := make([]abeutil.Amount, 0, len(eligible)) //input value
-
-		return func(target abeutil.Amount) (abeutil.Amount, []*wire.TxIn,
-			[]abeutil.Amount, [][]byte, error) {
-
-			for currentTotal < target && len(eligible) != 0 {
-				nextCredit := &eligible[0]
-				eligible = eligible[1:]
-				nextInput := wire.NewTxIn(&nextCredit.OutPoint, nil, nil)
-				currentTotal += nextCredit.Amount
-				currentInputs = append(currentInputs, nextInput)
-				currentScripts = append(currentScripts, nextCredit.PkScript)
-				currentInputValues = append(currentInputValues, nextCredit.Amount)
-			}
-			return currentTotal, currentInputs, currentInputValues, currentScripts, nil
+		if targetValue+txFee < currentTotal {
+			return nil
 		}
-
-		inputSource := makeInputSourceAbe(eligible, rings)
-		changeSource := func() ([]byte, error) {
-			// Derive the change output script. We'll use the default key
-			// scope responsible for P2WPKH addresses to do so. As a hack to
-			// allow spending from the imported account, change addresses
-			// are created from account 0.
-			return w.ManagerAbe.NewChangeAddress(addrmgrNs)
-		}
-		unsignedTx, err = txauthor.NewUnsignedTransactionAbe(outputs, feeSatPerKb,
-			inputSource, changeSource)
-		if err != nil {
-			return err
-		}
-		return nil
+		return errors.New("not Enough")
 	})
 	if err != nil {
 		return nil, err
@@ -665,34 +745,56 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 	// Randomize change position, if change exists, before signing.  This
 	// doesn't affect the serialize size, so the change amount will still
 	// be valid.
-	if unsignedTx.ChangeIndex >= 0 {
-		unsignedTx.RandomizeChangePosition()
-	}
 
+	// acquire thr master key
+	//  generate the transacion
+	abeTxInputDescs := make([]*abepqringct.AbeTxInputDesc, 0, len(selectedTxos))
+	for i := 0; i < len(selectedTxos); i++ {
+		serializedTxoLists := make([]*wire.TxOutAbe, 0, len(selectedRings[i].Index))
+		for j := 0; j < len(selectedRings[i].Index); j++ {
+			serializedTxoLists = append(serializedTxoLists, &wire.TxOutAbe{
+				Version:   selectedRings[i].Version,
+				TxoScript: selectedRings[i].TxoScripts[j],
+			})
+		}
+		abeTxInputDescs = append(abeTxInputDescs, abepqringct.NewAbeTxInputDesc(serializedTxoLists, int(selectedTxos[i].Index), mpkBytes, msvkBytes, msskBytes, selectedTxos[i].Amount))
+	}
+	if flag {
+		// TODO check the amount to uint64???
+		txOutDescs = append(txOutDescs, abepqringct.NewAbeTxOutDesc(mpkBytes, uint64(currentTotal-txFee-targetValue)))
+	}
+	transferTx, err := abepqringct.TransferTxGen(abeTxInputDescs, txOutDescs, wire.NewMsgTxAbe(wire.GetCurrentTxVersion()))
+	if err != nil {
+		return nil, err
+	}
+	resTx := &txauthor.AuthoredTxAbe{
+		Tx: transferTx,
+	}
+	return resTx, nil
 	// If a dry run was requested, we return now before adding the input
 	// scripts, and don't commit the database transaction. The DB will be
 	// rolled back when this method returns to ensure the dry run didn't
 	// alter the DB in any way.
-	if dryRun {
-		return unsignedTx, nil
-	}
+	//if dryRun {
+	//	return unsignedTx, nil
+	//}
 
 	// TODO(abe):refresh the utxo ring
 	//   todo
 	// TODO(abe):need to get serialNumber and signature for all input in new transaction
-	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-		// TODO 20210520: the signed message will be the hash of the transaction information without signature
-		err = unsignedTx.AddAllInputScripts([]byte("this is a test"), w.ManagerAbe, addrmgrNs, txmgrNs)
-		if err != nil {
-			return nil
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
+	//err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+	//	addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+	//	txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
+	//	// TODO 20210520: the signed message will be the hash of the transaction information without signature
+	//	err = unsignedTx.AddAllInputScripts([]byte("this is a test"), w.ManagerAbe, addrmgrNs, txmgrNs)
+	//	if err != nil {
+	//		return nil
+	//	}
+	//	return nil
+	//})
+	//if err != nil {
+	//	return nil, err
+	//}
 	//	todo(ABE): Is this necessary?
 	// TODO(osy): temporary ignore it
 	//err = validateMsgTx(tx.Tx, tx.PrevScripts, tx.PrevInputValues)
@@ -719,7 +821,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 	//if err!=nil{
 	//	return nil,err
 	//}
-	return unsignedTx, nil
+	//return unsignedTx, nil
 	//return unsignedTx, nil
 	//
 	//if err := dbtx.Commit(); err != nil {

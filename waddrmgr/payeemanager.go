@@ -96,7 +96,7 @@ func (p *PayeeManager) RemoveMPK(ns walletdb.ReadWriteBucket, addr ManagedAddres
 func (p PayeeManager) SerializeSize() int {
 	totalSize := 2 + 2 + len([]byte(p.name)) + 2 + 2*len(p.mpks) + 8 + 2 + 16*len(p.states)
 	for _, mpk := range p.mpks {
-		totalSize += mpk.SerializeSize()
+		totalSize += int(mpk.SerializeSize())
 	}
 	return totalSize
 }
@@ -114,8 +114,8 @@ func (p PayeeManager) Serialize() []byte {
 	for _, mpk := range p.mpks {
 		binary.BigEndian.PutUint16(res[offset:offset+2], uint16(mpk.SerializeSize()))
 		offset += 2
-		copy(res[offset:offset+mpk.SerializeSize()], mpk.Serialize())
-		offset += mpk.SerializeSize()
+		copy(res[offset:offset+int(mpk.SerializeSize())], mpk.Serialize())
+		offset += int(mpk.SerializeSize())
 	}
 	binary.BigEndian.PutUint64(res[offset:offset+8], uint64(p.totalAmount))
 	offset += 8

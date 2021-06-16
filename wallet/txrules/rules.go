@@ -142,8 +142,8 @@ func FeeForSerializeSizeAbe(relayFeePerKb abeutil.Amount, txSerializeSize int) a
 		fee = relayFeePerKb
 	}
 
-	if fee < 0 || fee > abeutil.MaxSatoshi {
-		fee = abeutil.MaxSatoshi
+	if fee < 0 || fee > abeutil.MaxNeutrino {
+		fee = abeutil.MaxNeutrino
 	}
 
 	return fee

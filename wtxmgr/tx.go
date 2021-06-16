@@ -274,6 +274,7 @@ type UnspentUTXO struct {
 	TxOutput     wire.OutPointAbe //the outpoint
 	FromCoinBase bool
 	Amount       uint64
+	Index        uint8  //TODO(osy,20210617) finish this field read and write
 	//ValueScript    int64
 	//AddrScript     []byte
 	GenerationTime time.Time      //at this moment, it also useless
