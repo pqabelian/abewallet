@@ -1486,11 +1486,12 @@ type (
 		resp        chan createTxResponse
 	}
 	createTxAbeRequest struct {
-		txOutDescs  []*abepqringct.AbeTxOutDesc
-		minconf     int32
-		feeSatPerKB abeutil.Amount
-		dryRun      bool
-		resp        chan createTxAbeResponse
+		txOutDescs        []*abepqringct.AbeTxOutDesc
+		minconf           int32
+		feePerKbSpecified abeutil.Amount
+		feeSpecified      abeutil.Amount
+		dryRun            bool
+		resp              chan createTxAbeResponse
 	}
 	createTxResponse struct {
 		tx  *txauthor.AuthoredTx
@@ -1544,7 +1545,9 @@ out:
 				txr.resp <- createTxAbeResponse{nil, err}
 				continue
 			}
-			tx, err := w.txAbeToOutputs(txr.txOutDescs, txr.minconf, txr.feeSatPerKB, txr.dryRun)
+			// todo(AliceBob): rename the methods
+			//tx, err := w.txAbeToOutputs(txr.txOutDescs, txr.minconf, txr.feeSatPerKB, txr.dryRun)
+			tx, err := w.txAbePqringCTToOutputs(txr.txOutDescs, txr.minconf, txr.feePerKbSpecified, txr.feeSpecified, txr.dryRun)
 			heldUnlock.release()
 			txr.resp <- createTxAbeResponse{tx, err}
 		case <-quit:
@@ -1581,14 +1584,15 @@ func (w *Wallet) CreateSimpleTx(account uint32, outputs []*wire.TxOut,
 }
 
 func (w *Wallet) CreateSimpleTxAbe(outputDescs []*abepqringct.AbeTxOutDesc, minconf int32,
-	satPerKb abeutil.Amount, dryRun bool) (*txauthor.AuthoredTxAbe, error) {
+	feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, dryRun bool) (*txauthor.AuthoredTxAbe, error) {
 
 	req := createTxAbeRequest{
-		txOutDescs:  outputDescs,
-		minconf:     minconf,
-		feeSatPerKB: satPerKb,
-		dryRun:      dryRun,
-		resp:        make(chan createTxAbeResponse),
+		txOutDescs:        outputDescs,
+		minconf:           minconf,
+		feePerKbSpecified: feePerKbSpecified,
+		feeSpecified:      feeSpecified,
+		dryRun:            dryRun,
+		resp:              make(chan createTxAbeResponse),
 	}
 	w.createTxAbeRequests <- req
 	resp := <-req.resp
@@ -4048,7 +4052,7 @@ func (w *Wallet) SendOutputs(outputs []*wire.TxOut, account uint32,
 	return createdTx.Tx, nil
 }
 
-func (w *Wallet) SendOutputsAbe(outputDescs []*abepqringct.AbeTxOutDesc, minconf int32, satPerKb abeutil.Amount, label string) (*wire.MsgTxAbe, error) {
+func (w *Wallet) SendOutputsAbe(outputDescs []*abepqringct.AbeTxOutDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, label string) (*wire.MsgTxAbe, error) {
 
 	// Ensure the outputs to be created adhere to the network's consensus
 	// rules.
@@ -4065,7 +4069,7 @@ func (w *Wallet) SendOutputsAbe(outputDescs []*abepqringct.AbeTxOutDesc, minconf
 	// transaction will be added to the database in order to ensure that we
 	// continue to re-broadcast the transaction upon restarts until it has
 	// been confirmed.
-	createdTx, err := w.CreateSimpleTxAbe(outputDescs, minconf, satPerKb, false)
+	createdTx, err := w.CreateSimpleTxAbe(outputDescs, minconf, feePerKbSpecified, feeSpecified, false)
 	if err != nil {
 		return nil, err
 	}

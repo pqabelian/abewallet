@@ -1475,11 +1475,13 @@ func deleteMaturedOutput(ns walletdb.ReadWriteBucket, k []byte) error {
 //UnspentTXO: store the relevant output which is unspent by current wallet
 // its key is transaction hash with the output index
 // its value is relevant information : From height,Fromcoinbase,amount,generation time, rinhash
-func valueUnspentTXO(fromCoinBase bool, height int32, amount uint64, generationTime time.Time, ringHash chainhash.Hash, ringSize uint8) []byte {
-	size := 4 + 1 + 8 + 8 + 32 + 1
+func valueUnspentTXO(fromCoinBase bool, version uint32, height int32, amount uint64, generationTime time.Time, ringHash chainhash.Hash, ringSize uint8) []byte {
+	size := 4 + 4 + 1 + 8 + 8 + 32 + 1
 	//	todo: should use HashSize, rather than 32
 	v := make([]byte, size)
 	offset := 0
+	byteOrder.PutUint32(v[offset:offset+4], version)
+	offset += 4
 	byteOrder.PutUint32(v[offset:offset+4], uint32(height))
 	offset += 4
 	if fromCoinBase {
@@ -1532,12 +1534,14 @@ func deleteUnspentTXO(ns walletdb.ReadWriteBucket, k []byte) error {
 // its key is transaction hash with the output index
 // its value is relevant information :
 // height, from coinbase,amount,generation time, rinhash,serialNumber，spentBy, spentTime,
-func valueSpentButUnminedTXO(height int, fromCoinBase bool, amount int64, generationTime time.Time,
-	ringHash chainhash.Hash, spentBy chainhash.Hash, spentTime time.Time) []byte {
-	size := 4 + 1 + 8 + 8 + 32 + 32 + 8
+func valueSpentButUnminedTXO(version uint32, height int, fromCoinBase bool, amount int64, generationTime time.Time,
+	ringHash chainhash.Hash, ringSize uint8, spentBy chainhash.Hash, spentTime time.Time) []byte {
+	size := 4 + 4 + 1 + 8 + 8 + 32 + 1 + 32 + 8
 	v := make([]byte, size)
 	offset := 0
-	byteOrder.PutUint32(v[offset:offset+8], uint32(height))
+	byteOrder.PutUint32(v[offset:offset+4], version)
+	offset += 4
+	byteOrder.PutUint32(v[offset:offset+4], uint32(height))
 	offset += 4
 	if fromCoinBase {
 		v[offset] = byte(1)
@@ -1551,6 +1555,8 @@ func valueSpentButUnminedTXO(height int, fromCoinBase bool, amount int64, genera
 	offset += 8
 	copy(v[offset:offset+32], ringHash[:])
 	offset += 32
+	v[offset] = ringSize
+	offset += 1
 	copy(v[offset:offset+32], spentBy[:])
 	offset += 32
 	byteOrder.PutUint64(v[offset:offset+8], uint64(spentTime.Unix()))
@@ -1571,7 +1577,7 @@ func fetchSpentButUnminedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, i
 	if v == nil {
 		return nil, fmt.Errorf("empty entry")
 	}
-	if len(v) < 93 {
+	if len(v) < 98 {
 		str := "wrong value in spent but unmined output bucket"
 		return nil, fmt.Errorf(str)
 	}
@@ -1579,6 +1585,8 @@ func fetchSpentButUnminedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, i
 	sbu.TxOutput.TxHash = hash
 	sbu.TxOutput.Index = index
 	offset := 0
+	sbu.Version = byteOrder.Uint32(v[offset : offset+4])
+	offset += 4
 	sbu.Height = int32(byteOrder.Uint32(v[offset : offset+4]))
 	offset += 4
 	t := v[offset]
@@ -1588,12 +1596,14 @@ func fetchSpentButUnminedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, i
 	} else {
 		sbu.FromCoinBase = true
 	}
-	sbu.Amount = int64(byteOrder.Uint64(v[offset : offset+8]))
+	sbu.Amount = byteOrder.Uint64(v[offset : offset+8])
 	offset += 8
 	sbu.GenerationTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
 	offset += 8
 	copy(sbu.RingHash[:], v[offset:offset+32])
 	offset += 32
+	sbu.RingSize = v[offset]
+	offset += 1
 	copy(sbu.SpentByHash[:], v[offset:offset+32])
 	offset += 32
 	sbu.SpentTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
@@ -1617,12 +1627,14 @@ func deleteSpentButUnminedTXO(ns walletdb.ReadWriteBucket, k []byte) error {
 // SpentConfirmedTXO: store the relevant output which is spent by current wallet and now is contained in a block
 // its key is transaction hash with the output index
 // its value is relevant information : height,From coinbase,amount,generation time, rinhash,serialNumber，spentTime,confirmedTime
-func valueSpentConfirmedTXO(height int, fromCoinBase bool, amount int64, generationTime time.Time,
-	ringHash chainhash.Hash, spentBy chainhash.Hash, spentTime time.Time, confirmTime time.Time) []byte {
-	size := 4 + 1 + 8 + 8 + 32 + 32 + 8 + 8
+func valueSpentConfirmedTXO(version uint32, height int, fromCoinBase bool, amount int64, generationTime time.Time,
+	ringHash chainhash.Hash, ringSize uint8, spentBy chainhash.Hash, spentTime time.Time, confirmTime time.Time) []byte {
+	size := 4 + 4 + 1 + 8 + 8 + 32 + 1 + 32 + 8 + 8
 	v := make([]byte, size)
 	offset := 0
-	byteOrder.PutUint32(v[offset:offset+8], uint32(height))
+	byteOrder.PutUint32(v[offset:offset+4], version)
+	offset += 4
+	byteOrder.PutUint32(v[offset:offset+4], uint32(height))
 	offset += 4
 	if fromCoinBase {
 		v[offset] = byte(1)
@@ -1636,6 +1648,8 @@ func valueSpentConfirmedTXO(height int, fromCoinBase bool, amount int64, generat
 	offset += 8
 	copy(v[offset:offset+32], ringHash[:])
 	offset += 32
+	v[offset] = ringSize
+	offset += 1
 	copy(v[offset:offset+32], spentBy[:])
 	offset += 32
 	byteOrder.PutUint64(v[offset:offset+8], uint64(spentTime.Unix()))
@@ -1658,7 +1672,8 @@ func fetchSpentConfirmedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, in
 	if v == nil {
 		return nil, fmt.Errorf("empty entry")
 	}
-	if len(v) != 69 {
+	//if len(v) != 69 { // todo: AliceBob should not use hardcode
+	if len(v) != 74 { // todo: AliceBob should not use hardcode
 		str := "wrong value in spent and confirmed output bucket"
 		return nil, fmt.Errorf(str)
 	}
@@ -1666,6 +1681,8 @@ func fetchSpentConfirmedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, in
 	sct.TxOutput.TxHash = hash
 	sct.TxOutput.Index = index
 	offset := 0
+	sct.Version = byteOrder.Uint32(v[offset : offset+4])
+	offset += 4
 	sct.Height = int32(byteOrder.Uint32(v[offset : offset+4]))
 	offset += 4
 	t := v[offset]
@@ -1675,7 +1692,7 @@ func fetchSpentConfirmedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, in
 	} else {
 		sct.FromCoinBase = true
 	}
-	sct.Amount = int64(byteOrder.Uint64(v[offset : offset+8]))
+	sct.Amount = uint64(byteOrder.Uint64(v[offset : offset+8]))
 	offset += 8
 	sct.GenerationTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
 	offset += 8

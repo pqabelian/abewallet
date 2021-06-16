@@ -268,7 +268,8 @@ type Credit struct {
 	FromCoinBase bool
 }
 type UnspentUTXO struct {
-	Height int32 // the block height used to identify whether this utox can be spent in current height
+	Version uint32 // todo: added by AliceBob 20210616, the version of corresponding Txo in blockchain, and the same as that of the ring
+	Height  int32  // the block height used to identify whether this utox can be spent in current height
 	//BlockHash      chainhash.Hash
 	TxOutput     wire.OutPointAbe //the outpoint
 	FromCoinBase bool
@@ -280,21 +281,24 @@ type UnspentUTXO struct {
 	RingSize       uint8          // set together with RingHash, uint8 is reasonable and larger enough
 }
 
-func NewUnspentUTXO(height int32, txOutput wire.OutPointAbe, fromCoinBase bool, amount uint64, generationTime time.Time, ringHash chainhash.Hash, ringSize uint8) *UnspentUTXO {
-	return &UnspentUTXO{Height: height, TxOutput: txOutput, FromCoinBase: fromCoinBase, Amount: amount, GenerationTime: generationTime, RingHash: ringHash, RingSize: ringSize}
+func NewUnspentUTXO(version uint32, height int32, txOutput wire.OutPointAbe, fromCoinBase bool, amount uint64, generationTime time.Time, ringHash chainhash.Hash, ringSize uint8) *UnspentUTXO {
+	return &UnspentUTXO{Version: version, Height: height, TxOutput: txOutput, FromCoinBase: fromCoinBase, Amount: amount, GenerationTime: generationTime, RingHash: ringHash, RingSize: ringSize}
 }
 
 func (utxo *UnspentUTXO) Deserialize(op *wire.OutPointAbe, v []byte) error {
 	if v == nil {
 		return fmt.Errorf("empty byte slice")
 	}
-	if len(v) < 49 {
+	//	if len(v) < 49 { // todo: 2021.06.16 hardcode needs to be fixed
+	if len(v) < 55 { // todo: 2021.06.16 hardcode needs to be fixed
 		str := "wrong size of serialized unspent transaction output"
 		return fmt.Errorf(str)
 	}
 	utxo.TxOutput.TxHash = op.TxHash
 	utxo.TxOutput.Index = op.Index
 	offset := 0
+	utxo.Version = byteOrder.Uint32(v[offset : offset+4])
+	offset += 4
 	utxo.Height = int32(byteOrder.Uint32(v[offset : offset+4]))
 	offset += 4
 	t := v[offset]
@@ -319,7 +323,8 @@ func (utxo *UnspentUTXO) Deserialize(op *wire.OutPointAbe, v []byte) error {
 }
 
 type SpentButUnminedTXO struct { //TODO(abe):should add a field to denote which tx spent this utxo
-	Height int32
+	Version uint32 // todo: added by AliceBob 20210616, the version of corresponding Txo in blockchain, and the same as that of the ring
+	Height  int32
 	//BlockHash      chainhash.Hash
 	TxOutput     wire.OutPointAbe
 	FromCoinBase bool
@@ -333,7 +338,8 @@ type SpentButUnminedTXO struct { //TODO(abe):should add a field to denote which 
 	SpentTime      time.Time
 }
 type SpentConfirmedTXO struct { //TODO(abe):should add a field to denote which tx spent this utxo
-	Height int32
+	Version uint32 // todo: added by AliceBob 20210616, the version of corresponding Txo in blockchain, and the same as that of the ring
+	Height  int32
 	//BlockHash      chainhash.Hash
 	TxOutput     wire.OutPointAbe
 	FromCoinBase bool
@@ -434,6 +440,7 @@ func (r Ring) Serialize() []byte {
 	return res
 }
 func (r *Ring) Deserialize(b []byte) error {
+	//	todo: AliceBob 20210616, Version is not handled
 	if len(b) < 32*wire.BlockNumPerRingGroup+(32+2+8) {
 		return fmt.Errorf("wrong length of input byte slice")
 	}
@@ -476,13 +483,22 @@ func (r *Ring) Deserialize(b []byte) error {
 
 // blockHash0||blockHash1||blockHash2||txHash0||index0||txHash1||index1||...
 func (r Ring) Hash() []byte {
-	size := wire.BlockNumPerRingGroup*32 + len(r.TxHashes)*(32+1)
+	//	todo: AliceBob 20210616, Version is not handled
+	//  todo: what is the relation between the ring here and the utxoring in abec? Shall they be kept consistent?
+
+	size := 4 + 1 + int(wire.GetWireParamBlockNumPerRingGroup(r.Version))*chainhash.HashSize + 1 + len(r.TxHashes)*(chainhash.HashSize+1)
 	v := make([]byte, size)
 	offset := 0
-	for i := 0; i < wire.BlockNumPerRingGroup; i++ {
+	byteOrder.PutUint32(v[offset:offset+4], r.Version)
+	offset += 4
+	v[offset] = wire.GetWireParamBlockNumPerRingGroup(r.Version)
+	offset += 1
+	for i := 0; i < int(wire.GetWireParamBlockNumPerRingGroup(r.Version)); i++ {
 		copy(v[offset:offset+32], r.BlockHashes[i][:])
 		offset += 32
 	}
+	v[offset] = uint8(len(r.TxHashes))
+	offset += 1
 	for i := 0; i < len(r.TxHashes); i++ {
 		copy(v[offset:offset+32], r.TxHashes[i][:])
 		offset += 32
@@ -1729,7 +1745,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 				TxHash: coinbaseTx.TxHash(),
 				Index:  uint8(i),
 			}
-			tmp := NewUnspentUTXO(b.Height, k, true, v, block.RecvTime, chainhash.ZeroHash, 0)
+			tmp := NewUnspentUTXO(coinbaseTx.TxOuts[i].Version, b.Height, k, true, v, block.RecvTime, chainhash.ZeroHash, 0)
 			coinbaseOutput[k] = tmp
 			blockOutputs[b] = append(blockOutputs[b], k)
 		}
@@ -1870,7 +1886,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 
 		// for all output in the given transaction
 		for j := 0; j < len(txi.TxOuts); j++ {
-			valid, v := abepqringct.TxoCoinReceive(txi.TxOuts[i], serializedMPK, serializedMSVK)
+			valid, v := abepqringct.TxoCoinReceive(txi.TxOuts[j], serializedMPK, serializedMSVK)
 			if valid && v != 0 {
 				amt, err := abeutil.NewAmountAbe(float64(v))
 				if err != nil {
@@ -1882,7 +1898,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 					TxHash: coinbaseTx.TxHash(),
 					Index:  uint8(i),
 				}
-				tmp := NewUnspentUTXO(b.Height, k, true, v, block.RecvTime, chainhash.ZeroHash, 0)
+				tmp := NewUnspentUTXO(txi.TxOuts[j].Version, b.Height, k, true, v, block.RecvTime, chainhash.ZeroHash, 0)
 				transferOutputs[k] = tmp
 				blockOutputs[b] = append(blockOutputs[b], k)
 			}
@@ -2174,7 +2190,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 		}
 		// transfer output -> mature
 		for op, utxo := range block1TransferUTXO {
-			v := valueUnspentTXO(false, utxo.Height, utxo.Amount, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
+			v := valueUnspentTXO(false, utxo.Version, utxo.Height, utxo.Amount, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 			amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
 			if err != nil {
 				return err
@@ -2187,7 +2203,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			}
 		}
 		for op, utxo := range block0TransferUTXO {
-			v := valueUnspentTXO(false, utxo.Height, utxo.Amount, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
+			v := valueUnspentTXO(false, utxo.Version, utxo.Height, utxo.Amount, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 			amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
 			if err != nil {
 				return err
@@ -2210,7 +2226,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 	}
 	if block.Height%3 == 2 { // transfer output is matured
 		for op, utxo := range transferOutputs {
-			v := valueUnspentTXO(false, utxo.Height, utxo.Amount, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
+			v := valueUnspentTXO(false, utxo.Version, utxo.Height, utxo.Amount, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 			err = putRawMaturedOutput(ns, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
 				return err
@@ -2231,12 +2247,12 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 	// fetch the matured coinbase output block.Height-Maturity
 	if block.Height >= int32(s.chainParams.CoinbaseMaturity)+2 && block.Height%3 == 2 {
 		for i := 0; i < len(maturedBlockHashs); i++ {
-			utxo, err := fetchImmaturedCoinbaseOutput(ns, block.Height-int32(s.chainParams.CoinbaseMaturity)-int32(i), *maturedBlockHashs[i])
+			utxos, err := fetchImmaturedCoinbaseOutput(ns, block.Height-int32(s.chainParams.CoinbaseMaturity)-int32(i), *maturedBlockHashs[i])
 			if err != nil {
 				return err
 			}
-			for op, utxo := range utxo {
-				v := valueUnspentTXO(true, block.Height-int32(s.chainParams.CoinbaseMaturity), utxo.Amount, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
+			for op, utxo := range utxos {
+				v := valueUnspentTXO(true, utxo.Version, block.Height-int32(s.chainParams.CoinbaseMaturity), utxo.Amount, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 				amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
 				if err != nil {
 					return err
@@ -2442,7 +2458,7 @@ func (s *Store) RemoveUnminedTxAbe(ns walletdb.ReadWriteBucket, rec *TxRecordAbe
 			//err = putRawUnspentTXO(ns,
 			err = putRawMaturedOutput(ns,
 				canonicalOutPointAbe(txIn.PreviousOutPointRing.OutPoints[j].TxHash, txIn.PreviousOutPointRing.OutPoints[j].Index),
-				valueUnspentTXO(sbutxo.FromCoinBase, sbutxo.Height, sbutxo.Amount, sbutxo.GenerationTime, sbutxo.RingHash, sbutxo.RingSize))
+				valueUnspentTXO(sbutxo.FromCoinBase, sbutxo.Version, sbutxo.Height, sbutxo.Amount, sbutxo.GenerationTime, sbutxo.RingHash, sbutxo.RingSize))
 			if err != nil {
 				return err
 			}
@@ -2928,7 +2944,7 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 					if _, ok := willDeleteRingHash[txo.RingHash]; !ok {
 						willDeleteRingHash[txo.RingHash] = struct{}{}
 					}
-					newV := valueUnspentTXO(txo.FromCoinBase, txo.Height, txo.Amount, txo.GenerationTime, chainhash.ZeroHash, 0)
+					newV := valueUnspentTXO(txo.FromCoinBase, txo.Version, txo.Height, txo.Amount, txo.GenerationTime, chainhash.ZeroHash, 0)
 					err := putRawUnspentTXO(ns, k, newV)
 					if err != nil {
 						return fmt.Errorf("putRawUnspentTXO error in rollbackAbe : %v", err)
@@ -2941,7 +2957,7 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 					if _, ok := willDeleteRingHash[txo.RingHash]; !ok {
 						willDeleteRingHash[txo.RingHash] = struct{}{}
 					}
-					newV := valueUnspentTXO(unmined.FromCoinBase, unmined.Height, unmined.Amount, unmined.GenerationTime, chainhash.ZeroHash, 0)
+					newV := valueUnspentTXO(unmined.FromCoinBase, unmined.Version, unmined.Height, unmined.Amount, unmined.GenerationTime, chainhash.ZeroHash, 0)
 					err = putRawUnspentTXO(ns, k, newV) // move to unspent txo bucket
 					if err != nil {
 						return fmt.Errorf("putRawUnspentTXO error in rollbackAbe : %v", err)
@@ -2961,7 +2977,7 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 					if _, ok := willDeleteRingHash[txo.RingHash]; !ok {
 						willDeleteRingHash[txo.RingHash] = struct{}{}
 					}
-					newV := valueUnspentTXO(txo.FromCoinBase, txo.Height, txo.Amount, txo.GenerationTime, chainhash.ZeroHash, 0)
+					newV := valueUnspentTXO(txo.FromCoinBase, txo.Version, txo.Height, txo.Amount, txo.GenerationTime, chainhash.ZeroHash, 0)
 					err := putRawUnspentTXO(ns, k, newV)
 					if err != nil {
 						return fmt.Errorf("putRawUnspentTXO error in rollbackAbe : %v", err)
@@ -2974,7 +2990,7 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 					if _, ok := willDeleteRingHash[txo.RingHash]; !ok {
 						willDeleteRingHash[txo.RingHash] = struct{}{}
 					}
-					newV := valueUnspentTXO(unmined.FromCoinBase, unmined.Height, unmined.Amount, unmined.GenerationTime, chainhash.ZeroHash, 0)
+					newV := valueUnspentTXO(unmined.FromCoinBase, unmined.Version, unmined.Height, unmined.Amount, unmined.GenerationTime, chainhash.ZeroHash, 0)
 					err = putRawUnspentTXO(ns, k, newV)
 					if err != nil {
 						return fmt.Errorf("putRawUnspentTXO error in rollbackAbe : %v", err)

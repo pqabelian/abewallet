@@ -31,6 +31,14 @@ func GetDustThreshold(scriptSize int, relayFeePerKb abeutil.Amount) abeutil.Amou
 	return 3 * relayFee
 }
 
+//	todo:AliceBob, 2021.06.15
+/*
+For change under the threshold, it will be regarded as fee, i.e., without change
+*/
+func GetChangeThreshold() abeutil.Amount {
+	return abeutil.Amount(1000)
+}
+
 // IsDustAmount determines whether a transaction output value and script length would
 // cause the output to be considered dust.  Transactions with dust outputs are
 // not standard and are rejected by mempools with default policies.

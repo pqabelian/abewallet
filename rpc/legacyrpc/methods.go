@@ -1504,7 +1504,9 @@ func sendPairs(w *wallet.Wallet, amounts map[string]abeutil.Amount,
 func isNilOrEmpty(s *string) bool {
 	return s == nil || *s == ""
 }
-func sendPairsAbe(w *wallet.Wallet, amounts map[string]abeutil.Amount,
+
+//	todo: to confirm : modified by AliceBob on 15 June
+/*func sendPairsAbe(w *wallet.Wallet, amounts map[string]abeutil.Amount,
 	minconf int32, feeSatPerKb abeutil.Amount) (string, error) {
 
 	//outputs, err := makeOutputsAbe(w, amounts, w.ChainParams())
@@ -1534,7 +1536,40 @@ func sendPairsAbe(w *wallet.Wallet, amounts map[string]abeutil.Amount,
 	txHashStr := tx.TxHash().String()
 	log.Infof("Successfully sent transaction %v", txHashStr)
 	return txHashStr, nil
+}*/
+
+func sendPairsAbe(w *wallet.Wallet, amounts map[string]abeutil.Amount,
+	minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount) (string, error) {
+
+	//outputs, err := makeOutputsAbe(w, amounts, w.ChainParams())
+	outputDescs, err := makeOutputDescs(w, amounts, w.ChainParams())
+	if err != nil {
+		return "", err
+	}
+	tx, err := w.SendOutputsAbe(outputDescs, minconf, feePerKbSpecified, feeSpecified, "") // TODO(abe): what's label?
+	if err != nil {
+		if err == txrules.ErrAmountNegative {
+			return "", ErrNeedPositiveAmount
+		}
+		if waddrmgr.IsError(err, waddrmgr.ErrLocked) {
+			return "", &ErrWalletUnlockNeeded
+		}
+		switch err.(type) {
+		case abejson.RPCError:
+			return "", err
+		}
+
+		return "", &abejson.RPCError{
+			Code:    abejson.ErrRPCInternal.Code,
+			Message: err.Error(),
+		}
+	}
+
+	txHashStr := tx.TxHash().String()
+	log.Infof("Successfully sent transaction %v", txHashStr)
+	return txHashStr, nil
 }
+
 func sendToPayees(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.SendToPayeesCmd)
 
@@ -1563,7 +1598,27 @@ func sendToPayees(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 		pairs[k] = amt
 	}
 
-	return sendPairsAbe(w, pairs, minConf, txrules.DefaultRelayFeePerKb)
+	//	todo: the fee policy
+	feeSatPerKb := txrules.DefaultRelayFeePerKb // todo: AliceBobScorpio, should use the feeSatPerKb received from abec
+	scaleToFeeSatPerKb := float64(*cmd.ScaleToFeeSatPerKb)
+	feeSpecified, err := abeutil.NewAmountAbe(float64(*cmd.FeeSpecified))
+	if err != nil {
+		return nil, err
+	}
+
+	if scaleToFeeSatPerKb > 0 {
+		feeSatPerKb = feeSatPerKb.MulF64(scaleToFeeSatPerKb)
+		feeSpecified = abeutil.Amount(0)
+	} else if feeSpecified == 0 {
+		//	if neither scaleToFeeSatPerKb or feeSpecified is specified, the use scaleToFeeSatPerKb = 1
+		//	feeSatPerKb = feeSatPerKb
+		//	feeSpecified = 0
+		//	i.e. nothing to do
+	}
+
+	// return sendPairsAbe(w, pairs, minConf, txrules.DefaultRelayFeePerKb)
+	//	todo: AliceBobScorpio, should use the feeSatPerKb received from abec
+	return sendPairsAbe(w, pairs, minConf, feeSatPerKb, feeSpecified)
 }
 
 // sendFrom handles a sendfrom RPC request by creating a new transaction
