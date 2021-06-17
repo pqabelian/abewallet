@@ -552,6 +552,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 	var selectedTxos []*wtxmgr.UnspentUTXO
 	var currentTotal abeutil.Amount
 	var selectedRings []*wtxmgr.Ring
+	var inputRingVersions []uint32
 	var txFee abeutil.Amount
 	var mpkBytes, msvkBytes, msskBytes []byte
 	flag := false //whether need to make a change
@@ -610,7 +611,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 
 				currentTotal = currentTotal + abeutil.Amount(nextUtxo.Amount)
 				selectedTxos = append(selectedTxos, nextUtxo)
-
+				inputRingVersions=append(inputRingVersions,nextUtxo.Version)
 				selectedRingSizes = append(selectedRingSizes, nextUtxo.RingSize)
 
 				if currentTotal >= targetValue+feeSpecified {
@@ -630,6 +631,9 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 						selectedRings = append(selectedRings, rings[txo.RingHash])
 					}
 					if currentTotal > targetValue+feeSpecified {
+						if currentTotal-targetValue-feeSpecified>0{
+
+						}
 						flag = true
 					}
 					return nil
@@ -655,7 +659,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 
 				currentTotal = currentTotal + abeutil.Amount(nextUtxo.Amount)
 				selectedTxos = append(selectedTxos, nextUtxo)
-
+				inputRingVersions=append(inputRingVersions,nextUtxo.Version)
 				selectedRingSizes = append(selectedRingSizes, int(nextUtxo.RingSize))
 
 				// todo: compute tx size and witness, computes the fee, check amount, compare with changeThreshold
@@ -663,9 +667,9 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 				if currentTotal > targetValue {
 					txVersion := wire.GetCurrentTxVersion()
 					// compute the tx size with witness
-					txoSizes := pqringctparam.GetTxoSerializeSize(txVersion) * uint32(len(txOutDescs))
+					txConSize := wire.PrecomputeTrTxConSize(txVersion,inputRingVersions,selectedRingSizes, uint8(len(txOutDescs)),pqringctparam.GetTxMemoMaxLen(txVersion)) * uint32(len(txOutDescs)) //TODO osy 20210618
 					witnessSize := pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs)))
-					fee, err := abeutil.NewAmountAbe(float64(txoSizes+witnessSize) * feePerKbSpecified.ToUnit(abeutil.AmountNeutrino))
+					fee, err := abeutil.NewAmountAbe(float64(txConSize+witnessSize) * feePerKbSpecified.ToUnit(abeutil.AmountNeutrino))
 					if err != nil {
 						return err
 					}
@@ -692,9 +696,9 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 						} else {
 							// need to make a change
 							flag = true
-							txoSizes = pqringctparam.GetTxoSerializeSize(txVersion) * uint32(len(txOutDescs)+1)
+							txConSize = pqringctparam.GetTxoSerializeSize(txVersion) * uint32(len(txOutDescs)+1)
 							witnessSize = pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs)))
-							fee, err = abeutil.NewAmountAbe(float64(txoSizes+witnessSize) * feePerKbSpecified.ToUnit(abeutil.AmountNeutrino))
+							fee, err = abeutil.NewAmountAbe(float64(txConSize+witnessSize) * feePerKbSpecified.ToUnit(abeutil.AmountNeutrino))
 							if targetValue+fee < currentTotal {
 								txFee = currentTotal - targetValue - fee
 								selectedRings = make([]*wtxmgr.Ring, 0, len(selectedTxos))

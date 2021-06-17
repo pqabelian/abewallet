@@ -1,7 +1,6 @@
 package wallet
 
 import (
-	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/txscript"
@@ -365,14 +364,6 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 			if err!=nil {
 				return err
 			}
-			msvk,err:=abesalrs.DeseralizeMasterSecretViewKey(msvkBytes)
-			if err!=nil {
-				return err
-			}
-			mpk,err:=abesalrs.DeseralizeMasterPubKey(mpkBytes)
-			if err!=nil {
-				return err
-			}
 			//startBlock := w.Manager.SyncedTo()
 			startBlock := w.ManagerAbe.SyncedTo()
 
@@ -406,7 +397,7 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 					return err
 				}
  				//err = w.TxStore.InsertBlockAbe(txmgrNs,blockAbeDetail,*maturedBlockHashs, mpk,msvk)
- 				err = w.TxStore.InsertBlockAbeNew(txmgrNs,blockAbeDetail,maturedBlockHashs, mpk,msvk)
+ 				err = w.TxStore.InsertBlockAbeNew(txmgrNs,blockAbeDetail,maturedBlockHashs, mpkBytes,msvkBytes)
 				if err != nil {
 					return err
 				}

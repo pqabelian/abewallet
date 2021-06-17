@@ -1475,7 +1475,7 @@ func deleteMaturedOutput(ns walletdb.ReadWriteBucket, k []byte) error {
 //UnspentTXO: store the relevant output which is unspent by current wallet
 // its key is transaction hash with the output index
 // its value is relevant information : From height,Fromcoinbase,amount,generation time, rinhash
-func valueUnspentTXO(fromCoinBase bool, version uint32, height int32, amount uint64, generationTime time.Time, ringHash chainhash.Hash, ringSize uint8) []byte {
+func valueUnspentTXO(fromCoinBase bool, version uint32, height int32, amount uint64, index uint8, generationTime time.Time, ringHash chainhash.Hash, ringSize uint8) []byte {
 	size := 4 + 4 + 1 + 8 + 8 + 32 + 1
 	//	todo: should use HashSize, rather than 32
 	v := make([]byte, size)
@@ -1492,6 +1492,8 @@ func valueUnspentTXO(fromCoinBase bool, version uint32, height int32, amount uin
 	offset += 1
 	byteOrder.PutUint64(v[offset:offset+8], amount)
 	offset += 8
+	v[offset] = index
+	offset += 1
 	byteOrder.PutUint64(v[offset:offset+8], uint64(generationTime.Unix()))
 	offset += 8
 	copy(v[offset:offset+32], ringHash[:])
@@ -1534,7 +1536,7 @@ func deleteUnspentTXO(ns walletdb.ReadWriteBucket, k []byte) error {
 // its key is transaction hash with the output index
 // its value is relevant information :
 // height, from coinbase,amount,generation time, rinhash,serialNumber，spentBy, spentTime,
-func valueSpentButUnminedTXO(version uint32, height int, fromCoinBase bool, amount int64, generationTime time.Time,
+func valueSpentButUnminedTXO(version uint32, height int, fromCoinBase bool, amount int64, index uint8, generationTime time.Time,
 	ringHash chainhash.Hash, ringSize uint8, spentBy chainhash.Hash, spentTime time.Time) []byte {
 	size := 4 + 4 + 1 + 8 + 8 + 32 + 1 + 32 + 8
 	v := make([]byte, size)
@@ -1551,6 +1553,8 @@ func valueSpentButUnminedTXO(version uint32, height int, fromCoinBase bool, amou
 	offset += 1
 	byteOrder.PutUint64(v[offset:offset+8], uint64(amount))
 	offset += 8
+	v[offset] = index
+	offset += 1
 	byteOrder.PutUint64(v[offset:offset+8], uint64(generationTime.Unix()))
 	offset += 8
 	copy(v[offset:offset+32], ringHash[:])
@@ -1598,6 +1602,8 @@ func fetchSpentButUnminedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, i
 	}
 	sbu.Amount = byteOrder.Uint64(v[offset : offset+8])
 	offset += 8
+	sbu.Index = v[offset]
+	offset += 1
 	sbu.GenerationTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
 	offset += 8
 	copy(sbu.RingHash[:], v[offset:offset+32])
@@ -1627,7 +1633,7 @@ func deleteSpentButUnminedTXO(ns walletdb.ReadWriteBucket, k []byte) error {
 // SpentConfirmedTXO: store the relevant output which is spent by current wallet and now is contained in a block
 // its key is transaction hash with the output index
 // its value is relevant information : height,From coinbase,amount,generation time, rinhash,serialNumber，spentTime,confirmedTime
-func valueSpentConfirmedTXO(version uint32, height int, fromCoinBase bool, amount int64, generationTime time.Time,
+func valueSpentConfirmedTXO(version uint32, height int, fromCoinBase bool, amount int64, index uint8, generationTime time.Time,
 	ringHash chainhash.Hash, ringSize uint8, spentBy chainhash.Hash, spentTime time.Time, confirmTime time.Time) []byte {
 	size := 4 + 4 + 1 + 8 + 8 + 32 + 1 + 32 + 8 + 8
 	v := make([]byte, size)
@@ -1644,6 +1650,8 @@ func valueSpentConfirmedTXO(version uint32, height int, fromCoinBase bool, amoun
 	offset += 1
 	byteOrder.PutUint64(v[offset:offset+8], uint64(amount))
 	offset += 8
+	v[offset] = index
+	offset += 1
 	byteOrder.PutUint64(v[offset:offset+8], uint64(generationTime.Unix()))
 	offset += 8
 	copy(v[offset:offset+32], ringHash[:])
@@ -1694,6 +1702,8 @@ func fetchSpentConfirmedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, in
 	}
 	sct.Amount = uint64(byteOrder.Uint64(v[offset : offset+8]))
 	offset += 8
+	sct.Index = v[offset]
+	offset += 1
 	sct.GenerationTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
 	offset += 8
 	copy(sct.RingHash[:], v[offset:offset+32])
