@@ -1,7 +1,7 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/abesuite/abec v0.0.4-beta.0.20210617134248-7a9f5b840d3b h1:GwU4NrulRd/5w+Shg03X/2WkUVtGJwOsfW5q1tq+dXY=
-github.com/abesuite/abec v0.0.4-beta.0.20210617134248-7a9f5b840d3b/go.mod h1:wUCd/J9sOEpYyGtCc2k3PMnNnPvKgokXznkNZ1hT78E=
+github.com/abesuite/abec v0.0.4-beta.0.20210619101038-4098e5dc1365 h1:cy7wgu4sgc5kdacGTuc4CfbjMUtel8o7UH3E5Hm0HTk=
+github.com/abesuite/abec v0.0.4-beta.0.20210619101038-4098e5dc1365/go.mod h1:ogdqQcphEC4B996Utj6SnFJ3pbG9XUIyM7xW4knDK+U=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd h1:BNI2MkhhtofxM0sTP8WmdcT4chaAKZOsyhspB58DSrM=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd/go.mod h1:eo8+6JwPaqdnrzzGmGXEH3nOYknOkk8GtuXw7Bo+f08=
 github.com/abesuite/go-spew v1.1.1 h1:8v1IQu/pRuElOpgwrBLmtxsSTEEK+fCBBOw4VYE9fx8=
@@ -13,8 +13,8 @@ github.com/cncf/udpa/go v0.0.0-20191209042840-269d4d468f6f/go.mod h1:M8M6+tZqaGX
 github.com/cryptosuite/kyber-go v0.0.0-20200701012546-a87ecb4b2ce3/go.mod h1:1G0Jh7bXJGSUCTrC6ZB9lFpmCF+VFQehDqIwm9dJU3s=
 github.com/cryptosuite/kyber-go v0.0.1 h1:L12sYYZZ2OjnOPoVuYOkoUgiM8Hap9p7S3HYZJnK46Q=
 github.com/cryptosuite/kyber-go v0.0.1/go.mod h1:1G0Jh7bXJGSUCTrC6ZB9lFpmCF+VFQehDqIwm9dJU3s=
-github.com/cryptosuite/pqringct v0.0.1-alpha.0.20210614132023-c3b875295fe9 h1:CIpyHLjayKtPy8wCEkyYQ6tjx7BxxEo8wBFi7kWeDnY=
-github.com/cryptosuite/pqringct v0.0.1-alpha.0.20210614132023-c3b875295fe9/go.mod h1:UBnEgLBYVWcwds7RQdNKpFCd6b60ac8JR8UXJfCJjaE=
+github.com/cryptosuite/pqringct v0.0.1-alpha.0.20210619091150-0c939328f01d h1:OgMmavJMaWVv72zZkQ0ymYKDxevkU2/FBTRB9LA3XGM=
+github.com/cryptosuite/pqringct v0.0.1-alpha.0.20210619091150-0c939328f01d/go.mod h1:UBnEgLBYVWcwds7RQdNKpFCd6b60ac8JR8UXJfCJjaE=
 github.com/cryptosuite/salrs-go v0.0.0-20200918155434-c02eea3b36d1 h1:vN3Cibtye7f3YuPvrJWG4Kp/jrb/XfxS5oIwl8XZBQY=
 github.com/cryptosuite/salrs-go v0.0.0-20200918155434-c02eea3b36d1/go.mod h1:mJeCa86eOqj3kCJO+O4245Wnq5U07P9K9RfJplI8bQ4=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

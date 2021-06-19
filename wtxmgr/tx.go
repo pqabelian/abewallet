@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abecrypto/abepqringct"
-	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/blockchain"
 	"github.com/abesuite/abewallet/walletdb"
 	"time"
@@ -274,7 +273,7 @@ type UnspentUTXO struct {
 	TxOutput     wire.OutPointAbe //the outpoint
 	FromCoinBase bool
 	Amount       uint64
-	Index        uint8 //TODO_DONE(osy,20210617) finish this field read and write
+	Index        uint8 //indicate the index in the ring, if not in a ring, it equals to -1 TODO_DONE(osy,20210617) finish this field read and write
 	//ValueScript    int64
 	//AddrScript     []byte
 	GenerationTime time.Time      //at this moment, it also useless
@@ -535,6 +534,7 @@ func NewUTXORingAbeFromRing(r *Ring) (*UTXORingAbe, error) {
 	}
 	ringSize := len(r.TxHashes)
 	return &UTXORingAbe{
+		Version:              r.Version,
 		AllSpent:             false,
 		Refreshed:            false,
 		RingHash:             *hash,
@@ -554,7 +554,7 @@ type RingHashSerialNumbers struct {
 
 // ring hash || transaction number || [transaction hash||output index...]||Origin serial number ||[index||serial number...]||isMy||Spent||Got serial number||[serial number...]
 func (u UTXORingAbe) SerializeSize() int {
-	return 32 + 1 + len(u.TxHashes)*(32+1) + 1 + len(u.OriginSerialNumberes)*(1+32) + 2 + 1 + len(u.GotSerialNumberes)*32
+	return 4+32 + 1 + len(u.TxHashes)*(32+1) + 1 + len(u.OriginSerialNumberes)*(1+32) + 2 + 1 + len(u.GotSerialNumberes)*32
 
 }
 func (u UTXORingAbe) Serialize() []byte {
@@ -970,7 +970,7 @@ func (s *Store) InsertTxAbe(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecordAbe,
 		}
 		// update the spendable balance
 		spendableBal, err := fetchSpenableBalance(wtxmgrNs)
-		amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
+		amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[9:17])))
 		if err != nil {
 			return err
 		}
@@ -1084,7 +1084,7 @@ func (s *Store) InsertTxAbe(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecordAbe,
 //	}
 //	return putMinedBalance(ns, balance)
 //}
-func (s *Store) InsertGenesisBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRecord, mpk *abesalrs.MasterPubKey, msvk *abesalrs.MasterSecretViewKey) error {
+func (s *Store) InsertGenesisBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRecord, serializedMPK []byte, serializedMSVK []byte) error {
 	balance, err := fetchMinedBalance(ns)
 	if err != nil {
 		return err
@@ -1111,31 +1111,23 @@ func (s *Store) InsertGenesisBlockAbeNew(ns walletdb.ReadWriteBucket, block *Blo
 	coinbaseTx := block.TxRecordAbes[0].MsgTx
 	coinbaseOutput := make(map[wire.OutPointAbe]*UnspentUTXO)
 	for i := 0; i < len(coinbaseTx.TxOuts); i++ {
-		//addr, err := txscript.ExtractAddressFromScriptAbe(coinbaseTx.TxOuts[i].AddressScript) // may have more than one outputs
-		//if err != nil {
-		//	return err
-		//}
-		//dpk := addr.DerivedPubKey()
-		//isMy, err := abesalrs.CheckDerivedPubKeyAttribute(dpk, mpk, msvk)
-		//if isMy {
-		//	k := wire.OutPointAbe{
-		//		TxHash: coinbaseTx.TxHash(),
-		//		Index:  uint8(i),
-		//	}
-		//	amt, err := abeutil.NewAmountAbe(float64(coinbaseTx.TxOuts[i].ValueScript))
-		//	if err != nil {
-		//		return err
-		//	}
-		//
-		//	balance += amt
-		//	freezedBal += amt
-		//
-		//	tmp := NewUnspentUTXO(b.Height, k, true, coinbaseTx.TxOuts[i].ValueScript, block.RecvTime, chainhash.ZeroHash)
-		//	coinbaseOutput[k] = tmp
-		//	blockOutputs[b] = append(blockOutputs[b], k)
-		//}
-		//TODO(osy) 20210608 finish the txo receive
-		panic(b)
+		//TODO_DONE(osy) 20210608 finish the txo receive
+		valid, v := abepqringct.TxoCoinReceive(coinbaseTx.TxOuts[i], serializedMPK, serializedMSVK)
+		if valid && v != 0 {
+			amt, err := abeutil.NewAmountAbe(float64(v))
+			if err != nil {
+				return err
+			}
+			freezedBal += amt
+			balance += amt
+			k := wire.OutPointAbe{
+				TxHash: coinbaseTx.TxHash(),
+				Index:  uint8(i),
+			}
+			tmp := NewUnspentUTXO(coinbaseTx.TxOuts[i].Version, b.Height, k, true, v, 255, block.RecvTime, chainhash.ZeroHash, 0)
+			coinbaseOutput[k] = tmp
+			blockOutputs[b] = append(blockOutputs[b], k)
+		}
 	}
 	if len(blockOutputs) != 0 {
 		err := putRawImmaturedCoinbaseOutput(ns, canonicalBlockAbe(block.Height, block.Hash), valueImmaturedCoinbaseOutput(coinbaseOutput))
@@ -1750,7 +1742,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 				TxHash: coinbaseTx.TxHash(),
 				Index:  uint8(i),
 			}
-			tmp := NewUnspentUTXO(coinbaseTx.TxOuts[i].Version, b.Height, k, true, v, uint8(i), block.RecvTime, chainhash.ZeroHash, 0)
+			tmp := NewUnspentUTXO(coinbaseTx.TxOuts[i].Version, b.Height, k, true, v, 255, block.RecvTime, chainhash.ZeroHash, 0)
 			coinbaseOutput[k] = tmp
 			blockOutputs[b] = append(blockOutputs[b], k)
 		}
@@ -1822,7 +1814,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 					if v != nil {
 						//otherwise it has been moved to spentButUnmined bucket
 						// update the balances
-						amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
+						amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[9:17])))
 						if err != nil {
 							return err
 						}
@@ -1840,7 +1832,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 					} else { //TODO(abe): if this transaction is create by the wallet, the outpoint should be stored in spentButUnmined bucket
 						v = existsRawSpentButUnminedTXO(ns, k)
 						if v != nil { //otherwise it has been moved to spentButUnmined bucket
-							amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
+							amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[9:17])))
 							if err != nil {
 								return err
 							}
@@ -1903,7 +1895,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 					TxHash: coinbaseTx.TxHash(),
 					Index:  uint8(i),
 				}
-				tmp := NewUnspentUTXO(txi.TxOuts[j].Version, b.Height, k, true, v, uint8(j), block.RecvTime, chainhash.ZeroHash, 0)
+				tmp := NewUnspentUTXO(txi.TxOuts[j].Version, b.Height, k, true, v, 255, block.RecvTime, chainhash.ZeroHash, 0)
 				transferOutputs[k] = tmp
 				blockOutputs[b] = append(blockOutputs[b], k)
 			}
@@ -2112,7 +2104,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 						// add this ring and utxo ring to database
 						//generate a ringDetails
 						ring := Ring{}
-						ring.Version = utxoRing.Version
+						ring.Version = utxoRingEntry.Version
 						outpointRing := utxoRingEntry.OutPointRing()
 						for i := 0; i < len(outpointRing.BlockHashs); i++ {
 							ring.BlockHashes = append(ring.BlockHashes, *outpointRing.BlockHashs[i])
@@ -2165,6 +2157,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 							break
 						}
 					}
+					utxo.Index = uint8(index)
 					utxoRing.IsMy[index] = true
 				}
 			}
@@ -2196,7 +2189,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 		// transfer output -> mature
 		for op, utxo := range block1TransferUTXO {
 			v := valueUnspentTXO(false, utxo.Version, utxo.Height, utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
-			amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
+			amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[9:17])))
 			if err != nil {
 				return err
 			}
@@ -2209,7 +2202,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 		}
 		for op, utxo := range block0TransferUTXO {
 			v := valueUnspentTXO(false, utxo.Version, utxo.Height, utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
-			amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
+			amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[9:17])))
 			if err != nil {
 				return err
 			}
@@ -2258,7 +2251,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			}
 			for op, utxo := range utxos {
 				v := valueUnspentTXO(true, utxo.Version, block.Height-int32(s.chainParams.CoinbaseMaturity), utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
-				amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
+				amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[9:17])))
 				if err != nil {
 					return err
 				}

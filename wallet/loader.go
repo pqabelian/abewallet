@@ -2,7 +2,6 @@ package wallet
 
 import (
 	"errors"
-	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abewallet/internal/prompt"
 	"github.com/abesuite/abewallet/waddrmgr"
@@ -241,19 +240,11 @@ func (l *Loader) createNewWalletAbe(pubPassphrase, privPassphrase,
 		if err != nil {
 			return err
 		}
-		msvk, err := abesalrs.DeseralizeMasterSecretViewKey(msvkBytes)
-		if err != nil {
-			return err
-		}
-		mpk, err := abesalrs.DeseralizeMasterPubKey(mpkBytes)
-		if err != nil {
-			return err
-		}
 		genesisBlockRecords, err := wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(chaincfg.MainNetParams.GenesisBlock)
 		if err!=nil{
 			return err
 		}
-		err = w.TxStore.InsertGenesisBlockAbeNew(txmgrNs, genesisBlockRecords, mpk, msvk)
+		err = w.TxStore.InsertGenesisBlockAbeNew(txmgrNs, genesisBlockRecords, mpkBytes, msvkBytes)
 		if err != nil {
 			log.Error("Fail to create wallet due to:",err)
 		}

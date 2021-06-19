@@ -266,7 +266,7 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 	if !useUserSeed {
 		// TODO(abe): use abesarls to replace the hdkeychain
 		//seed, err := hdkeychain.GenerateSeed(hdkeychain.RecommendedSeedLen)
-		seed, err := abesalrs.GenerateSeed(abesalrs.RecommendedSeedLen)
+		seed, err := abesalrs.GenerateSeed(2*abesalrs.RecommendedSeedLen)
 		if err != nil {
 			return nil, err
 		}

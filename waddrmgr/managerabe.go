@@ -1051,9 +1051,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 			return fmt.Errorf("failed to generate master key")
 		}
 		var b []byte
-		for i := 0; i < 32; i += 8 {
-			b = append(b, byte((abecrypto.CryptoSchemePQRINGCT>>i)&0xFF))
-		}
+		b=append(b,chainParams.PQRingCTID) //TODO(abe): append the network ID but there are something logic error
 		//for i:=0;i<2;i++{
 		//	b=append(b,0)
 		//}

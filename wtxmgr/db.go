@@ -1283,18 +1283,22 @@ func deleteBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) error {
 	return nil
 }
 
-// block height || block hash -> []UnspentTXO 【txhash + index + amount + generationTime + ringhash】
+// block height || block hash -> version + []UnspentTXO 【txhash + index + amount + generationTime + ringhash】
 func valueImmaturedCoinbaseOutput(immatured map[wire.OutPointAbe]*UnspentUTXO) []byte {
 	//res := make([]byte, len(immatured)*(32+1+8+8+32))
-	res := make([]byte, len(immatured)*(32+1+8+8+32+1)) // todo: should not use hard codes
+	res := make([]byte, len(immatured)*(4+32+1+8+1+8+32+1)) // todo: should not use hard codes. and the version field is the same so it can be optimized
 	offset := 0
 	for _, utxo := range immatured {
+		byteOrder.PutUint32(res[offset:offset+4], utxo.Version)
+		offset += 4
 		copy(res[offset:offset+32], utxo.TxOutput.TxHash[:])
 		offset += 32
 		res[offset] = utxo.TxOutput.Index
 		offset += 1
 		byteOrder.PutUint64(res[offset:offset+8], uint64(utxo.Amount))
 		offset += 8
+		res[offset] = utxo.Index
+		offset += 1
 		byteOrder.PutUint64(res[offset:offset+8], uint64(utxo.GenerationTime.Unix()))
 		offset += 8
 		copy(res[offset:offset+32], utxo.RingHash[:])
@@ -1319,8 +1323,10 @@ func fetchImmaturedCoinbaseOutput(ns walletdb.ReadBucket, height int32, hash cha
 	op := make(map[wire.OutPointAbe]*UnspentUTXO)
 	offset := 0
 	//for i := 0; i < len(v)/(32+1+8+8+32); i++ {
-	for i := 0; i < len(v)/(32+1+8+8+32+1); i++ { // todo: should not use hardcodes
+	for i := 0; i < len(v)/(4+32+1+8+1+8+32+1); i++ { // todo: should not use hardcodes
 		tmp := new(UnspentUTXO)
+		tmp.Version = byteOrder.Uint32(v[offset : offset+4])
+		offset += 4
 		copy(tmp.TxOutput.TxHash[:], v[offset:offset+32])
 		offset += 32
 		tmp.TxOutput.Index = v[offset]
@@ -1328,6 +1334,8 @@ func fetchImmaturedCoinbaseOutput(ns walletdb.ReadBucket, height int32, hash cha
 		tmp.FromCoinBase = true
 		tmp.Amount = byteOrder.Uint64(v[offset : offset+8])
 		offset += 8
+		tmp.Index = v[offset]
+		offset += 1
 		tmp.GenerationTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
 		offset += 8
 		copy(tmp.RingHash[:], v[offset:offset+32])
@@ -1356,15 +1364,19 @@ func deleteImmaturedCoinbaseOutput(ns walletdb.ReadWriteBucket, k []byte) error 
 // block height || block hash -> []UnspentTXO 【txhash + index + amount + generationTime + ringhash】
 func valueImmaturedOutput(immatured map[wire.OutPointAbe]*UnspentUTXO) []byte {
 	//res := make([]byte, len(immatured)*(32+1+8+8+32))
-	res := make([]byte, len(immatured)*(32+1+8+8+32+1)) // todo: should not use hard code
+	res := make([]byte, len(immatured)*(4+32+1+8+1+8+32+1)) // todo: should not use hard code
 	offset := 0
 	for _, utxo := range immatured {
+		byteOrder.PutUint32(res[offset:offset+4], utxo.Version)
+		offset += 4
 		copy(res[offset:offset+32], utxo.TxOutput.TxHash[:])
 		offset += 32
 		res[offset] = utxo.TxOutput.Index
 		offset += 1
 		byteOrder.PutUint64(res[offset:offset+8], uint64(utxo.Amount))
 		offset += 8
+		res[offset] = utxo.Index
+		offset += 1
 		byteOrder.PutUint64(res[offset:offset+8], uint64(utxo.GenerationTime.Unix()))
 		offset += 8
 		copy(res[offset:offset+32], utxo.RingHash[:])
@@ -1392,6 +1404,8 @@ func fetchImmaturedOutput(ns walletdb.ReadBucket, height int32, hash chainhash.H
 	//	for i := 0; i < len(v)/(32+1+8+8+32); i++ {
 	for i := 0; i < len(v)/(32+1+8+8+32+1); i++ { // todo: should not use hard code, should use getXXXSize
 		tmp := new(UnspentUTXO)
+		tmp.Version = byteOrder.Uint32(v[offset : offset+4])
+		offset += 4
 		copy(tmp.TxOutput.TxHash[:], v[offset:offset+32])
 		offset += 32
 		tmp.TxOutput.Index = v[offset]
@@ -1399,6 +1413,8 @@ func fetchImmaturedOutput(ns walletdb.ReadBucket, height int32, hash chainhash.H
 		tmp.FromCoinBase = false
 		tmp.Amount = byteOrder.Uint64(v[offset : offset+8])
 		offset += 8
+		tmp.Index = v[offset]
+		offset += 1
 		tmp.GenerationTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
 		offset += 8
 		copy(tmp.RingHash[:], v[offset:offset+32])
@@ -1476,7 +1492,7 @@ func deleteMaturedOutput(ns walletdb.ReadWriteBucket, k []byte) error {
 // its key is transaction hash with the output index
 // its value is relevant information : From height,Fromcoinbase,amount,generation time, rinhash
 func valueUnspentTXO(fromCoinBase bool, version uint32, height int32, amount uint64, index uint8, generationTime time.Time, ringHash chainhash.Hash, ringSize uint8) []byte {
-	size := 4 + 4 + 1 + 8 + 8 + 32 + 1
+	size := 4 + 4 + 1 + 8 + 1 + 8 + 32 + 1
 	//	todo: should use HashSize, rather than 32
 	v := make([]byte, size)
 	offset := 0
@@ -1498,9 +1514,8 @@ func valueUnspentTXO(fromCoinBase bool, version uint32, height int32, amount uin
 	offset += 8
 	copy(v[offset:offset+32], ringHash[:])
 	offset += 32
-
 	v[offset] = ringSize
-
+	offset += 1
 	return v
 }
 func putRawUnspentTXO(ns walletdb.ReadWriteBucket, k, v []byte) error {
@@ -1538,7 +1553,7 @@ func deleteUnspentTXO(ns walletdb.ReadWriteBucket, k []byte) error {
 // height, from coinbase,amount,generation time, rinhash,serialNumber，spentBy, spentTime,
 func valueSpentButUnminedTXO(version uint32, height int, fromCoinBase bool, amount int64, index uint8, generationTime time.Time,
 	ringHash chainhash.Hash, ringSize uint8, spentBy chainhash.Hash, spentTime time.Time) []byte {
-	size := 4 + 4 + 1 + 8 + 8 + 32 + 1 + 32 + 8
+	size := 4 + 4 + 1 + 8 +1+ 8 + 32 + 1 + 32 + 8
 	v := make([]byte, size)
 	offset := 0
 	byteOrder.PutUint32(v[offset:offset+4], version)
@@ -1635,7 +1650,7 @@ func deleteSpentButUnminedTXO(ns walletdb.ReadWriteBucket, k []byte) error {
 // its value is relevant information : height,From coinbase,amount,generation time, rinhash,serialNumber，spentTime,confirmedTime
 func valueSpentConfirmedTXO(version uint32, height int, fromCoinBase bool, amount int64, index uint8, generationTime time.Time,
 	ringHash chainhash.Hash, ringSize uint8, spentBy chainhash.Hash, spentTime time.Time, confirmTime time.Time) []byte {
-	size := 4 + 4 + 1 + 8 + 8 + 32 + 1 + 32 + 8 + 8
+	size := 4 + 4 + 1 + 8 +1+ 8 + 32 + 1 + 32 + 8 + 8
 	v := make([]byte, size)
 	offset := 0
 	byteOrder.PutUint32(v[offset:offset+4], version)
@@ -1708,6 +1723,8 @@ func fetchSpentConfirmedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, in
 	offset += 8
 	copy(sct.RingHash[:], v[offset:offset+32])
 	offset += 32
+	sct.RingSize= v[offset]
+	offset += 1
 	copy(sct.SpentByHash[:], v[offset:offset+32])
 	offset += 32
 	sct.SpentTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)

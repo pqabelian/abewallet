@@ -2,6 +2,7 @@ package wallet
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -4897,6 +4898,7 @@ func createAbe(db walletdb.DB, pubPass, privPass, seed []byte,
 		// If a seed was provided, ensure that it is of valid length. Otherwise,
 		// we generate a random seed for the wallet with the recommended seed
 		// length.
+		// TODO(abe,20210619): this code snippet seems to not run forever?
 		if seed == nil {
 			//	todo(ABE.MUST): the generation of the seed
 			//	How does ABE generates the seed? By outputting the seed in the process of generating MPK.
@@ -4915,7 +4917,10 @@ func createAbe(db walletdb.DB, pubPass, privPass, seed []byte,
 		//}
 
 	}
-
+	// add the cryptoScheme before seed
+	tmp:=make([]byte,4,4+hdkeychain.RecommendedSeedLen*2)
+	binary.BigEndian.PutUint32(tmp[0:4], uint32(abecrypto.CryptoSchemePQRINGCT))
+	seed =append(tmp,seed[:]...)
 	return walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
 		addrmgrNs, err := tx.CreateTopLevelBucket(waddrmgrNamespaceKey)
 		if err != nil {
