@@ -2358,7 +2358,12 @@ func (w *Wallet) RenameAccount(scope waddrmgr.KeyScope, account uint32, newName 
 
 //TODO(abe):add log information in log file
 func (w *Wallet) AddPayee(name string, masterPubKey string) error {
-	mAddr, err := abeutil.DecodeMasterAddressAbe(masterPubKey)
+	// check the address legitimacy
+	_, err := abeutil.DecodeMasterAddressAbe(masterPubKey)
+	if err != nil {
+		return err
+	}
+	addrBytes, err := hex.DecodeString(masterPubKey) // the reverse method is hex.EncodeToString
 	if err != nil {
 		return err
 	}
@@ -2377,7 +2382,7 @@ func (w *Wallet) AddPayee(name string, masterPubKey string) error {
 				return err
 			}
 		}
-		return manager.AddMPK(addrmgrNs, mAddr)
+		return manager.AddMPK(addrmgrNs, addrBytes[1:])
 	})
 	return err
 }

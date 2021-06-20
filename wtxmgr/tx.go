@@ -410,15 +410,17 @@ func (r Ring) Serialize() []byte {
 	addrScriptAllSize := 0 //address script size
 	bLen := len(r.BlockHashes)
 	txLen := len(r.TxHashes) //transaction number
-	var txoSize []int
+	txoSize:=make([]int,0,txLen)
 	for i := 0; i < txLen; i++ {
 		txoSize = append(txoSize, len(r.TxoScripts[i]))
 		addrScriptAllSize += len(r.TxoScripts[i])
 	}
 
-	total := 32*bLen + 2 + (32+1+8)*txLen + 2*txLen + addrScriptAllSize + 4
+	total := 4 + 32*bLen + 2 + (32+1+4)*txLen + addrScriptAllSize + 4
 	res := make([]byte, total)
 	offset := 0
+	byteOrder.PutUint32(res,r.Version)
+	offset+=4
 	for i := 0; i < bLen; i++ {
 		copy(res[offset:offset+32], r.BlockHashes[i][:])
 		offset += 32
@@ -432,24 +434,26 @@ func (r Ring) Serialize() []byte {
 		offset += 1
 		//byteOrder.PutUint64(res[offset:offset+8], uint64(r.ValueScript[i]))
 		//offset += 8
-		//byteOrder.PutUint16(res[offset:offset+2], uint16(txoSize[i]))
-		//offset += 2
+		byteOrder.PutUint32(res[offset:offset+4], uint32(txoSize[i]))
+		offset += 4
 	}
-	//for i := 0; i < txLen; i++ {
-	//	copy(res[offset:offset+txoSize[i]], r.AddrScript[i])
-	//	offset += txoSize[i]
-	//}
+	for i := 0; i < txLen; i++ {
+		copy(res[offset:offset+txoSize[i]], r.TxoScripts[i])
+		offset += txoSize[i]
+	}
 	byteOrder.PutUint32(res[offset:offset+4], uint32(r.BlockHeight))
 	offset += 4
 	return res
 }
 func (r *Ring) Deserialize(b []byte) error {
 	//	todo: AliceBob 20210616, Version is not handled
+	// TODO:20210620 change the checking
 	if len(b) < 32*wire.BlockNumPerRingGroup+(32+2+8) {
 		return fmt.Errorf("wrong length of input byte slice")
 	}
 	offset := 0
-	// TODO(osy):The deserialized process has some error, has fixed
+	r.Version=byteOrder.Uint32(b)
+	offset+=4
 	for i := 0; i < wire.BlockNumPerRingGroup; i++ {
 		newHash, err := chainhash.NewHash(b[offset : offset+32])
 		if err != nil {
@@ -460,7 +464,7 @@ func (r *Ring) Deserialize(b []byte) error {
 	}
 	txLen := int(byteOrder.Uint16(b[offset : offset+2]))
 	offset += 2
-	var addrSize []int
+	addrSize:=make([]int,0,txLen)
 	for i := 0; i < txLen; i++ {
 		newHash, err := chainhash.NewHash(b[offset : offset+32])
 		if err != nil {
@@ -472,8 +476,8 @@ func (r *Ring) Deserialize(b []byte) error {
 		offset += 1
 		//r.ValueScript = append(r.ValueScript, int64(byteOrder.Uint64(b[offset:offset+8])))
 		//offset += 8
-		addrSize = append(addrSize, int(byteOrder.Uint16(b[offset:offset+2])))
-		offset += 2
+		addrSize = append(addrSize, int(byteOrder.Uint32(b[offset:offset+4])))
+		offset += 4
 	}
 	r.TxoScripts = make([][]byte, txLen)
 	for i := 0; i < txLen; i++ {

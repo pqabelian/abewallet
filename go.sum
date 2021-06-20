@@ -1,7 +1,13 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/abesuite/abec v0.0.4-beta.0.20210619101038-4098e5dc1365 h1:cy7wgu4sgc5kdacGTuc4CfbjMUtel8o7UH3E5Hm0HTk=
-github.com/abesuite/abec v0.0.4-beta.0.20210619101038-4098e5dc1365/go.mod h1:ogdqQcphEC4B996Utj6SnFJ3pbG9XUIyM7xW4knDK+U=
+github.com/abesuite/abec v0.0.4-beta.0.20210620053841-9553ea973ace h1:X1ZQcnhLxOXyL20X6XJ/a6MGMZOS49rRZo7dFrKYhDM=
+github.com/abesuite/abec v0.0.4-beta.0.20210620053841-9553ea973ace/go.mod h1:ogdqQcphEC4B996Utj6SnFJ3pbG9XUIyM7xW4knDK+U=
+github.com/abesuite/abec v0.0.4-beta.0.20210620060947-951b89c42289 h1:RSpj5WJULLAR09Nbw8bbY4wL3t0QdfPC/UfJiIvMffM=
+github.com/abesuite/abec v0.0.4-beta.0.20210620060947-951b89c42289/go.mod h1:ogdqQcphEC4B996Utj6SnFJ3pbG9XUIyM7xW4knDK+U=
+github.com/abesuite/abec v0.0.4-beta.0.20210620064731-84acf7a05767 h1:rvFPkO8Vv/MMqTStAlSGtZfnsp99ckxQfxqqZFuRrBA=
+github.com/abesuite/abec v0.0.4-beta.0.20210620064731-84acf7a05767/go.mod h1:ogdqQcphEC4B996Utj6SnFJ3pbG9XUIyM7xW4knDK+U=
+github.com/abesuite/abec v0.0.4-beta.0.20210620065034-c268ea4acadf h1:sloFpl/2dYSstjeaJYJ1cV101W4Nf7HdMZj8EWGfmL4=
+github.com/abesuite/abec v0.0.4-beta.0.20210620065034-c268ea4acadf/go.mod h1:ogdqQcphEC4B996Utj6SnFJ3pbG9XUIyM7xW4knDK+U=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd h1:BNI2MkhhtofxM0sTP8WmdcT4chaAKZOsyhspB58DSrM=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd/go.mod h1:eo8+6JwPaqdnrzzGmGXEH3nOYknOkk8GtuXw7Bo+f08=
 github.com/abesuite/go-spew v1.1.1 h1:8v1IQu/pRuElOpgwrBLmtxsSTEEK+fCBBOw4VYE9fx8=

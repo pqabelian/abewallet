@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/abesuite/abec/abecrypto"
-	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abewallet/walletdb"
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	mathrand "math/rand"
@@ -36,7 +35,7 @@ func (s *state) Deserialize(b []byte) error {
 type PayeeManager struct {
 	name        string
 	rootManager *ManagerAbe
-	mpks        []ManagedAddressAbe //one payee may have more than one master address
+	mpks        [][]byte //one payee may have more than one master address
 	totalAmount int64
 	states      []state
 }
@@ -49,7 +48,7 @@ func (p PayeeManager) ChooseMAddr() ([]byte, error) {
 		return nil, errors.New("this payee has no master address, please add it.")
 	}
 	i := mathrand.Intn(len(p.mpks))
-	return p.mpks[i].Serialize(), nil
+	return p.mpks[i], nil
 }
 func (p *PayeeManager) ChangeName(ns walletdb.ReadWriteBucket, newName string) error {
 	p.name = newName
@@ -67,19 +66,19 @@ func (p *PayeeManager) Payee(ns walletdb.ReadWriteBucket, amount int64) error {
 	})
 	return putPayeeManager(ns, p.name, p)
 }
-func (p *PayeeManager) AddMPK(ns walletdb.ReadWriteBucket, addr ManagedAddressAbe) error {
+func (p *PayeeManager) AddMPK(ns walletdb.ReadWriteBucket, addr []byte) error {
 	for i := 0; i < len(p.mpks); i++ {
-		if bytes.Equal(p.mpks[i].Serialize(), addr.Serialize()) {
+		if bytes.Equal(p.mpks[i], addr) {
 			return fmt.Errorf("the payee had the same master address.")
 		}
 	}
 	p.mpks = append(p.mpks, addr)
 	return putPayeeManager(ns, p.name, p) // update the payee manager in database
 }
-func (p *PayeeManager) RemoveMPK(ns walletdb.ReadWriteBucket, addr ManagedAddressAbe) error {
+func (p *PayeeManager) RemoveMPK(ns walletdb.ReadWriteBucket, addr []byte) error {
 	index := -1
 	for i := 0; i < len(p.mpks); i++ {
-		if p.mpks[i] == addr {
+		if bytes.Equal(p.mpks[i], addr) {
 			index = i
 			break
 		}
@@ -94,78 +93,97 @@ func (p *PayeeManager) RemoveMPK(ns walletdb.ReadWriteBucket, addr ManagedAddres
 
 // length of paymanager||name||num of mpk||[length of mpk||mpk...]||num of state||[state...]
 func (p PayeeManager) SerializeSize() int {
-	totalSize := 2 + 2 + len([]byte(p.name)) + 2 + 2*len(p.mpks) + 8 + 2 + 16*len(p.states)
+	totalSize := 8 + 2 + len([]byte(p.name)) + 2 + len(p.mpks)*4 + 8 + 2 + 16*len(p.states)
 	for _, mpk := range p.mpks {
-		totalSize += int(mpk.SerializeSize())
+		totalSize += len(mpk)
 	}
 	return totalSize
 }
 func (p PayeeManager) Serialize() []byte {
 	res := make([]byte, p.SerializeSize())
 	offset := 0
-	binary.BigEndian.PutUint16(res[offset:offset+2], uint16(p.SerializeSize()))
-	offset += 2
+	// total length of the payee manager
+	binary.BigEndian.PutUint64(res[offset:offset+8], uint64(p.SerializeSize()))
+	offset += 8
+	// length of name
 	binary.BigEndian.PutUint16(res[offset:offset+2], uint16(len([]byte(p.name))))
 	offset += 2
+	// name
 	copy(res[offset:offset+len([]byte(p.name))], []byte(p.name))
 	offset += len([]byte(p.name))
+	// number of master public key1
 	binary.BigEndian.PutUint16(res[offset:offset+2], uint16(len(p.mpks)))
 	offset += 2
 	for _, mpk := range p.mpks {
-		binary.BigEndian.PutUint16(res[offset:offset+2], uint16(mpk.SerializeSize()))
-		offset += 2
-		copy(res[offset:offset+int(mpk.SerializeSize())], mpk.Serialize())
-		offset += int(mpk.SerializeSize())
+		// length of master public key
+		binary.BigEndian.PutUint32(res[offset:offset+4], uint32(len(mpk)))
+		offset += 4
+		// master public key
+		copy(res[offset:offset+len(mpk)], mpk)
+		offset += len(mpk)
 	}
+	// total amount
 	binary.BigEndian.PutUint64(res[offset:offset+8], uint64(p.totalAmount))
 	offset += 8
+	// length of state
 	binary.BigEndian.PutUint16(res[offset:offset+2], uint16(len(p.states)))
 	offset += 2
 	for _, s := range p.states {
+		// time(4 bytes) + amount(4 bytes)
 		copy(res[offset:offset+16], s.Serialize())
 		offset += 16
 	}
 	return res
 }
 func (p *PayeeManager) Deserialize(b []byte) error {
-	totalSize := int(binary.BigEndian.Uint16(b[0:2]))
+	offset:=0
+	totalSize := int(binary.BigEndian.Uint64(b[offset:offset+8]))
+	offset+=8
 	if len(b) < totalSize {
 		return fmt.Errorf("wrong size of serialized payee manager")
 	}
-	nameSize := int(binary.BigEndian.Uint16(b[2:4]))
-	offset := 4
+	nameSize := int(binary.BigEndian.Uint16(b[offset:offset+2]))
+	offset+=2
 	p.name = string(b[offset : offset+nameSize])
 	offset += nameSize
 	numOfMPK := int(binary.BigEndian.Uint16(b[offset : offset+2]))
 	offset += 2
+	if p.mpks == nil {
+		p.mpks = make([][]byte, 0, numOfMPK)
+	}
 	for i := 0; i < numOfMPK; i++ {
-		lengthOfMPK := int(binary.BigEndian.Uint16(b[offset : offset+2]))
-		offset += 2
-		scheme := abecrypto.CryptoScheme(binary.BigEndian.Uint16(b[offset : offset+2]))
-		var mpk abeutil.MasterAddress
-		switch scheme {
-		case abecrypto.CryptoSchemeSALRS:
-			mpk = new(abeutil.MasterAddressSalrs)
+		lengthOfMPK := int(binary.BigEndian.Uint32(b[offset : offset+4]))
+		offset += 4
+		scheme := abecrypto.CryptoScheme(binary.BigEndian.Uint32(b[offset : offset+4]))
+		if scheme == abecrypto.CryptoSchemePQRINGCT {
+		} else {
+			return errors.New("unsupported address scheme")
 		}
-		mpk.Deserialize(b[offset : offset+lengthOfMPK])
-		if p.mpks == nil {
-			p.mpks = *new([]ManagedAddressAbe)
-		}
-		p.mpks = append(p.mpks, ManagedAddressAbe(mpk))
-		offset += lengthOfMPK
+
+		//var mpk abeutil.MasterAddress
+		//switch scheme {
+		//case abecrypto.CryptoSchemeSALRS:
+		//	mpk = new(abeutil.MasterAddressSalrs)
+		//case abecrypto.CryptoSchemePQRINGCT:
+		//
+		//}
+		mpk:=make([]byte,lengthOfMPK)
+		copy(mpk,b[offset:offset+lengthOfMPK])
+		offset+=lengthOfMPK
+		p.mpks = append(p.mpks, mpk)
 	}
 	p.totalAmount = int64(binary.BigEndian.Uint64(b[offset : offset+8]))
 	offset += 8
 	numOfStates := int(binary.BigEndian.Uint16(b[offset : offset+2]))
 	offset += 2
+	if p.states == nil {
+		p.states =make([]state,0,numOfStates)
+	}
 	for i := 0; i < numOfStates; i++ {
 		s := new(state)
 		s.Deserialize(b[offset : offset+16])
-		if p.states == nil {
-			p.states = *new([]state)
-		}
-		p.states = append(p.states, *s)
 		offset += 16
+		p.states = append(p.states, *s)
 	}
 	return nil
 }

@@ -528,6 +528,28 @@ func (w *Wallet) txToOutputs(outputs []*wire.TxOut, account uint32,
 //	//return tx, nil
 //}
 
+func createTransferTxAbeMsgTemplate(txIn []*wire.TxInAbe, txOutNum int, txMemo []byte,fee uint64) (*wire.MsgTxAbe, error) {
+	msgTx := &wire.MsgTxAbe{
+		Version:   wire.GetCurrentTxVersion(),
+		TxIns:     nil,
+		TxOuts:    make([]*wire.TxOutAbe, txOutNum),
+		TxFee:     fee,
+		TxMemo:    txMemo,
+		TxWitness: []byte{}, // will be fulfill
+	}
+
+	msgTx.TxIns=txIn
+
+	for i := 0; i < txOutNum; i++ {
+		msgTx.TxOuts[i] = &wire.TxOutAbe{
+			Version:   msgTx.Version,
+			TxoScript: []byte{}, // will be fulfill
+		}
+	}
+
+	return msgTx, nil
+}
+
 func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, dryRun bool) (
 	unsignedTx *txauthor.AuthoredTxAbe, err error) {
 
@@ -551,7 +573,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 	}
 	var selectedTxos []*wtxmgr.UnspentUTXO
 	var currentTotal abeutil.Amount
-	var selectedRings []*wtxmgr.Ring
+	var selectedRings map[chainhash.Hash]*wtxmgr.Ring
 	var inputRingVersions []uint32
 	var txFee abeutil.Amount
 	var mpkBytes, msvkBytes, msskBytes []byte
@@ -572,7 +594,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 		if err != nil {
 			return err
 		}
-		msskBytes, err = w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, msskEncBytes)
+		msskBytes, err = w.ManagerAbe.Decrypt(waddrmgr.CKTPrivate, msskEncBytes)
 		if err != nil {
 			return err
 		}
@@ -593,7 +615,6 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 
 		// fix the transaction fee
 		if feeSpecified > 0 {
-			txFee = feeSpecified
 			currentVersion := eligible[0].Version
 			selectedTxos = make([]*wtxmgr.UnspentUTXO, 0, len(eligible))
 			currentTotal = abeutil.Amount(0) // total amount
@@ -608,33 +629,35 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 					continue
 				}
 				eligible = eligible[1:]
-
 				currentTotal = currentTotal + abeutil.Amount(nextUtxo.Amount)
 				selectedTxos = append(selectedTxos, nextUtxo)
-				inputRingVersions=append(inputRingVersions,nextUtxo.Version)
+				inputRingVersions = append(inputRingVersions, nextUtxo.Version)
 				selectedRingSizes = append(selectedRingSizes, nextUtxo.RingSize)
 
 				if currentTotal >= targetValue+feeSpecified {
-					selectedRings = make([]*wtxmgr.Ring, 0, len(selectedTxos))
+					txFee = feeSpecified
+					selectedRings = make(map[chainhash.Hash]*wtxmgr.Ring)
 					// todo: read selected rings, form the TxIn and the inputDesc, call TxGen
-					rings := make(map[chainhash.Hash]*wtxmgr.Ring)
 					for _, txo := range selectedTxos {
-						_, ok := rings[txo.RingHash]
+						_, ok := selectedRings[txo.RingHash]
 						if !ok {
 							ring, err := wtxmgr.FetchRingDetails(txmgrNs, txo.RingHash[:])
 							if err != nil {
 								return err
 							}
-							rings[txo.RingHash] = ring
+							selectedRings[txo.RingHash] = ring
 
 						}
-						selectedRings = append(selectedRings, rings[txo.RingHash])
 					}
 					if currentTotal > targetValue+feeSpecified {
-						if currentTotal-targetValue-feeSpecified>0{
-
+						// the remain less than threshold so giving it to transaction fee
+						if currentTotal-targetValue-feeSpecified < ChangeThreshold {
+							txFee = currentTotal - targetValue
+							flag = false
+						} else {
+							txFee = feeSpecified
+							flag = true
 						}
-						flag = true
 					}
 					return nil
 				}
@@ -659,7 +682,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 
 				currentTotal = currentTotal + abeutil.Amount(nextUtxo.Amount)
 				selectedTxos = append(selectedTxos, nextUtxo)
-				inputRingVersions=append(inputRingVersions,nextUtxo.Version)
+				inputRingVersions = append(inputRingVersions, nextUtxo.Version)
 				selectedRingSizes = append(selectedRingSizes, int(nextUtxo.RingSize))
 
 				// todo: compute tx size and witness, computes the fee, check amount, compare with changeThreshold
@@ -667,7 +690,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 				if currentTotal > targetValue {
 					txVersion := wire.GetCurrentTxVersion()
 					// compute the tx size with witness
-					txConSize := wire.PrecomputeTrTxConSize(txVersion,inputRingVersions,selectedRingSizes, uint8(len(txOutDescs)),pqringctparam.GetTxMemoMaxLen(txVersion)) * uint32(len(txOutDescs)) //TODO osy 20210618
+					txConSize := wire.PrecomputeTrTxConSize(txVersion, inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)), pqringctparam.GetTxMemoMaxLen(txVersion)) * uint32(len(txOutDescs)) //TODO osy 20210618
 					witnessSize := pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs)))
 					fee, err := abeutil.NewAmountAbe(float64(txConSize+witnessSize) * feePerKbSpecified.ToUnit(abeutil.AmountNeutrino))
 					if err != nil {
@@ -675,50 +698,41 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 					}
 					if targetValue+fee < currentTotal {
 						if currentTotal-targetValue-fee < ChangeThreshold {
-							txFee = currentTotal - targetValue - fee
-							// read the ring
-							selectedRings = make([]*wtxmgr.Ring, 0, len(selectedTxos))
-							// todo: read selected rings, form the TxIn and the inputDesc, call TxGen
-							rings := make(map[chainhash.Hash]*wtxmgr.Ring)
-							for _, txo := range selectedTxos {
-								_, ok := rings[txo.RingHash]
-								if !ok {
-									ring, err := wtxmgr.FetchRingDetails(txmgrNs, txo.RingHash[:])
-									if err != nil {
-										return err
-									}
-									rings[txo.RingHash] = ring
-
-								}
-								selectedRings = append(selectedRings, rings[txo.RingHash])
-							}
-							return nil
+							txFee = currentTotal - targetValue
+							flag = false
 						} else {
 							// need to make a change
 							flag = true
-							txConSize = pqringctparam.GetTxoSerializeSize(txVersion) * uint32(len(txOutDescs)+1)
-							witnessSize = pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs)))
+							txConSize := wire.PrecomputeTrTxConSize(txVersion, inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)+1), pqringctparam.GetTxMemoMaxLen(txVersion)) * uint32(len(txOutDescs)+1) //TODO osy 20210618
+							witnessSize = pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs)+1))
 							fee, err = abeutil.NewAmountAbe(float64(txConSize+witnessSize) * feePerKbSpecified.ToUnit(abeutil.AmountNeutrino))
 							if targetValue+fee < currentTotal {
-								txFee = currentTotal - targetValue - fee
-								selectedRings = make([]*wtxmgr.Ring, 0, len(selectedTxos))
-								// todo: read selected rings, form the TxIn and the inputDesc, call TxGen
-								rings := make(map[chainhash.Hash]*wtxmgr.Ring)
-								for _, txo := range selectedTxos {
-									_, ok := rings[txo.RingHash]
-									if !ok {
-										ring, err := wtxmgr.FetchRingDetails(txmgrNs, txo.RingHash[:])
-										if err != nil {
-											return err
-										}
-										rings[txo.RingHash] = ring
-
-									}
-									selectedRings = append(selectedRings, rings[txo.RingHash])
+								if currentTotal-targetValue < ChangeThreshold {
+									txFee = currentTotal - targetValue
+									flag = false
+								} else {
+									txFee = fee
+									flag = true
 								}
-								return nil
+							} else {
+								continue
 							}
 						}
+						// read the ring
+						selectedRings = make(map[chainhash.Hash]*wtxmgr.Ring)
+						// todo: read selected rings, form the TxIn and the inputDesc, call TxGen
+						for _, txo := range selectedTxos {
+							_, ok := selectedRings[txo.RingHash]
+							if !ok {
+								ring, err := wtxmgr.FetchRingDetails(txmgrNs, txo.RingHash[:])
+								if err != nil {
+									return err
+								}
+								selectedRings[txo.RingHash] = ring
+
+							}
+						}
+						return nil
 					}
 				}
 				// if over changethreshold, compute tx size and witheness witness with one more output, then check the amount.
@@ -731,7 +745,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 							}*/
 			}
 		}
-		if targetValue+txFee < currentTotal {
+		if targetValue+txFee <= currentTotal {
 			return nil
 		}
 		return errors.New("not Enough")
@@ -753,21 +767,43 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 	// acquire thr master key
 	//  generate the transacion
 	abeTxInputDescs := make([]*abepqringct.AbeTxInputDesc, 0, len(selectedTxos))
+	txIns :=make([]*wire.TxInAbe,len(selectedTxos))
 	for i := 0; i < len(selectedTxos); i++ {
-		serializedTxoLists := make([]*wire.TxOutAbe, 0, len(selectedRings[i].Index))
-		for j := 0; j < len(selectedRings[i].Index); j++ {
+		txIns[i]=&wire.TxInAbe{
+			SerialNumber:         nil,
+			PreviousOutPointRing: wire.OutPointRing{
+				Version:    selectedRings[selectedTxos[i].RingHash].Version,
+				BlockHashs: make([]*chainhash.Hash,len(selectedRings[selectedTxos[i].RingHash].BlockHashes)),
+				OutPoints:  make([]*wire.OutPointAbe,len(selectedRings[selectedTxos[i].RingHash].TxHashes)),
+			},
+		}
+		for j := 0; j < len(selectedRings[selectedTxos[i].RingHash].BlockHashes); j++ {
+			txIns[i].PreviousOutPointRing.BlockHashs[j]=&selectedRings[selectedTxos[i].RingHash].BlockHashes[j]
+			txIns[i].PreviousOutPointRing.OutPoints[j]=&wire.OutPointAbe{
+				TxHash: selectedRings[selectedTxos[i].RingHash].TxHashes[j],
+				Index:  selectedRings[selectedTxos[i].RingHash].Index[j],
+			}
+		}
+
+		serializedTxoLists := make([]*wire.TxOutAbe, 0, len(selectedRings[selectedTxos[i].RingHash].Index))
+		for j := 0; j < len(selectedRings[selectedTxos[i].RingHash].Index); j++ {
 			serializedTxoLists = append(serializedTxoLists, &wire.TxOutAbe{
-				Version:   selectedRings[i].Version,
-				TxoScript: selectedRings[i].TxoScripts[j],
+				Version:   selectedRings[selectedTxos[i].RingHash].Version,
+				TxoScript: selectedRings[selectedTxos[i].RingHash].TxoScripts[j],
 			})
 		}
 		abeTxInputDescs = append(abeTxInputDescs, abepqringct.NewAbeTxInputDesc(serializedTxoLists, int(selectedTxos[i].Index), mpkBytes, msvkBytes, msskBytes, selectedTxos[i].Amount))
 	}
+
 	if flag {
 		// TODO check the amount to uint64???
 		txOutDescs = append(txOutDescs, abepqringct.NewAbeTxOutDesc(mpkBytes, uint64(currentTotal-txFee-targetValue)))
 	}
-	transferTx, err := abepqringct.TransferTxGen(abeTxInputDescs, txOutDescs, wire.NewMsgTxAbe(wire.GetCurrentTxVersion()))
+	transferTxTemplate, err := createTransferTxAbeMsgTemplate(txIns, len(txOutDescs),[]byte{}, uint64(txFee))
+	if err != nil {
+		return nil, errors.New("error for creating a transfer transaction template ")
+	}
+	transferTx, err := abepqringct.TransferTxGen(abeTxInputDescs, txOutDescs, transferTxTemplate)
 	if err != nil {
 		return nil, err
 	}

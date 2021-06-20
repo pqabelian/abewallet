@@ -159,7 +159,7 @@ func (m *ManagerAbe) NewPayeeManager(ns walletdb.ReadWriteBucket, name string) (
 		pm := PayeeManager{
 			name:        name,
 			rootManager: m,
-			mpks:        []ManagedAddressAbe{},
+			mpks:        [][]byte{},
 			totalAmount: 0,
 			states:      []state{},
 		}
