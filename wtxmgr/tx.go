@@ -961,10 +961,10 @@ func (s *Store) InsertTxAbe(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecordAbe,
 		if index == -1 { //it do not belong the wallet
 			continue
 		}
-		// mark it as spent
-		if u.IsMy[index] {
-			u.Spent[index] = true
-		}
+		// do not mark it as spent, wait the block coming to mark it as spent
+		//if u.IsMy[index] {
+		//	u.Spent[index] = true
+		//}
 		//move from the unspentUtxo bucket to spentUtxobucket if necessary
 		k := canonicalOutPointAbe(rec.MsgTx.TxIns[i].PreviousOutPointRing.OutPoints[index].TxHash, rec.MsgTx.TxIns[i].PreviousOutPointRing.OutPoints[index].Index)
 		//v := wtxmgrNs.NestedReadWriteBucket(bucketUnspentTXO).Get(k)
@@ -1879,7 +1879,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 				continue
 			}
 			// if not, update the entry
-			err := putRawUTXORing(ns, k[:], v.Serialize()[32:])
+			err := putRawUTXORing(ns, k[:], v.Serialize()[:])
 			if err != nil {
 				return err
 			}
@@ -2168,7 +2168,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 		}
 		// put the utxo ring into database
 		for ringHash, utxoRing := range willAddUTXORing {
-			err := putRawUTXORing(ns, ringHash[:], utxoRing.Serialize()[32:])
+			err := putRawUTXORing(ns, ringHash[:], utxoRing.Serialize()[:])
 			if err != nil {
 				return err
 			}
@@ -3092,7 +3092,7 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 						}
 					}
 				}
-				err := putRawUTXORing(ns, utxoRings[j].RingHash[:], utxoRings[j].Serialize()[32:])
+				err := putRawUTXORing(ns, utxoRings[j].RingHash[:], utxoRings[j].Serialize()[:])
 				if err != nil {
 					return err
 				}
@@ -3122,7 +3122,7 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 						}
 					}
 				}
-				err = putRawUTXORing(ns, utxoRings[j].RingHash[:], utxoRings[j].Serialize()[32:])
+				err = putRawUTXORing(ns, utxoRings[j].RingHash[:], utxoRings[j].Serialize()[:])
 				if err != nil {
 					return err
 				}

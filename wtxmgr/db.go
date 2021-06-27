@@ -1893,7 +1893,7 @@ func DeleteNeedUpdateUTXORing(ns walletdb.ReadWriteBucket, k []byte) error {
 //    [0:32] RingHash(32 bytes)
 //    value see the serialize method of UTXORing
 func valueUTXORing(u *UTXORingAbe) []byte {
-	return u.Serialize()[32:]
+	return u.Serialize()[:]
 }
 func existsUTXORing(ns walletdb.ReadBucket, hash chainhash.Hash) (k, v []byte) {
 	k = make([]byte, 32)
@@ -1922,8 +1922,7 @@ func fetchUTXORing(ns walletdb.ReadBucket, k []byte) (*UTXORingAbe, error) {
 		return nil, fmt.Errorf("the pair is not exist")
 	}
 	res := new(UTXORingAbe)
-	tmp := append(k, v...)
-	res.Deserialize(tmp)
+	res.Deserialize(v)
 	return res, nil
 }
 func deleteUTXORing(ns walletdb.ReadWriteBucket, k []byte) error {

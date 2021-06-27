@@ -3719,7 +3719,7 @@ func (w *Wallet) resendUnminedTxAbes() {
 	}
 
 	for _, tx := range txs {
-		txHash, err := w.publishTransactionAbe(tx)
+		txHash, err := w.publishTransactionAbeNew(tx)
 		if err != nil {
 			log.Debugf("Unable to rebroadcast transaction %v: %v",
 				tx.TxHash(), err)
@@ -4080,7 +4080,7 @@ func (w *Wallet) SendOutputsAbe(outputDescs []*abepqringct.AbeTxOutDesc, minconf
 		return nil, err
 	}
 	// it means that the transaction is create if successful
-	txHash, err := w.reliablyPublishTransactionAbe(createdTx.Tx, label)
+	txHash, err := w.reliablyPublishTransactionAbeNew(createdTx.Tx, label)
 	if err != nil {
 		return nil, err
 	}
@@ -4408,6 +4408,40 @@ func (w *Wallet) reliablyPublishTransactionAbe(tx *wire.MsgTxAbe,
 	//}
 
 	return w.publishTransactionAbe(tx)
+}
+
+func (w *Wallet) reliablyPublishTransactionAbeNew(tx *wire.MsgTxAbe,
+	label string) (*chainhash.Hash, error) {
+	// firstly, send the transaction to the backend
+	hash, err := w.publishTransactionAbeNew(tx)
+	// if failed, do nothing
+	// if successfully, add the transaction into unmined bucket
+	if err!=nil{
+		// failed
+		return nil,err
+	}
+	txRec, err := wtxmgr.NewTxRecordAbeFromMsgTxAbe(tx, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	// add the transaction into unmined bucket
+	err = walletdb.Update(w.db, func(dbTx walletdb.ReadWriteTx) error {
+		if err := w.addRelevantTxAbe(dbTx, txRec, nil); err != nil {
+			return err
+		}
+		// If the tx label is empty, we can return early.
+		if len(label) == 0 {
+			return nil
+		}
+		// If there is a label we should write, get the namespace key
+		// and record it in the tx store.
+		txmgrNs := dbTx.ReadWriteBucket(wtxmgrNamespaceKey)
+		return w.TxStore.PutTxLabel(txmgrNs, tx.TxHash(), label) // use the label to explain the tx?
+	})
+	if err != nil {
+		return nil, err
+	}
+	return hash,nil
 }
 
 // publishTransaction attempts to send an unconfirmed transaction to the
@@ -4784,7 +4818,8 @@ func (w *Wallet) publishTransactionAbe(tx *wire.MsgTxAbe) (*chainhash.Hash, erro
 		if err != nil {
 			return err
 		}
-		return w.TxStore.RemoveUnminedTxAbe(txmgrNs, txRec)
+		w.TxStore.RemoveUnminedTxAbe(txmgrNs, txRec)
+		return nil
 	})
 	if dbErr != nil {
 		log.Warnf("Unable to remove invalid transaction %v: %v",
@@ -4792,6 +4827,165 @@ func (w *Wallet) publishTransactionAbe(tx *wire.MsgTxAbe) (*chainhash.Hash, erro
 	} else {
 		log.Infof("Removed invalid transaction: %v",
 			spew.Sdump(tx))
+	}
+
+	return nil, returnErr
+}
+
+func (w *Wallet) publishTransactionAbeNew(tx *wire.MsgTxAbe) (*chainhash.Hash, error) {
+	chainClient, err := w.requireChainClient()
+	if err != nil {
+		return nil, err
+	}
+
+	// match is a helper method to easily string match on the error
+	// message.
+	match := func(err error, s string) bool {
+		return strings.Contains(strings.ToLower(err.Error()), s)
+	}
+
+	_, err = chainClient.SendRawTransactionAbe(tx, false) // send the transaction to backend
+
+	// Determine if this was an RPC error thrown due to the transaction
+	// already confirming.
+	var rpcTxConfirmed bool
+	if rpcErr, ok := err.(*abejson.RPCError); ok {
+		rpcTxConfirmed = rpcErr.Code == abejson.ErrRPCTxAlreadyInChain
+	}
+
+	var (
+		txid      = tx.TxHash()
+		returnErr error
+	)
+
+	switch {
+	case err == nil:
+		return &txid, nil
+
+	// Since we have different backends that can be used with the wallet,
+	// we'll need to check specific errors for each one.
+	//
+	// If the transaction is already in the mempool, we can just return now.
+	//
+	// This error is returned when broadcasting/sending a transaction to a
+	// btcd node that already has it in their mempool.
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L953
+	case match(err, "already have transaction"):
+		fallthrough
+
+	// This error is returned when broadcasting a transaction to a bitcoind
+	// node that already has it in their mempool.
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L590
+	case match(err, "txn-already-in-mempool"):
+		return &txid, nil
+
+	// If the transaction has already confirmed, we can safely remove it
+	// from the unconfirmed store as it should already exist within the
+	// confirmed store. We'll avoid returning an error as the broadcast was
+	// in a sense successful.
+	//
+	// This error is returned when sending a transaction that has already
+	// confirmed to a btcd/bitcoind node over RPC.
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/rpcserver.go#L3355
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/node/transaction.cpp#L36
+	case rpcTxConfirmed:
+		fallthrough
+
+	// This error is returned when broadcasting a transaction that has
+	// already confirmed to a btcd node over the P2P network.
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L1036
+	case match(err, "transaction already exists"):
+		fallthrough
+
+	// This error is returned when broadcasting a transaction that has
+	// already confirmed to a bitcoind node over the P2P network.
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L648
+	case match(err, "txn-already-known"): //update the utxo set
+		fallthrough
+
+	// If the transactions is invalid since it attempts to double spend a
+	// transaction already in the mempool or in the chain, we'll remove it
+	// from the store and return an error.
+	//
+	// This error is returned from btcd when there is already a transaction
+	// not signaling replacement in the mempool that spends one of the
+	// referenced outputs.
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L591
+	case match(err, "already spent"):
+		fallthrough
+
+	// This error is returned from btcd when a referenced output cannot be
+	// found, meaning it etiher has been spent or doesn't exist.
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/blockchain/chain.go#L405
+	case match(err, "already been spent"):
+		fallthrough
+
+	// This error is returned from btcd when a transaction is spending
+	// either output that is missing or already spent, and orphans aren't
+	// allowed.
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L1409
+	case match(err, "orphan transaction"):
+		fallthrough
+
+	// Error returned from bitcoind when output was spent by other
+	// non-replacable transaction already in the mempool.
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L622
+	case match(err, "txn-mempool-conflict"):
+		fallthrough
+
+	// Returned by bitcoind on the RPC when broadcasting a transaction that
+	// is spending either output that is missing or already spent.
+	//
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/node/transaction.cpp#L49
+	// https://github.com/bitcoin/bitcoin/blob/0.20/src/validation.cpp#L642
+	case match(err, "missing inputs") ||
+		match(err, "bad-txns-inputs-missingorspent"):
+
+		returnErr = &ErrDoubleSpend{
+			backendError: err,
+		}
+
+	// Returned by bitcoind if the transaction spends outputs that would be
+	// replaced by it.
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L790
+	case match(err, "bad-txns-spends-conflicting-tx"):
+		fallthrough
+
+	// Returned by bitcoind when a replacement transaction did not have
+	// enough fee.
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L830
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L894
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L904
+	case match(err, "insufficient fee"):
+		fallthrough
+
+	// Returned by bitcoind in case the transaction would replace too many
+	// transaction in the mempool.
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L858
+	case match(err, "too many potential replacements"):
+		fallthrough
+
+	// Returned by bitcoind if the transaction spends an output that is
+	// unconfimed and not spent by the transaction it replaces.
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L882
+	case match(err, "replacement-adds-unconfirmed"):
+		fallthrough
+
+	// Returned by btcd when replacement transaction was rejected for
+	// whatever reason.
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L841
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L854
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L875
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L896
+	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L913
+	case match(err, "replacement transaction"):
+		returnErr = &ErrReplacement{
+			backendError: err,
+		}
+
+	// We received an error not matching any of the above cases.
+	default:
+		returnErr = fmt.Errorf("unmatched backend error: %v", err)
 	}
 
 	return nil, returnErr

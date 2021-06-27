@@ -528,7 +528,7 @@ func (w *Wallet) txToOutputs(outputs []*wire.TxOut, account uint32,
 //	//return tx, nil
 //}
 
-func createTransferTxAbeMsgTemplate(txIn []*wire.TxInAbe, txOutNum int, txMemo []byte,fee uint64) (*wire.MsgTxAbe, error) {
+func createTransferTxAbeMsgTemplate(txIn []*wire.TxInAbe, txOutNum int, txMemo []byte, fee uint64) (*wire.MsgTxAbe, error) {
 	msgTx := &wire.MsgTxAbe{
 		Version:   wire.GetCurrentTxVersion(),
 		TxIns:     nil,
@@ -538,7 +538,7 @@ func createTransferTxAbeMsgTemplate(txIn []*wire.TxInAbe, txOutNum int, txMemo [
 		TxWitness: []byte{}, // will be fulfill
 	}
 
-	msgTx.TxIns=txIn
+	msgTx.TxIns = txIn
 
 	for i := 0; i < txOutNum; i++ {
 		msgTx.TxOuts[i] = &wire.TxOutAbe{
@@ -767,19 +767,19 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 	// acquire thr master key
 	//  generate the transacion
 	abeTxInputDescs := make([]*abepqringct.AbeTxInputDesc, 0, len(selectedTxos))
-	txIns :=make([]*wire.TxInAbe,len(selectedTxos))
+	txIns := make([]*wire.TxInAbe, len(selectedTxos))
 	for i := 0; i < len(selectedTxos); i++ {
-		txIns[i]=&wire.TxInAbe{
-			SerialNumber:         nil,
+		txIns[i] = &wire.TxInAbe{
+			SerialNumber: nil,
 			PreviousOutPointRing: wire.OutPointRing{
 				Version:    selectedRings[selectedTxos[i].RingHash].Version,
-				BlockHashs: make([]*chainhash.Hash,len(selectedRings[selectedTxos[i].RingHash].BlockHashes)),
-				OutPoints:  make([]*wire.OutPointAbe,len(selectedRings[selectedTxos[i].RingHash].TxHashes)),
+				BlockHashs: make([]*chainhash.Hash, len(selectedRings[selectedTxos[i].RingHash].BlockHashes)),
+				OutPoints:  make([]*wire.OutPointAbe, len(selectedRings[selectedTxos[i].RingHash].TxHashes)),
 			},
 		}
 		for j := 0; j < len(selectedRings[selectedTxos[i].RingHash].BlockHashes); j++ {
-			txIns[i].PreviousOutPointRing.BlockHashs[j]=&selectedRings[selectedTxos[i].RingHash].BlockHashes[j]
-			txIns[i].PreviousOutPointRing.OutPoints[j]=&wire.OutPointAbe{
+			txIns[i].PreviousOutPointRing.BlockHashs[j] = &selectedRings[selectedTxos[i].RingHash].BlockHashes[j]
+			txIns[i].PreviousOutPointRing.OutPoints[j] = &wire.OutPointAbe{
 				TxHash: selectedRings[selectedTxos[i].RingHash].TxHashes[j],
 				Index:  selectedRings[selectedTxos[i].RingHash].Index[j],
 			}
@@ -799,13 +799,36 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 		// TODO check the amount to uint64???
 		txOutDescs = append(txOutDescs, abepqringct.NewAbeTxOutDesc(mpkBytes, uint64(currentTotal-txFee-targetValue)))
 	}
-	transferTxTemplate, err := createTransferTxAbeMsgTemplate(txIns, len(txOutDescs),[]byte{}, uint64(txFee))
+	//TODO(abe) 20210627: to sure the txmemo?
+	transferTxTemplate, err := createTransferTxAbeMsgTemplate(txIns, len(txOutDescs), []byte{}, uint64(txFee))
 	if err != nil {
 		return nil, errors.New("error for creating a transfer transaction template ")
 	}
 	transferTx, err := abepqringct.TransferTxGen(abeTxInputDescs, txOutDescs, transferTxTemplate)
 	if err != nil {
 		return nil, err
+	}
+	// update the utxoring
+	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
+		for i, txo := range selectedTxos {
+			utxoRing, err := wtxmgr.FetchUTXORing(txmgrNs, txo.RingHash[:])
+			if err!=nil{
+				return err
+			}
+			if utxoRing.OriginSerialNumberes==nil{
+				utxoRing.OriginSerialNumberes=map[uint8][]byte{}
+			}
+			utxoRing.OriginSerialNumberes[txo.Index]=transferTx.TxIns[i].SerialNumber
+			err = wtxmgr.PutUTXORing(txmgrNs, txo.RingHash[:], utxoRing)
+			if err!=nil{
+				return err
+			}
+		}
+		return nil
+	})
+	if err!=nil{
+		return nil,err
 	}
 	resTx := &txauthor.AuthoredTxAbe{
 		Tx: transferTx,

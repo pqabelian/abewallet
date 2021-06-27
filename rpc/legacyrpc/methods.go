@@ -1605,10 +1605,11 @@ func sendToPayees(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 		return nil, err
 	}
 
-	if scaleToFeeSatPerKb > 0 {
+	if scaleToFeeSatPerKb !=1 {
+		// set the scaleToFeeSatPerKb
 		feeSatPerKb = feeSatPerKb.MulF64(scaleToFeeSatPerKb)
 		feeSpecified = abeutil.Amount(0)
-	} else if feeSpecified == 0 {
+	} else if feeSpecified != 0 && scaleToFeeSatPerKb==1 {
 		//	if neither scaleToFeeSatPerKb or feeSpecified is specified, the use scaleToFeeSatPerKb = 1
 		//	feeSatPerKb = feeSatPerKb
 		//	feeSpecified = 0
