@@ -1899,7 +1899,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 				freezedBal += amt
 				balance += amt
 				k := wire.OutPointAbe{
-					TxHash: coinbaseTx.TxHash(),
+					TxHash: txi.TxHash(),
 					Index:  uint8(i),
 				}
 				tmp := NewUnspentUTXO(txi.TxOuts[j].Version, b.Height, k, true, v, 255, block.RecvTime, chainhash.ZeroHash, 0)
