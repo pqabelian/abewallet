@@ -1900,7 +1900,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 				balance += amt
 				k := wire.OutPointAbe{
 					TxHash: txi.TxHash(),
-					Index:  uint8(i),
+					Index:  uint8(j),
 				}
 				tmp := NewUnspentUTXO(txi.TxOuts[j].Version, b.Height, k, true, v, 255, block.RecvTime, chainhash.ZeroHash, 0)
 				transferOutputs[k] = tmp
