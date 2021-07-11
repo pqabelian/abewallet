@@ -777,14 +777,16 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 				OutPoints:  make([]*wire.OutPointAbe, len(selectedRings[selectedTxos[i].RingHash].TxHashes)),
 			},
 		}
-		for j := 0; j < len(selectedRings[selectedTxos[i].RingHash].TxHashes); j++ {
+		for j := 0; j < len(selectedRings[selectedTxos[i].RingHash].BlockHashes); j++ {
 			txIns[i].PreviousOutPointRing.BlockHashs[j] = &selectedRings[selectedTxos[i].RingHash].BlockHashes[j]
+		}
+
+		for j := 0; j < len(selectedRings[selectedTxos[i].RingHash].TxHashes); j++ {
 			txIns[i].PreviousOutPointRing.OutPoints[j] = &wire.OutPointAbe{
 				TxHash: selectedRings[selectedTxos[i].RingHash].TxHashes[j],
 				Index:  selectedRings[selectedTxos[i].RingHash].Index[j],
 			}
 		}
-
 		serializedTxoLists := make([]*wire.TxOutAbe, 0, len(selectedRings[selectedTxos[i].RingHash].Index))
 		for j := 0; j < len(selectedRings[selectedTxos[i].RingHash].Index); j++ {
 			serializedTxoLists = append(serializedTxoLists, &wire.TxOutAbe{
