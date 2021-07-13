@@ -1119,6 +1119,7 @@ func (s *Store) InsertGenesisBlockAbeNew(ns walletdb.ReadWriteBucket, block *Blo
 		valid, v := abepqringct.TxoCoinReceive(coinbaseTx.TxOuts[i], serializedMPK, serializedMSVK)
 		if valid && v != 0 {
 			amt, err := abeutil.NewAmountAbe(float64(v))
+			fmt.Printf("(Coinbase) Find my txo at block height %d with value %d\n", block.Height, int(v))
 			if err != nil {
 				return err
 			}
@@ -1728,7 +1729,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 	}
 	blockOutputs := make(map[Block][]wire.OutPointAbe) // if the block height meet the requirement, it also store previous two block outputs belong the wallet
 
-	// store all outputs of coinbaseTx into a map : coinbaseOutput
+	// store all outputs of coinbaseTx which belong to us into a map : coinbaseOutput
 	coinbaseTx := block.TxRecordAbes[0].MsgTx
 	coinbaseOutput := make(map[wire.OutPointAbe]*UnspentUTXO)
 	for i := 0; i < len(coinbaseTx.TxOuts); i++ {

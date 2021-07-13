@@ -1286,10 +1286,12 @@ func deleteBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) error {
 // block height || block hash -> version + []UnspentTXO 【txhash + index + amount + generationTime + ringhash】
 func valueImmaturedCoinbaseOutput(immatured map[wire.OutPointAbe]*UnspentUTXO) []byte {
 	//res := make([]byte, len(immatured)*(32+1+8+8+32))
-	res := make([]byte, len(immatured)*(4+32+1+8+1+8+32+1)) // todo: should not use hard codes. and the version field is the same so it can be optimized
+	res := make([]byte, len(immatured)*(4+4+32+1+8+1+8+32+1)) // todo: should not use hard codes. and the version field is the same so it can be optimized
 	offset := 0
 	for _, utxo := range immatured {
 		byteOrder.PutUint32(res[offset:offset+4], utxo.Version)
+		offset += 4
+		byteOrder.PutUint32(res[offset:offset+4], uint32(utxo.Height))
 		offset += 4
 		copy(res[offset:offset+32], utxo.TxOutput.TxHash[:])
 		offset += 32
@@ -1323,9 +1325,11 @@ func fetchImmaturedCoinbaseOutput(ns walletdb.ReadBucket, height int32, hash cha
 	op := make(map[wire.OutPointAbe]*UnspentUTXO)
 	offset := 0
 	//for i := 0; i < len(v)/(32+1+8+8+32); i++ {
-	for i := 0; i < len(v)/(4+32+1+8+1+8+32+1); i++ { // todo: should not use hardcodes
+	for i := 0; i < len(v)/(4+4+32+1+8+1+8+32+1); i++ { // todo: should not use hardcodes
 		tmp := new(UnspentUTXO)
 		tmp.Version = byteOrder.Uint32(v[offset : offset+4])
+		offset += 4
+		tmp.Height = int32(byteOrder.Uint32(v[offset : offset+4]))
 		offset += 4
 		copy(tmp.TxOutput.TxHash[:], v[offset:offset+32])
 		offset += 32
