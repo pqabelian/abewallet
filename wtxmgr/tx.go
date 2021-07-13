@@ -1707,10 +1707,6 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 	if err != nil {
 		return err
 	}
-	tmpBal, err := abeutil.NewAmountAbe(0)
-	if err != nil {
-		return err
-	}
 	// put the serialized block into database
 	err = putBlockAbeRecord(ns, block)
 	if err != nil {
@@ -1739,6 +1735,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 		valid, v := abepqringct.TxoCoinReceive(coinbaseTx.TxOuts[i], serializedMPK, serializedMSVK)
 		if valid && v != 0 {
 			amt, err := abeutil.NewAmountAbe(float64(v))
+			fmt.Printf("(Coinbase) Find my txo at block height %d with value %d\n", block.Height, int(v))
 			if err != nil {
 				return err
 			}
@@ -1892,7 +1889,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			valid, v := abepqringct.TxoCoinReceive(txi.TxOuts[j], serializedMPK, serializedMSVK)
 			if valid && v != 0 {
 				amt, err := abeutil.NewAmountAbe(float64(v))
-				fmt.Printf("Find my utxo in block height %d with value %d\n", block.Height, int(v))
+				fmt.Printf("(Transfer) Find my txo at block height %d with value %d\n", block.Height, int(v))
 				if err != nil {
 					return err
 				}
@@ -2230,15 +2227,24 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 		}
 	}
 	if block.Height%3 == 2 { // transfer output is matured
+		var newBal uint64 = 0
+		if err != nil {
+			return err
+		}
 		for op, utxo := range transferOutputs {
 			v := valueUnspentTXO(false, utxo.Version, utxo.Height, utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 			err = putRawMaturedOutput(ns, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
 				return err
 			}
+			newBal += utxo.Amount
 		}
-		spendableBal += tmpBal
-		freezedBal -= tmpBal
+		amt, err := abeutil.NewAmountAbe(float64(newBal))
+		if err != nil {
+			return err
+		}
+		spendableBal += amt
+		freezedBal -= amt
 	} else { // immatured
 		if len(transferOutputs) != 0 {
 			err := putRawImmaturedOutput(ns, canonicalBlockAbe(block.Height, block.Hash), valueImmaturedOutput(transferOutputs))
