@@ -1939,6 +1939,31 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			}
 		}
 	}
+
+	// Fix for spending immarture coinbase transaction output: move it to spendable utxo bucket every 3 blocks
+	// fetch the matured coinbase output block.Height-Maturity
+	if block.Height >= int32(s.chainParams.CoinbaseMaturity)+2 && block.Height%3 == 2 {
+		for i := 0; i < len(maturedBlockHashs); i++ {
+			utxos, err := fetchImmaturedCoinbaseOutput(ns, block.Height-int32(s.chainParams.CoinbaseMaturity)-int32(i), *maturedBlockHashs[i])
+			if err != nil {
+				return err
+			}
+			for op, utxo := range utxos {
+				v := valueUnspentTXO(true, utxo.Version, block.Height-int32(s.chainParams.CoinbaseMaturity), utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
+				amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[9:17])))
+				if err != nil {
+					return err
+				}
+				spendableBal += amt
+				freezedBal -= amt
+				err = putRawMaturedOutput(ns, canonicalOutPointAbe(op.TxHash, op.Index), v)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+
 	//TODO(abe): check the correctness of generating ring and modify the utxo in bucket unspentUtxo
 	if block.Height%3 == 2 {
 		var block1CoinbaseUTXO, block1TransferUTXO, block0CoinbaseUTXO, block0TransferUTXO map[wire.OutPointAbe]*UnspentUTXO
@@ -2255,29 +2280,6 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 		}
 	}
 
-	// Fix for spending immarture coinbase transaction output: move it to spendable utxo bucket every 3 blocks
-	// fetch the matured coinbase output block.Height-Maturity
-	if block.Height >= int32(s.chainParams.CoinbaseMaturity)+2 && block.Height%3 == 2 {
-		for i := 0; i < len(maturedBlockHashs); i++ {
-			utxos, err := fetchImmaturedCoinbaseOutput(ns, block.Height-int32(s.chainParams.CoinbaseMaturity)-int32(i), *maturedBlockHashs[i])
-			if err != nil {
-				return err
-			}
-			for op, utxo := range utxos {
-				v := valueUnspentTXO(true, utxo.Version, block.Height-int32(s.chainParams.CoinbaseMaturity), utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
-				amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[9:17])))
-				if err != nil {
-					return err
-				}
-				spendableBal += amt
-				freezedBal -= amt
-				err = putRawMaturedOutput(ns, canonicalOutPointAbe(op.TxHash, op.Index), v)
-				if err != nil {
-					return err
-				}
-			}
-		}
-	}
 	// update the balances
 	// return handle
 	err = putSpenableBalance(ns, spendableBal)
