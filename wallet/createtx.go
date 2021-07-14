@@ -774,13 +774,6 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 			idx, txo.Amount, txo.Height, txo.TxOutput.TxHash.String(), txo.TxOutput.Index, txo.RingHash.String(), txo.Index, txo.RingSize, txo.FromCoinBase)
 	}
 
-	// print the details of transaction outputs
-	fmt.Println("New utxos: ")
-	for idx, txo := range txOutDescs{
-		fmt.Printf("(%d) Value %d\n", idx, txo.GetValue())
-	}
-	fmt.Printf("txFee: %d\n", txFee)
-
 	abeTxInputDescs := make([]*abepqringct.AbeTxInputDesc, 0, len(selectedTxos))
 	txIns := make([]*wire.TxInAbe, len(selectedTxos))
 	for i := 0; i < len(selectedTxos); i++ {
@@ -816,6 +809,18 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 		// TODO check the amount to uint64???
 		txOutDescs = append(txOutDescs, abepqringct.NewAbeTxOutDesc(mpkBytes, uint64(currentTotal-txFee-targetValue)))
 	}
+
+	// print the details of transaction outputs
+	fmt.Println("New utxos: ")
+	for idx, txo := range txOutDescs{
+		if idx != len(txOutDescs)-1 {
+			fmt.Printf("(%d) Value %d\n", idx, txo.GetValue())
+		}else{
+			fmt.Printf("(%d) Value %d (Change)\n", idx, txo.GetValue())
+		}
+	}
+	fmt.Printf("TxFee: %d\n", txFee)
+
 	//TODO(abe) 20210627: to sure the txmemo?
 	transferTxTemplate, err := createTransferTxAbeMsgTemplate(txIns, len(txOutDescs), []byte{}, uint64(txFee))
 	if err != nil {
