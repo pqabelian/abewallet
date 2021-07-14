@@ -1949,7 +1949,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 				return err
 			}
 			for op, utxo := range utxos {
-				v := valueUnspentTXO(true, utxo.Version, block.Height-int32(s.chainParams.CoinbaseMaturity), utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
+				v := valueUnspentTXO(true, utxo.Version, block.Height-int32(s.chainParams.CoinbaseMaturity)-int32(i), utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 				amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[9:17])))
 				if err != nil {
 					return err

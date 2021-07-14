@@ -766,6 +766,21 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 
 	// acquire thr master key
 	//  generate the transacion
+
+	// print the details of transaction inputs
+	fmt.Println("Consume utxos: ")
+	for idx, txo := range selectedTxos{
+		fmt.Printf("(%d) Value %d at height %d, TxHash: %s Index: %d, RingHash: %s RingIndex: %d (Member Size: %d), (From Coinbase: %t)\n",
+			idx, txo.Amount, txo.Height, txo.TxOutput.TxHash.String(), txo.TxOutput.Index, txo.RingHash.String(), txo.Index, txo.RingSize, txo.FromCoinBase)
+	}
+
+	// print the details of transaction outputs
+	fmt.Println("New utxos: ")
+	for idx, txo := range txOutDescs{
+		fmt.Printf("(%d) Value %d\n", idx, txo.GetValue())
+	}
+	fmt.Printf("txFee: %d\n", txFee)
+
 	abeTxInputDescs := make([]*abepqringct.AbeTxInputDesc, 0, len(selectedTxos))
 	txIns := make([]*wire.TxInAbe, len(selectedTxos))
 	for i := 0; i < len(selectedTxos); i++ {
