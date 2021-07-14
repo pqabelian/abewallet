@@ -696,6 +696,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 					if err != nil {
 						return err
 					}
+					txFee = fee
 					if targetValue+fee < currentTotal {
 						if currentTotal-targetValue-fee < ChangeThreshold {
 							txFee = currentTotal - targetValue
