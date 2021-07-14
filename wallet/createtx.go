@@ -17,7 +17,10 @@ import (
 	"sort"
 )
 
-const ChangeThreshold abeutil.Amount = 1000
+const (
+	ChangeThreshold abeutil.Amount = 1000
+	WitnessScaleFactor = 10
+)
 
 // byAmount defines the methods needed to satisify sort.Interface to
 // sort credits by their output amount.
@@ -550,6 +553,37 @@ func createTransferTxAbeMsgTemplate(txIn []*wire.TxInAbe, txOutNum int, txMemo [
 	return msgTx, nil
 }
 
+func PrintConsumedUTXOs(selectedTxos []*wtxmgr.UnspentUTXO){
+	fmt.Println("Consumed utxos: ")
+	for idx, txo := range selectedTxos{
+		fmt.Printf("(%d) Value %d at height %d, TxHash: %s Index: %d, RingHash: %s RingIndex: %d (Member Size: %d), (From Coinbase: %t)\n",
+			idx, txo.Amount, txo.Height, txo.TxOutput.TxHash.String(), txo.TxOutput.Index, txo.RingHash.String(), txo.Index, txo.RingSize, txo.FromCoinBase)
+	}
+}
+
+func PrintNewUTXOs(txOutDescs []*abepqringct.AbeTxOutDesc, hasChange bool, fee abeutil.Amount){
+	fmt.Println("New utxos: ")
+	for idx, txo := range txOutDescs{
+		fmt.Printf("(%d) Value %d", idx, txo.GetValue())
+		if idx != len(txOutDescs) - 1 {
+			fmt.Printf("\n")
+		}
+	}
+	if hasChange {
+		fmt.Printf(" (Change)")
+	}
+	fmt.Printf("\n")
+	fmt.Printf("TxFee: %d\n", fee)
+}
+
+func CalculateFee(txConSize uint32, witnessSize uint32, feePerKbSpecified abeutil.Amount) (abeutil.Amount, error){
+	fee, err := abeutil.NewAmountAbe(float64(txConSize+witnessSize/uint32(WitnessScaleFactor)) * feePerKbSpecified.ToUnit(abeutil.AmountNeutrino))
+	if err != nil {
+		return 0, err
+	}
+	return fee, nil
+}
+
 func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, dryRun bool) (
 	unsignedTx *txauthor.AuthoredTxAbe, err error) {
 
@@ -692,7 +726,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 					// compute the tx size with witness
 					txConSize := wire.PrecomputeTrTxConSize(txVersion, inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)), pqringctparam.GetTxMemoMaxLen(txVersion)) * uint32(len(txOutDescs)) //TODO osy 20210618
 					witnessSize := pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs)))
-					fee, err := abeutil.NewAmountAbe(float64(txConSize+witnessSize) * feePerKbSpecified.ToUnit(abeutil.AmountNeutrino))
+					fee, err := CalculateFee(txConSize, witnessSize, feePerKbSpecified)
 					if err != nil {
 						return err
 					}
@@ -706,7 +740,10 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 							flag = true
 							txConSize := wire.PrecomputeTrTxConSize(txVersion, inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)+1), pqringctparam.GetTxMemoMaxLen(txVersion)) * uint32(len(txOutDescs)+1) //TODO osy 20210618
 							witnessSize = pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs)+1))
-							fee, err = abeutil.NewAmountAbe(float64(txConSize+witnessSize) * feePerKbSpecified.ToUnit(abeutil.AmountNeutrino))
+							fee, err := CalculateFee(txConSize, witnessSize, feePerKbSpecified)
+							if err != nil {
+								return err
+							}
 							if targetValue+fee < currentTotal {
 								if currentTotal-targetValue < ChangeThreshold {
 									txFee = currentTotal - targetValue
@@ -768,12 +805,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 	// acquire thr master key
 	//  generate the transacion
 
-	// print the details of transaction inputs
-	fmt.Println("Consume utxos: ")
-	for idx, txo := range selectedTxos{
-		fmt.Printf("(%d) Value %d at height %d, TxHash: %s Index: %d, RingHash: %s RingIndex: %d (Member Size: %d), (From Coinbase: %t)\n",
-			idx, txo.Amount, txo.Height, txo.TxOutput.TxHash.String(), txo.TxOutput.Index, txo.RingHash.String(), txo.Index, txo.RingSize, txo.FromCoinBase)
-	}
+	PrintConsumedUTXOs(selectedTxos)
 
 	abeTxInputDescs := make([]*abepqringct.AbeTxInputDesc, 0, len(selectedTxos))
 	txIns := make([]*wire.TxInAbe, len(selectedTxos))
@@ -811,16 +843,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 		txOutDescs = append(txOutDescs, abepqringct.NewAbeTxOutDesc(mpkBytes, uint64(currentTotal-txFee-targetValue)))
 	}
 
-	// print the details of transaction outputs
-	fmt.Println("New utxos: ")
-	for idx, txo := range txOutDescs{
-		if idx != len(txOutDescs)-1 {
-			fmt.Printf("(%d) Value %d\n", idx, txo.GetValue())
-		}else{
-			fmt.Printf("(%d) Value %d (Change)\n", idx, txo.GetValue())
-		}
-	}
-	fmt.Printf("TxFee: %d\n", txFee)
+	PrintNewUTXOs(txOutDescs, flag, txFee)
 
 	//TODO(abe) 20210627: to sure the txmemo?
 	transferTxTemplate, err := createTransferTxAbeMsgTemplate(txIns, len(txOutDescs), []byte{}, uint64(txFee))
