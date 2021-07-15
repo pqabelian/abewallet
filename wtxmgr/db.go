@@ -1473,6 +1473,34 @@ func putRawMaturedOutput(ns walletdb.ReadWriteBucket, k, v []byte) error {
 		str := "failed to put unspent output"
 		return storeError(ErrDatabase, str, err)
 	}
+
+	unspent := make([]UnspentUTXO, 0)
+	var op wire.OutPointAbe
+	err = ns.NestedReadBucket(bucketMaturedOutput).ForEach(func(k, v []byte) error {
+		err := readCanonicalOutPointAbe(k, &op)
+		if err != nil {
+			return err
+		}
+		ust := new(UnspentUTXO)
+		err = ust.Deserialize(&op, v)
+		if err != nil {
+			return err
+		}
+		unspent = append(unspent, *ust)
+		return nil
+	})
+	if err != nil {
+		if _, ok := err.(Error); ok {
+			return err
+		}
+		str := "failed iterating unspent bucket"
+		return storeError(ErrDatabase, str, err)
+	}
+	fmt.Println("================For test====================")
+	for idx, utxo := range unspent{
+		fmt.Printf("(%d) Height: %d, Value: %d\n", idx, utxo.Height, utxo.Amount)
+	}
+	fmt.Println("================For test====================")
 	return nil
 }
 func fetchMaturedOutput(ns walletdb.ReadBucket, hash chainhash.Hash, index uint8) (*UnspentUTXO, error) {
