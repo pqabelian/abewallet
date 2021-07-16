@@ -465,7 +465,7 @@ out:
 			notifications = append(notifications, n)
 
 		case dequeue <- next:
-			if n, ok := next.(BlockConnected); ok {
+			if n, ok := next.(BlockAbeConnected); ok {
 				bs = &waddrmgr.BlockStamp{
 					Height: n.Height,
 					Hash:   n.Hash,
