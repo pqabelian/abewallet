@@ -3717,6 +3717,33 @@ func (s *Store) NeedUpdateNum(ns walletdb.ReadBucket) (int, error) {
 	return num, err
 }
 
+func (s *Store) DetailedUtxos(ns walletdb.ReadBucket, minConf int32, syncHeight int32) ([]string, error) {
+	unspent := make([]UnspentUTXO, 0)
+	var op wire.OutPointAbe
+	err := ns.NestedReadBucket(bucketMaturedOutput).ForEach(func(k, v []byte) error {
+		err := readCanonicalOutPointAbe(k, &op)
+		if err != nil {
+			return err
+		}
+		ust := new(UnspentUTXO)
+		err = ust.Deserialize(&op, v)
+		if err != nil {
+			return err
+		}
+		unspent = append(unspent, *ust)
+		return nil
+	})
+	if err != nil {
+		str := "failed iterating unspent bucket"
+		return nil, storeError(ErrDatabase, str, err)
+	}
+	res := make([]string, len(unspent))
+	for idx, utxo := range unspent{
+		res[idx] = fmt.Sprintf("(%d) Height: %d, Value: %d", idx, utxo.Height, utxo.Amount)
+	}
+	return res, nil
+}
+
 // PutTxLabel validates transaction labels and writes them to disk if they
 // are non-zero and within the label length limit. The entry is keyed by the
 // transaction hash:

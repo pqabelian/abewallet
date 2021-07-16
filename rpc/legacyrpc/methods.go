@@ -79,6 +79,7 @@ var rpcHandlers = map[string]struct {
 	"getaddressesbyaccount": {handler: getAddressesByAccount},
 	"getbalance":            {handler: getBalance},
 	"getbalancesabe":        {handler: getBalanceAbe},
+	"getdetailedutxos":	     {handler: getDetailedUtxos},
 	"getbestblockhash":      {handler: getBestBlockHash},
 	"getblockcount":         {handler: getBlockCount},
 	"getinfo":               {handlerWithChain: getInfo},
@@ -487,6 +488,17 @@ func getBalanceAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 		return nil, err
 	}
 	return []float64{balances[0].ToABE(), balances[1].ToABE(), balances[2].ToABE(), balances[3].ToABE(), float64(needUpdateNum)}, nil
+}
+
+// getDetailedUtxos is a temporary command for convenience of test.
+// will be deleted or modified in the future
+func getDetailedUtxos(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.GetDetailedUtxosCmd)
+	res, err := w.FetchDetailedUtxos(int32(*cmd.Minconf))
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 // getBestBlock handles a getbestblock request by returning a JSON object

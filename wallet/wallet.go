@@ -2031,6 +2031,18 @@ func (w *Wallet) CalculateBalanceAbe(confirms int32) ([]abeutil.Amount, int, err
 	return balances, needUpdateNum, err
 }
 
+func (w *Wallet) FetchDetailedUtxos(confirms int32) ([]string, error) {
+	var details []string
+	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		blk := w.ManagerAbe.SyncedTo()
+		var err error
+		details, err = w.TxStore.DetailedUtxos(txmgrNs, confirms, blk.Height)
+		return err
+	})
+	return details, err
+}
+
 // Balances records total, spendable (by policy), and immature coinbase
 // reward balance amounts.
 type Balances struct {
