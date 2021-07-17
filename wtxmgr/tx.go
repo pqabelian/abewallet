@@ -653,6 +653,7 @@ func (u *UTXORingAbe) Deserialize(b []byte) error {
 	offset += 1
 	u.GotSerialNumberes = make([][]byte, gotSnSize)
 	for i := 0; i < gotSnSize; i++ {
+		u.GotSerialNumberes[i] = make([]byte, 32)
 		copy(u.GotSerialNumberes[i][:], b[offset:offset+32])
 		offset += 32
 	}
@@ -706,6 +707,7 @@ func (u *UTXORingAbe) AddGotSerialNumber(serialNumber []byte) error {
 
 func (u UTXORingAbe) Copy() *UTXORingAbe {
 	res := new(UTXORingAbe)
+	res.Version = u.Version
 	res.AllSpent = u.AllSpent
 	res.Refreshed = u.Refreshed
 	res.RingHash = u.RingHash
