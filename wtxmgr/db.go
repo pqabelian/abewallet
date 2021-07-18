@@ -1764,7 +1764,7 @@ func ConfirmSpentTXO(ns walletdb.ReadWriteBucket, txHash chainhash.Hash, index u
 	if v != nil { //from the MaturedOutput
 		//otherwise it has been moved to spentButUnmined bucket
 		// update the balances
-		amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
+		amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[9:17])))
 		if err != nil {
 			return err
 		}
