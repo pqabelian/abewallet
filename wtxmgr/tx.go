@@ -8,6 +8,7 @@ import (
 	"github.com/abesuite/abec/abecrypto/abepqringct"
 	"github.com/abesuite/abec/blockchain"
 	"github.com/abesuite/abewallet/walletdb"
+	"math"
 	"time"
 
 	"github.com/abesuite/abec/abeutil"
@@ -1121,10 +1122,10 @@ func (s *Store) InsertGenesisBlockAbeNew(ns walletdb.ReadWriteBucket, block *Blo
 		valid, v := abepqringct.TxoCoinReceive(coinbaseTx.TxOuts[i], serializedMPK, serializedMSVK)
 		if valid && v != 0 {
 			amt, err := abeutil.NewAmountAbe(float64(v))
-			fmt.Printf("(Coinbase) Find my txo at block height %d with value %d\n", block.Height, int(v))
 			if err != nil {
 				return err
 			}
+			fmt.Printf("(Coinbase) Find my txo at block height %d with value %v\n", block.Height, amt.ToABE())
 			freezedBal += amt
 			balance += amt
 			k := wire.OutPointAbe{
@@ -1738,10 +1739,10 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 		valid, v := abepqringct.TxoCoinReceive(coinbaseTx.TxOuts[i], serializedMPK, serializedMSVK)
 		if valid && v != 0 {
 			amt, err := abeutil.NewAmountAbe(float64(v))
-			fmt.Printf("(Coinbase) Find my txo at block height %d with value %d\n", block.Height, int(v))
 			if err != nil {
 				return err
 			}
+			fmt.Printf("(Coinbase) Find my txo at block height %d with value %v\n", block.Height, amt.ToABE())
 			freezedBal += amt
 			balance += amt
 			k := wire.OutPointAbe{
@@ -1892,10 +1893,10 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			valid, v := abepqringct.TxoCoinReceive(txi.TxOuts[j], serializedMPK, serializedMSVK)
 			if valid && v != 0 {
 				amt, err := abeutil.NewAmountAbe(float64(v))
-				fmt.Printf("(Transfer) Find my txo at block height %d with value %d\n", block.Height, int(v))
 				if err != nil {
 					return err
 				}
+				fmt.Printf("(Transfer) Find my txo at block height %d with value %v\n", block.Height, amt.ToABE())
 				freezedBal += amt
 				balance += amt
 				k := wire.OutPointAbe{
@@ -2227,7 +2228,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			}
 			spendableBal += amt
 			freezedBal -= amt
-			fmt.Printf("Transfer txo at Height %d , Vlaue %d is matured!\n", utxo.Height, utxo.Amount)
+			fmt.Printf("Transfer txo at Height %d , Vlaue %v is matured!\n", utxo.Height, float64(utxo.Amount) / math.Pow10(7))
 			err = putRawMaturedOutput(ns, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
 				return err
@@ -2241,7 +2242,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			}
 			spendableBal += amt
 			freezedBal -= amt
-			fmt.Printf("Transfer txo at Height %d , Vlaue %d is matured!\n", utxo.Height, utxo.Amount)
+			fmt.Printf("Transfer txo at Height %d , Vlaue %v is matured!\n", utxo.Height, float64(utxo.Amount) / math.Pow10(7))
 			err = putRawMaturedOutput(ns, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
 				return err
@@ -2262,7 +2263,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			return err
 		}
 		for op, utxo := range transferOutputs {
-			fmt.Printf("Transfer txo at Height %d , Vlaue %d is matured!\n", utxo.Height, utxo.Amount)
+			fmt.Printf("Transfer txo at Height %d , Vlaue %v is matured!\n", utxo.Height, float64(utxo.Amount) / math.Pow10(7))
 			v := valueUnspentTXO(false, utxo.Version, utxo.Height, utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 			err = putRawMaturedOutput(ns, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
@@ -3717,33 +3718,6 @@ func (s *Store) NeedUpdateNum(ns walletdb.ReadBucket) (int, error) {
 		return nil
 	})
 	return num, err
-}
-
-func (s *Store) DetailedUtxos(ns walletdb.ReadBucket, minConf int32, syncHeight int32) ([]string, error) {
-	unspent := make([]UnspentUTXO, 0)
-	var op wire.OutPointAbe
-	err := ns.NestedReadBucket(bucketMaturedOutput).ForEach(func(k, v []byte) error {
-		err := readCanonicalOutPointAbe(k, &op)
-		if err != nil {
-			return err
-		}
-		ust := new(UnspentUTXO)
-		err = ust.Deserialize(&op, v)
-		if err != nil {
-			return err
-		}
-		unspent = append(unspent, *ust)
-		return nil
-	})
-	if err != nil {
-		str := "failed iterating unspent bucket"
-		return nil, storeError(ErrDatabase, str, err)
-	}
-	res := make([]string, len(unspent))
-	for idx, utxo := range unspent{
-		res[idx] = fmt.Sprintf("(%d) Height: %d, Value: %d", idx, utxo.Height, utxo.Amount)
-	}
-	return res, nil
 }
 
 // PutTxLabel validates transaction labels and writes them to disk if they

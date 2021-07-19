@@ -14,6 +14,7 @@ import (
 	"github.com/abesuite/abewallet/wallet/txauthor"
 	"github.com/abesuite/abewallet/walletdb"
 	"github.com/abesuite/abewallet/wtxmgr"
+	"math"
 	"sort"
 )
 
@@ -556,15 +557,15 @@ func createTransferTxAbeMsgTemplate(txIn []*wire.TxInAbe, txOutNum int, txMemo [
 func PrintConsumedUTXOs(selectedTxos []*wtxmgr.UnspentUTXO){
 	fmt.Println("Consumed utxos: ")
 	for idx, txo := range selectedTxos{
-		fmt.Printf("(%d) Value %d at height %d, TxHash: %s Index: %d, RingHash: %s RingIndex: %d (Member Size: %d), (From Coinbase: %t)\n",
-			idx, txo.Amount, txo.Height, txo.TxOutput.TxHash.String(), txo.TxOutput.Index, txo.RingHash.String(), txo.Index, txo.RingSize, txo.FromCoinBase)
+		fmt.Printf("(%d) Value %v at height %d, TxHash: %s Index: %d, RingHash: %s RingIndex: %d (Member Size: %d), (From Coinbase: %t)\n",
+			idx, float64(txo.Amount) / math.Pow10(7), txo.Height, txo.TxOutput.TxHash.String(), txo.TxOutput.Index, txo.RingHash.String(), txo.Index, txo.RingSize, txo.FromCoinBase)
 	}
 }
 
 func PrintNewUTXOs(txOutDescs []*abepqringct.AbeTxOutDesc, hasChange bool, fee abeutil.Amount){
 	fmt.Println("New utxos: ")
 	for idx, txo := range txOutDescs{
-		fmt.Printf("(%d) Value %d", idx, txo.GetValue())
+		fmt.Printf("(%d) Value %v", idx, float64(txo.GetValue()) / math.Pow10(7))
 		if idx != len(txOutDescs) - 1 {
 			fmt.Printf("\n")
 		}
@@ -573,7 +574,7 @@ func PrintNewUTXOs(txOutDescs []*abepqringct.AbeTxOutDesc, hasChange bool, fee a
 		fmt.Printf(" (Change)")
 	}
 	fmt.Printf("\n")
-	fmt.Printf("TxFee: %d\n", fee)
+	fmt.Printf("TxFee: %v\n", fee.ToABE())
 }
 
 func CalculateFee(txConSize uint32, witnessSize uint32, feePerKbSpecified abeutil.Amount) (abeutil.Amount, error){
@@ -637,7 +638,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 		eligible, err := w.findEligibleTxosAbe(txmgrNs, minconf, bs)
 		fmt.Println("Find eligible: ")
 		for idx, txo := range eligible {
-			fmt.Printf("(%d) Height: %d, Value: %d\n", idx, txo.Height, txo.Amount)
+			fmt.Printf("(%d) Height: %d, Value: %v\n", idx, txo.Height, float64(txo.Amount) / math.Pow10(7))
 		}
 		if err != nil {
 			return err

@@ -25,6 +25,7 @@ import (
 	"github.com/abesuite/abewallet/walletdb/migration"
 	"github.com/abesuite/abewallet/wtxmgr"
 	"github.com/abesuite/go-spew/spew"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -2035,9 +2036,22 @@ func (w *Wallet) FetchDetailedUtxos(confirms int32) ([]string, error) {
 	var details []string
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
-		blk := w.ManagerAbe.SyncedTo()
-		var err error
-		details, err = w.TxStore.DetailedUtxos(txmgrNs, confirms, blk.Height)
+		chainClient, err := w.requireChainClient()
+		if err != nil {
+			return err
+		}
+		bs, err := chainClient.BlockStamp()
+		if err != nil {
+			return err
+		}
+		eligible, err := w.findEligibleTxosAbe(txmgrNs, confirms, bs)
+		if err != nil {
+			return err
+		}
+		details = make([]string, len(eligible))
+		for idx, utxo := range eligible{
+			details[idx] = fmt.Sprintf("(%d) Height: %d, Value: %v", idx, utxo.Height, float64(utxo.Amount) / math.Pow10(7))
+		}
 		return err
 	})
 	return details, err
