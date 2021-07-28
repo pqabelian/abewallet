@@ -2,9 +2,14 @@ package main
 
 import (
 	"bufio"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"github.com/abesuite/abec/abecrypto/abesalrs"
+	"github.com/abesuite/abec/abeutil/hdkeychain"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/abesuite/abec/abeutil"
@@ -226,84 +231,115 @@ func createWalletAbe(cfg *config) error {
 		}
 	}
 
-	// Start by prompting for the private passphrase.  When there is an
-	// existing keystore, the user will be promped for that passphrase,
-	// otherwise they will be prompted for a new one.
-	reader := bufio.NewReader(os.Stdin)
-	privPass, err := prompt.PrivatePass(reader, legacyKeyStore)
-	if err != nil {
-		return err
-	}
-
-	// When there exists a legacy keystore, unlock it now and set up a
-	// callback to import all keystore keys into the new walletdb
-	// wallet
-	if legacyKeyStore != nil {
-		err = legacyKeyStore.Unlock(privPass)
+	if cfg.Create {
+		// Start by prompting for the private passphrase.  When there is an
+		// existing keystore, the user will be promped for that passphrase,
+		// otherwise they will be prompted for a new one.
+		reader := bufio.NewReader(os.Stdin)
+		privPass, err := prompt.PrivatePass(reader, legacyKeyStore)
 		if err != nil {
 			return err
 		}
 
-		// Import the addresses in the legacy keystore to the new wallet if
-		// any exist, locking each wallet again when finished.
-		loader.RunAfterLoad(func(w *wallet.Wallet) {
-			defer legacyKeyStore.Lock()
-
-			fmt.Println("Importing addresses from existing wallet...")
-
-			lockChan := make(chan time.Time, 1)
-			defer func() {
-				lockChan <- time.Time{}
-			}()
-			err := w.Unlock(privPass, lockChan)
+		// When there exists a legacy keystore, unlock it now and set up a
+		// callback to import all keystore keys into the new walletdb
+		// wallet
+		if legacyKeyStore != nil {
+			err = legacyKeyStore.Unlock(privPass)
 			if err != nil {
-				fmt.Printf("ERR: Failed to unlock new wallet "+
-					"during old wallet key import: %v", err)
-				return
+				return err
 			}
 
-			err = convertLegacyKeystore(legacyKeyStore, w)
+			// Import the addresses in the legacy keystore to the new wallet if
+			// any exist, locking each wallet again when finished.
+			loader.RunAfterLoad(func(w *wallet.Wallet) {
+				defer legacyKeyStore.Lock()
+
+				fmt.Println("Importing addresses from existing wallet...")
+
+				lockChan := make(chan time.Time, 1)
+				defer func() {
+					lockChan <- time.Time{}
+				}()
+				err := w.Unlock(privPass, lockChan)
+				if err != nil {
+					fmt.Printf("ERR: Failed to unlock new wallet "+
+						"during old wallet key import: %v", err)
+					return
+				}
+
+				err = convertLegacyKeystore(legacyKeyStore, w)
+				if err != nil {
+					fmt.Printf("ERR: Failed to import keys from old "+
+						"wallet format: %v", err)
+					return
+				}
+
+				// Remove the legacy key store.
+				err = os.Remove(keystorePath)
+				if err != nil {
+					fmt.Printf("WARN: Failed to remove legacy wallet "+
+						"from'%s'\n", keystorePath)
+				}
+			})
+		}
+
+		// Ascertain the public passphrase.  This will either be a value
+		// specified by the user or the default hard-coded public passphrase if
+		// the user does not want the additional public data encryption.
+		pubPass, err := prompt.PublicPass(reader, privPass,
+			[]byte(wallet.InsecurePubPassphrase), []byte(cfg.WalletPass))
+		if err != nil {
+			return err
+		}
+
+		// Ascertain the wallet generation seed.  This will either be an
+		// automatically generated value the user has already confirmed or a
+		// value the user has entered which has already been validated.
+		seed, err := prompt.Seed(reader)
+		if err != nil {
+			return err
+		}
+
+		fmt.Println("Creating the wallet...")
+		w, err := loader.CreateNewWalletAbe(pubPass, privPass, seed, time.Now())
+		if err != nil {
+			return err
+		}
+
+		//w.Manager.Close()
+		w.ManagerAbe.Close()
+		fmt.Println("The wallet has been created successfully.")
+	} else if cfg.NonInteractiveCreate {
+		var seed []byte
+		if !cfg.WithSeed {
+			seed, err = abesalrs.GenerateSeed(2*abesalrs.RecommendedSeedLen)
 			if err != nil {
-				fmt.Printf("ERR: Failed to import keys from old "+
-					"wallet format: %v", err)
-				return
+				return err
 			}
+		} else {
+			seedStr := strings.TrimSpace(strings.ToLower(cfg.MySeed))
 
-			// Remove the legacy key store.
-			err = os.Remove(keystorePath)
+			seed, err = hex.DecodeString(seedStr)
 			if err != nil {
-				fmt.Printf("WARN: Failed to remove legacy wallet "+
-					"from'%s'\n", keystorePath)
+				return err
 			}
-		})
+			if len(seed) <abesalrs.MinSeedBytes || len(seed) > abesalrs.MaxSeedBytes {
+				return errors.New(fmt.Sprintf("Invalid seed specified.  Must be a "+
+					"hexadecimal value that is at least %d bits and "+
+					"at most %d bits\n", hdkeychain.MinSeedBytes*8,
+					hdkeychain.MaxSeedBytes*8))
+			}
+		}
+		fmt.Printf("%x\n", seed)
+		w, err := loader.CreateNewWalletAbe([]byte(wallet.InsecurePubPassphrase), []byte(cfg.MyPassword), seed, time.Now())
+		if err != nil {
+			return err
+		}
+
+		w.ManagerAbe.Close()
 	}
 
-	// Ascertain the public passphrase.  This will either be a value
-	// specified by the user or the default hard-coded public passphrase if
-	// the user does not want the additional public data encryption.
-	pubPass, err := prompt.PublicPass(reader, privPass,
-		[]byte(wallet.InsecurePubPassphrase), []byte(cfg.WalletPass))
-	if err != nil {
-		return err
-	}
-
-	// Ascertain the wallet generation seed.  This will either be an
-	// automatically generated value the user has already confirmed or a
-	// value the user has entered which has already been validated.
-	seed, err := prompt.Seed(reader)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println("Creating the wallet...")
-	w, err := loader.CreateNewWalletAbe(pubPass, privPass, seed, time.Now())
-	if err != nil {
-		return err
-	}
-
-	//w.Manager.Close()
-	w.ManagerAbe.Close()
-	fmt.Println("The wallet has been created successfully.")
 	return nil
 }
 

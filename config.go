@@ -101,6 +101,12 @@ type config struct {
 
 	// Deprecated options
 	DataDir *cfgutil.ExplicitString `short:"b" long:"datadir" default-mask:"-" description:"DEPRECATED -- use appdata instead"`
+
+	// Create wallet in non-interactive mode
+	NonInteractiveCreate		bool			`long:"noninteractivecreate" description:"Create a wallet in non-interactive mode, just using command line args"`
+	WithSeed					bool			`long:"withseed" description:"Whether or not the args containing wallet seed"`
+	MySeed						string			`long:"myseed" description:"Seed in non-interactive mode"`
+	MyPassword					string			`long:"mypassword" description:"Password in non-interactive mode"`
 }
 
 // cleanAndExpandPath expands environement variables and leading ~ in the
@@ -455,7 +461,7 @@ func loadConfig() (*config, []string, error) {
 				return nil, nil, err
 			}
 		}
-	} else if cfg.Create {
+	} else if cfg.Create || cfg.NonInteractiveCreate {
 		// Error if the create flag is set and the wallet already
 		// exists.
 		if dbFileExists {
