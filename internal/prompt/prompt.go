@@ -3,9 +3,11 @@ package prompt
 import (
 	"bufio"
 	"bytes"
-	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"github.com/abesuite/abec/abecrypto"
+	"github.com/abesuite/abec/abecrypto/abepqringct"
 	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/abeutil/hdkeychain"
 	"github.com/abesuite/abec/chainhash"
@@ -13,6 +15,7 @@ import (
 	"github.com/abesuite/abewallet/wordlists"
 	"golang.org/x/crypto/ssh/terminal"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -270,18 +273,17 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 		// TODO(abe): use abesarls to replace the hdkeychain
 		//seed, err := hdkeychain.GenerateSeed(hdkeychain.RecommendedSeedLen)
 		//seed, err := abesalrs.GenerateSeed(2*abesalrs.RecommendedSeedLen)
-		//seed, _, _, _, err := abepqringct.MasterKeyGen(nil,abecrypto.CryptoSchemePQRINGCT)
-		seed := make([]byte, 64)
-		_, err := rand.Read(seed)
+		seed, _, _, _, err := abepqringct.MasterKeyGen(nil, abecrypto.CryptoSchemePQRINGCT)
 		if err != nil {
 			return nil, err
 		}
-		mnemonics := seedToWords(seed, wordlists.English)
+		mnemonics := seedToWords(seed[4:], wordlists.English)
 		//fmt.Println("Your wallet generation seed is:")
 		//fmt.Printf("%x\n", seed)
+		fmt.Println("the crypto version is", binary.BigEndian.Uint32(seed[:4]))
 		fmt.Println("Your wallet mnemonic list is:")
 		fmt.Printf("%v\n", strings.Join(mnemonics, ","))
-		fmt.Println("IMPORTANT: Keep the seed in a safe place as you\n" +
+		fmt.Println("IMPORTANT: Keep the version and seed in a safe place as you\n" +
 			"will NOT be able to restore your wallet without it.")
 		fmt.Println("Please keep in mind that anyone who has access\n" +
 			"to the seed can also restore your wallet thereby\n" +
@@ -301,11 +303,17 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 				break
 			}
 		}
-
 		return seed, nil
 	}
 
 	for {
+		fmt.Print("Enter the crypto version is:")
+		versionStr, err := reader.ReadString('\n')
+		versionStr = strings.TrimSpace(strings.ToLower(versionStr))
+		version, err := strconv.Atoi(versionStr)
+		if err != nil {
+			return nil, err
+		}
 		fmt.Print("Enter existing wallet seed: ")
 		seedStr, err := reader.ReadString('\n')
 		if err != nil {
@@ -325,6 +333,7 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 		}
 		seed = seed[:64]
 		//seed, err := hex.DecodeString(seedStr)
+		//TODO(abe20210801):remove the salrs dependency
 		if err != nil || len(seed) < abesalrs.MinSeedBytes ||
 			len(seed) > abesalrs.MaxSeedBytes {
 			//if err != nil || len(seed) < hdkeychain.MinSeedBytes ||
@@ -336,7 +345,10 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 			//	hdkeychain.MaxSeedBytes*8)
 			continue
 		}
-
+		// add the cryptoScheme before seed
+		tmp := make([]byte, 4, 4+64)
+		binary.BigEndian.PutUint32(tmp[0:4], uint32(version))
+		seed = append(tmp, seed[:]...)
 		return seed, nil
 	}
 }
