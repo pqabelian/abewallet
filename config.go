@@ -107,8 +107,9 @@ type config struct {
 
 	// Create wallet in non-interactive mode
 	NonInteractiveCreate bool   `long:"noninteractivecreate" description:"Create a wallet in non-interactive mode, just using command line args"`
-	WithSeed             bool   `long:"withseed" description:"Whether or not the args containing wallet seed"`
-	MySeed               string `long:"myseed" description:"Seed in non-interactive mode"`
+	WithMnemonic             bool   `long:"withmnemonic" description:"Whether or not the args containing wallet mnemonic"`
+	MyVersion				string	`long:"myversion" description:"Mnemonic version in non-interactive mode"`
+	MyMnemonic               string `long:"mymnemonic" description:"Mnemonic in non-interactive mode"`
 	MyPassword           string `long:"mypassword" description:"Password in non-interactive mode"`
 }
 

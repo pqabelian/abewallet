@@ -353,6 +353,10 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 	}
 }
 
+func SeedToWords(seed []byte, wordlist []string) []string {
+	return seedToWords(seed, wordlist)
+}
+
 func seedToWords(seed []byte, wordlist []string) []string {
 	res := make([]string, 0, 48)
 	hash := chainhash.DoubleHashH(seed)
@@ -391,11 +395,17 @@ func seedToWords(seed []byte, wordlist []string) []string {
 	}
 	return res
 }
+
+func WordsToSeed(words []string, wordMap map[string]int) []byte {
+	return wordsToSeed(words, wordMap)
+}
+
 func wordsToSeed(words []string, wordMap map[string]int) []byte {
 	res := make([]byte, 0, 66)
 	indexs := make([]int, len(words))
 	for i := 0; i < len(words); i++ {
-		indexs[i] = wordMap[words[i]]
+		trim_word := strings.TrimSpace(words[i])
+		indexs[i] = wordMap[trim_word]
 	}
 	pos := 0
 	for pos < len(indexs) {
