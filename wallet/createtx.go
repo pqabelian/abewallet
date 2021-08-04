@@ -555,25 +555,24 @@ func createTransferTxAbeMsgTemplate(txIn []*wire.TxInAbe, txOutNum int, txMemo [
 }
 
 func PrintConsumedUTXOs(selectedTxos []*wtxmgr.UnspentUTXO){
-	fmt.Println("Consumed utxos: ")
+	log.Infof("Consumed utxos: ")
 	for idx, txo := range selectedTxos{
-		log.Infof("(%d) Value %v at height %d, TxHash: %s Index: %d, RingHash: %s RingIndex: %d (Member Size: %d), (From Coinbase: %t)\n",
+		log.Infof("(%d) Value %v at height %d, TxHash: %s Index: %d, RingHash: %s RingIndex: %d (Member Size: %d), (From Coinbase: %t)",
 			idx, float64(txo.Amount) / math.Pow10(7), txo.Height, txo.TxOutput.TxHash.String(), txo.TxOutput.Index, txo.RingHash.String(), txo.Index, txo.RingSize, txo.FromCoinBase)
 	}
 }
 
 func PrintNewUTXOs(txOutDescs []*abepqringct.AbeTxOutDesc, hasChange bool, fee abeutil.Amount){
-	fmt.Println("New utxos: ")
+	log.Infof("New utxos: ")
 	for idx, txo := range txOutDescs{
-		log.Infof("(%d) Value %v", idx, float64(txo.GetValue()) / math.Pow10(7))
 		if idx != len(txOutDescs) - 1 {
-			log.Infof("\n")
+			log.Infof("(%d) Value %v", idx, float64(txo.GetValue()) / math.Pow10(7))
+		} else if hasChange {
+			log.Infof("(%d) Value %v (Change)", idx, float64(txo.GetValue()) / math.Pow10(7))
+		} else {
+			log.Infof("(%d) Value %v", idx, float64(txo.GetValue()) / math.Pow10(7))
 		}
 	}
-	if hasChange {
-		log.Infof(" (Change)")
-	}
-	log.Infof("\n")
 	log.Infof("TxFee: %v\n", fee.ToABE())
 }
 
@@ -636,9 +635,9 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
 		eligible, err := w.findEligibleTxosAbe(txmgrNs, minconf, bs)
-		fmt.Println("Find eligible: ")
+		log.Infof("Find eligible: ")
 		for idx, txo := range eligible {
-			log.Infof("(%d) Height: %d, Value: %v\n", idx, txo.Height, float64(txo.Amount) / math.Pow10(7))
+			log.Infof("(%d) Height: %d, Value: %v", idx, txo.Height, float64(txo.Amount) / math.Pow10(7))
 		}
 		if err != nil {
 			return err
