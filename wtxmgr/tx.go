@@ -1126,7 +1126,7 @@ func (s *Store) InsertGenesisBlockAbeNew(ns walletdb.ReadWriteBucket, block *Blo
 			if err != nil {
 				return err
 			}
-			log.Infof("(Coinbase) Find my txo at block height %d with value %v\n", block.Height, amt.ToABE())
+			log.Infof("(Coinbase) Find my txo at block height %d with value %v", block.Height, amt.ToABE())
 			freezedBal += amt
 			balance += amt
 			k := wire.OutPointAbe{
@@ -1699,7 +1699,7 @@ func (s *Store) InsertGenesisBlockAbeNew(ns walletdb.ReadWriteBucket, block *Blo
 //}
 
 func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRecord, maturedBlockHashs []*chainhash.Hash, serializedMPK []byte, serializedMSVK []byte) error {
-	log.Infof("Current sync height %d\n", block.Height)
+	log.Infof("Current sync height %d", block.Height)
 
 	balance, err := fetchMinedBalance(ns)
 	if err != nil {
@@ -1745,7 +1745,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			if err != nil {
 				return err
 			}
-			log.Infof("(Coinbase) Find my txo at block height %d with value %v\n", block.Height, amt.ToABE())
+			log.Infof("(Coinbase) Find my txo at block height %d with value %v", block.Height, amt.ToABE())
 			freezedBal += amt
 			balance += amt
 			k := wire.OutPointAbe{
@@ -1906,7 +1906,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 				if err != nil {
 					return err
 				}
-				log.Infof("(Transfer) Find my txo at block height %d with value %v\n", block.Height, amt.ToABE())
+				log.Infof("(Transfer) Find my txo at block height %d with value %v", block.Height, amt.ToABE())
 				freezedBal += amt
 				balance += amt
 				k := wire.OutPointAbe{
@@ -2247,7 +2247,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			}
 			spendableBal += amt
 			freezedBal -= amt
-			log.Infof("Transfer txo at Height %d , Vlaue %v is matured!\n", utxo.Height, float64(utxo.Amount) / math.Pow10(7))
+			log.Infof("Transfer txo at Height %d , Vlaue %v is matured!", utxo.Height, float64(utxo.Amount) / math.Pow10(7))
 			err = putRawMaturedOutput(ns, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
 				return err
@@ -2261,7 +2261,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			}
 			spendableBal += amt
 			freezedBal -= amt
-			log.Infof("Transfer txo at Height %d , Vlaue %v is matured!\n", utxo.Height, float64(utxo.Amount) / math.Pow10(7))
+			log.Infof("Transfer txo at Height %d , Vlaue %v is matured!", utxo.Height, float64(utxo.Amount) / math.Pow10(7))
 			err = putRawMaturedOutput(ns, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
 				return err
@@ -2276,7 +2276,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			return err
 		}
 		for op, utxo := range transferOutputs {
-			log.Infof("Transfer txo at Height %d , Value %v is matured!\n", utxo.Height, float64(utxo.Amount) / math.Pow10(7))
+			log.Infof("Transfer txo at Height %d , Value %v is matured!", utxo.Height, float64(utxo.Amount) / math.Pow10(7))
 			v := valueUnspentTXO(false, utxo.Version, utxo.Height, utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 			err = putRawMaturedOutput(ns, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
