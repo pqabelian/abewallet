@@ -557,7 +557,7 @@ func createTransferTxAbeMsgTemplate(txIn []*wire.TxInAbe, txOutNum int, txMemo [
 func PrintConsumedUTXOs(selectedTxos []*wtxmgr.UnspentUTXO){
 	fmt.Println("Consumed utxos: ")
 	for idx, txo := range selectedTxos{
-		fmt.Printf("(%d) Value %v at height %d, TxHash: %s Index: %d, RingHash: %s RingIndex: %d (Member Size: %d), (From Coinbase: %t)\n",
+		log.Infof("(%d) Value %v at height %d, TxHash: %s Index: %d, RingHash: %s RingIndex: %d (Member Size: %d), (From Coinbase: %t)\n",
 			idx, float64(txo.Amount) / math.Pow10(7), txo.Height, txo.TxOutput.TxHash.String(), txo.TxOutput.Index, txo.RingHash.String(), txo.Index, txo.RingSize, txo.FromCoinBase)
 	}
 }
@@ -565,16 +565,16 @@ func PrintConsumedUTXOs(selectedTxos []*wtxmgr.UnspentUTXO){
 func PrintNewUTXOs(txOutDescs []*abepqringct.AbeTxOutDesc, hasChange bool, fee abeutil.Amount){
 	fmt.Println("New utxos: ")
 	for idx, txo := range txOutDescs{
-		fmt.Printf("(%d) Value %v", idx, float64(txo.GetValue()) / math.Pow10(7))
+		log.Infof("(%d) Value %v", idx, float64(txo.GetValue()) / math.Pow10(7))
 		if idx != len(txOutDescs) - 1 {
-			fmt.Printf("\n")
+			log.Infof("\n")
 		}
 	}
 	if hasChange {
-		fmt.Printf(" (Change)")
+		log.Infof(" (Change)")
 	}
-	fmt.Printf("\n")
-	fmt.Printf("TxFee: %v\n", fee.ToABE())
+	log.Infof("\n")
+	log.Infof("TxFee: %v\n", fee.ToABE())
 }
 
 func CalculateFee(txConSize uint32, witnessSize uint32, feePerKbSpecified abeutil.Amount) (abeutil.Amount, error){
@@ -638,7 +638,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 		eligible, err := w.findEligibleTxosAbe(txmgrNs, minconf, bs)
 		fmt.Println("Find eligible: ")
 		for idx, txo := range eligible {
-			fmt.Printf("(%d) Height: %d, Value: %v\n", idx, txo.Height, float64(txo.Amount) / math.Pow10(7))
+			log.Infof("(%d) Height: %d, Value: %v\n", idx, txo.Height, float64(txo.Amount) / math.Pow10(7))
 		}
 		if err != nil {
 			return err
