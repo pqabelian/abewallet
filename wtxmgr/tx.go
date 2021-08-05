@@ -1953,14 +1953,6 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 		}
 	}
 
-	// store the coinbase outputs of current block
-	if len(coinbaseOutput) != 0 {
-		err := putRawImmaturedCoinbaseOutput(ns, canonicalBlockAbe(block.Height, block.Hash), valueImmaturedCoinbaseOutput(coinbaseOutput))
-		if err != nil {
-			return err
-		}
-	}
-
 	// move matured coinbase outputs to maturedOutput bucket
 	if block.Height >= int32(s.chainParams.CoinbaseMaturity)+2 && block.Height%3 == 2 {
 		for i := 0; i < len(maturedBlockHashs); i++ {
@@ -2266,6 +2258,14 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			if err != nil {
 				return err
 			}
+		}
+	}
+
+	// store the coinbase outputs of current block
+	if len(coinbaseOutput) != 0 {
+		err := putRawImmaturedCoinbaseOutput(ns, canonicalBlockAbe(block.Height, block.Hash), valueImmaturedCoinbaseOutput(coinbaseOutput))
+		if err != nil {
+			return err
 		}
 	}
 
