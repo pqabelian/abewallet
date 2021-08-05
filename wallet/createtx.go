@@ -644,7 +644,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 		}
 
 		if len(eligible) == 0 {
-			return err
+			return errors.New("not Enough")
 		}
 		// todo_DONE: order by version-then-amount
 		//	pick utxos to spend
