@@ -278,8 +278,8 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 			return nil, err
 		}
 		mnemonics := seedToWords(seed[4:], wordlists.English)
-		//fmt.Println("Your wallet generation seed is:")
-		//fmt.Printf("%x\n", seed)
+		fmt.Println("Your wallet generation seed is:")
+		fmt.Printf("%x\n", seed)
 		fmt.Println("the crypto version is", binary.BigEndian.Uint32(seed[:4]))
 		fmt.Println("Your wallet mnemonic list is:")
 		fmt.Printf("%v\n", strings.Join(mnemonics, ","))
@@ -314,7 +314,7 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		fmt.Print("Enter existing wallet seed: ")
+		fmt.Print("Enter existing wallet mnemonic: ")
 		seedStr, err := reader.ReadString('\n')
 		if err != nil {
 			return nil, err
@@ -322,16 +322,16 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 		seedStr = strings.TrimSpace(strings.ToLower(seedStr))
 		mnemonics := strings.Split(seedStr, ",")
 		seed := wordsToSeed(mnemonics, wordlists.EnglishMap)
-		if len(seed) != 66 {
+		if len(seed) != 33 {
 			fmt.Printf("Invalid mnemonic word list specified\n")
 			continue
 		}
-		seedH := chainhash.DoubleHashH(seed[:64])
-		if !bytes.Equal(seedH[:2], seed[64:]) {
+		seedH := chainhash.DoubleHashH(seed[:32])
+		if !bytes.Equal(seedH[:1], seed[32:]) {
 			fmt.Printf("Invalid mnemonic word list specified\n")
 			continue
 		}
-		seed = seed[:64]
+		seed = seed[:32]
 		//seed, err := hex.DecodeString(seedStr)
 		//TODO(abe20210801):remove the salrs dependency
 		if err != nil || len(seed) < abesalrs.MinSeedBytes ||
@@ -346,7 +346,7 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 			continue
 		}
 		// add the cryptoScheme before seed
-		tmp := make([]byte, 4, 4+64)
+		tmp := make([]byte, 4, 4+32)
 		binary.BigEndian.PutUint32(tmp[0:4], uint32(version))
 		seed = append(tmp, seed[:]...)
 		return seed, nil
@@ -358,11 +358,11 @@ func SeedToWords(seed []byte, wordlist []string) []string {
 }
 
 func seedToWords(seed []byte, wordlist []string) []string {
-	res := make([]string, 0, 48)
+	res := make([]string, 0, 24)
 	hash := chainhash.DoubleHashH(seed)
-	tmp := make([]byte, len(seed)+2)
+	tmp := make([]byte, len(seed)+1)
 	copy(tmp, seed)
-	copy(tmp[len(seed):], hash[:2])
+	copy(tmp[len(seed):], hash[:1])
 	// 11-bit
 	pos := 0
 	index := -1
@@ -401,7 +401,7 @@ func WordsToSeed(words []string, wordMap map[string]int) []byte {
 }
 
 func wordsToSeed(words []string, wordMap map[string]int) []byte {
-	res := make([]byte, 0, 66)
+	res := make([]byte, 0, 33)
 	indexs := make([]int, len(words))
 	for i := 0; i < len(words); i++ {
 		trim_word := strings.TrimSpace(words[i])
