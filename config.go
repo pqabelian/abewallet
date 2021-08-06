@@ -7,6 +7,7 @@ import (
 	"github.com/abesuite/abewallet/internal/legacy/keystore"
 	"github.com/abesuite/abewallet/netparams"
 	"github.com/abesuite/abewallet/wallet"
+	"github.com/abesuite/abewallet/wordlists"
 	"github.com/jessevdk/go-flags"
 	"net"
 	"os"
@@ -54,7 +55,9 @@ type config struct {
 	Profile       string                  `long:"profile" description:"Enable HTTP profiling on given port -- NOTE port must be between 1024 and 65536"`
 
 	// Wallet options
-	WalletPass string `long:"walletpass" default-mask:"-" description:"The public wallet password -- Only required if the wallet was created with one"`
+	WalletPass string         `long:"walletpass" default-mask:"-" description:"The public wallet password -- Only required if the wallet was created with one"`
+	WordList   []string       `long:"wordlist" description:"The mnemonic code for generating deterministic keys"`
+	WordMap    map[string]int `long:"wordmap" description:"The map of mnemonic code for generating deterministic keys"`
 
 	// RPC client options
 	RPCConnect       string                  `short:"c" long:"rpcconnect" description:"Hostname/IP and port of abec RPC server to connect to (default localhost:8334, testnet: localhost:18334, simnet: localhost:18556)"`
@@ -103,10 +106,11 @@ type config struct {
 	DataDir *cfgutil.ExplicitString `short:"b" long:"datadir" default-mask:"-" description:"DEPRECATED -- use appdata instead"`
 
 	// Create wallet in non-interactive mode
-	NonInteractiveCreate		bool			`long:"noninteractivecreate" description:"Create a wallet in non-interactive mode, just using command line args"`
-	WithSeed					bool			`long:"withseed" description:"Whether or not the args containing wallet seed"`
-	MySeed						string			`long:"myseed" description:"Seed in non-interactive mode"`
-	MyPassword					string			`long:"mypassword" description:"Password in non-interactive mode"`
+	NonInteractiveCreate bool   `long:"noninteractivecreate" description:"Create a wallet in non-interactive mode, just using command line args"`
+	WithMnemonic             bool   `long:"withmnemonic" description:"Whether or not the args containing wallet mnemonic"`
+	MyVersion				string	`long:"myversion" description:"Mnemonic version in non-interactive mode"`
+	MyMnemonic               string `long:"mymnemonic" description:"Mnemonic in non-interactive mode"`
+	MyPassword           string `long:"mypassword" description:"Password in non-interactive mode"`
 }
 
 // cleanAndExpandPath expands environement variables and leading ~ in the
@@ -271,10 +275,15 @@ func loadConfig() (*config, []string, error) {
 		UseSPV:                 false,
 		AddPeers:               []string{},
 		ConnectPeers:           []string{},
+		WordList:               wordlists.English,
+		WordMap:                map[string]int{},
 		//	todo(ABE): ABE does not support neutrino in lighting
 		//MaxPeers:               neutrino.MaxPeers,
 		//BanDuration:            neutrino.BanDuration,
 		//BanThreshold:           neutrino.BanThreshold,
+	}
+	for index, mnemonic := range cfg.WordList {
+		cfg.WordMap[mnemonic] = index
 	}
 
 	// Pre-parse the command line options to see if an alternative config
@@ -483,7 +492,7 @@ func loadConfig() (*config, []string, error) {
 		//	return nil, nil, err
 		//}
 		//TODO(abe):
- 		if err := createWalletAbe(&cfg); err != nil {
+		if err := createWalletAbe(&cfg); err != nil {
 			fmt.Fprintln(os.Stderr, "Unable to create wallet:", err)
 			return nil, nil, err
 		}
@@ -575,7 +584,7 @@ func loadConfig() (*config, []string, error) {
 							cfg.CAFile.Value = abecDefaultCAFile
 						}
 					}
-				}                                   	
+				}
 			}
 		}
 	}

@@ -2,7 +2,6 @@ package wallet
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -2049,8 +2048,8 @@ func (w *Wallet) FetchDetailedUtxos(confirms int32) ([]string, error) {
 			return err
 		}
 		details = make([]string, len(eligible))
-		for idx, utxo := range eligible{
-			details[idx] = fmt.Sprintf("(%d) Height: %d, Value: %v", idx, utxo.Height, float64(utxo.Amount) / math.Pow10(7))
+		for idx, utxo := range eligible {
+			details[idx] = fmt.Sprintf("(%d) Height: %d, Value: %v", idx, utxo.Height, float64(utxo.Amount)/math.Pow10(7))
 		}
 		return err
 	})
@@ -4442,9 +4441,9 @@ func (w *Wallet) reliablyPublishTransactionAbeNew(tx *wire.MsgTxAbe,
 	hash, err := w.publishTransactionAbeNew(tx)
 	// if failed, do nothing
 	// if successfully, add the transaction into unmined bucket
-	if err!=nil{
+	if err != nil {
 		// failed
-		return nil,err
+		return nil, err
 	}
 	txRec, err := wtxmgr.NewTxRecordAbeFromMsgTxAbe(tx, time.Now())
 	if err != nil {
@@ -4467,7 +4466,7 @@ func (w *Wallet) reliablyPublishTransactionAbeNew(tx *wire.MsgTxAbe,
 	if err != nil {
 		return nil, err
 	}
-	return hash,nil
+	return hash, nil
 }
 
 // publishTransaction attempts to send an unconfirmed transaction to the
@@ -5142,10 +5141,6 @@ func createAbe(db walletdb.DB, pubPass, privPass, seed []byte,
 		//}
 
 	}
-	// add the cryptoScheme before seed
-	tmp:=make([]byte,4,4+hdkeychain.RecommendedSeedLen*2)
-	binary.BigEndian.PutUint32(tmp[0:4], uint32(abecrypto.CryptoSchemePQRINGCT))
-	seed =append(tmp,seed[:]...)
 	return walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
 		addrmgrNs, err := tx.CreateTopLevelBucket(waddrmgrNamespaceKey)
 		if err != nil {

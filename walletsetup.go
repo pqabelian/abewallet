@@ -2,13 +2,18 @@ package main
 
 import (
 	"bufio"
-	"encoding/hex"
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/abesuite/abec/abecrypto"
+	"github.com/abesuite/abec/abecrypto/abepqringct"
 	"github.com/abesuite/abec/abecrypto/abesalrs"
-	"github.com/abesuite/abec/abeutil/hdkeychain"
+	"github.com/abesuite/abec/chainhash"
+	"github.com/abesuite/abewallet/wordlists"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -312,26 +317,40 @@ func createWalletAbe(cfg *config) error {
 		fmt.Println("The wallet has been created successfully.")
 	} else if cfg.NonInteractiveCreate {
 		var seed []byte
-		if !cfg.WithSeed {
-			seed, err = abesalrs.GenerateSeed(2*abesalrs.RecommendedSeedLen)
+		var mnemonics []string
+		if !cfg.WithMnemonic {
+			seed, _, _, _, err = abepqringct.MasterKeyGen(nil, abecrypto.CryptoSchemePQRINGCT)
 			if err != nil {
 				return err
 			}
+			mnemonics = prompt.SeedToWords(seed[4:], wordlists.English)
 		} else {
-			seedStr := strings.TrimSpace(strings.ToLower(cfg.MySeed))
-
-			seed, err = hex.DecodeString(seedStr)
+			versionStr := strings.TrimSpace(strings.ToLower(cfg.MyVersion))
+			version, err := strconv.Atoi(versionStr)
 			if err != nil {
 				return err
 			}
-			if len(seed) <abesalrs.MinSeedBytes || len(seed) > abesalrs.MaxSeedBytes {
-				return errors.New(fmt.Sprintf("Invalid seed specified.  Must be a "+
-					"hexadecimal value that is at least %d bits and "+
-					"at most %d bits\n", hdkeychain.MinSeedBytes*8,
-					hdkeychain.MaxSeedBytes*8))
+			mnemonics = strings.Split(cfg.MyMnemonic, ",")
+			seed = prompt.WordsToSeed(mnemonics, wordlists.EnglishMap)
+			if len(seed) != 33 {
+				return errors.New("Invalid mnemonic word list specified\n")
 			}
+			seedH := chainhash.DoubleHashH(seed[:32])
+			if !bytes.Equal(seedH[:1], seed[32:]) {
+				return errors.New("Invalid mnemonic word list specified\n")
+			}
+			seed = seed[:32]
+			if len(seed) <abesalrs.MinSeedBytes || len(seed) > abesalrs.MaxSeedBytes {
+				return errors.New("Invalid mnemonic word list specified\n")
+			}
+			// add the cryptoScheme before seed
+			tmp := make([]byte, 4, 4+32)
+			binary.BigEndian.PutUint32(tmp[0:4], uint32(version))
+			seed = append(tmp, seed[:]...)
 		}
+		fmt.Println(binary.BigEndian.Uint32(seed[:4]))
 		fmt.Printf("%x\n", seed)
+		fmt.Printf("%v\n", strings.Join(mnemonics, ","))
 		w, err := loader.CreateNewWalletAbe([]byte(wallet.InsecurePubPassphrase), []byte(cfg.MyPassword), seed, time.Now())
 		if err != nil {
 			return err

@@ -1104,6 +1104,7 @@ func (s *Store) InsertGenesisBlockAbeNew(ns walletdb.ReadWriteBucket, block *Blo
 	if err != nil {
 		return err
 	}
+
 	// put the genesis block into database
 	err = putBlockAbeRecord(ns, block)
 	if err != nil {
@@ -1125,7 +1126,7 @@ func (s *Store) InsertGenesisBlockAbeNew(ns walletdb.ReadWriteBucket, block *Blo
 			if err != nil {
 				return err
 			}
-			fmt.Printf("(Coinbase) Find my txo at block height %d with value %v\n", block.Height, amt.ToABE())
+			log.Infof("(Coinbase) Find my txo at block height %d with value %v", block.Height, amt.ToABE())
 			freezedBal += amt
 			balance += amt
 			k := wire.OutPointAbe{
@@ -1698,7 +1699,8 @@ func (s *Store) InsertGenesisBlockAbeNew(ns walletdb.ReadWriteBucket, block *Blo
 //}
 
 func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRecord, maturedBlockHashs []*chainhash.Hash, serializedMPK []byte, serializedMSVK []byte) error {
-	fmt.Printf("Current sync height %d\n", block.Height)
+	log.Infof("Current sync height %d", block.Height)
+
 	balance, err := fetchMinedBalance(ns)
 	if err != nil {
 		return err
@@ -1711,11 +1713,13 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 	if err != nil {
 		return err
 	}
+
 	// put the serialized block into database
 	err = putBlockAbeRecord(ns, block)
 	if err != nil {
 		return err
 	}
+
 	//TODO(abe):finished:delete oldest block in the database
 	if block.Height > NUMBERBLOCKABE {
 		_, err = deleteRawBlockAbeWithBlockHeight(ns, block.Height-NUMBERBLOCKABE)
@@ -1723,18 +1727,17 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			return err
 		}
 	}
-	if err != nil {
-		return err
-	}
+
 	b := Block{
 		Hash:   block.Hash,
 		Height: block.Height,
 	}
+
+	coinbaseTx := block.TxRecordAbes[0].MsgTx
+	coinbaseOutput := make(map[wire.OutPointAbe]*UnspentUTXO)
 	blockOutputs := make(map[Block][]wire.OutPointAbe) // if the block height meet the requirement, it also store previous two block outputs belong the wallet
 
 	// store all outputs of coinbaseTx which belong to us into a map : coinbaseOutput
-	coinbaseTx := block.TxRecordAbes[0].MsgTx
-	coinbaseOutput := make(map[wire.OutPointAbe]*UnspentUTXO)
 	for i := 0; i < len(coinbaseTx.TxOuts); i++ {
 		valid, v := abepqringct.TxoCoinReceive(coinbaseTx.TxOuts[i], serializedMPK, serializedMSVK)
 		if valid && v != 0 {
@@ -1742,7 +1745,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			if err != nil {
 				return err
 			}
-			fmt.Printf("(Coinbase) Find my txo at block height %d with value %v\n", block.Height, amt.ToABE())
+			log.Infof("(Coinbase) Find my txo at block height %d with value %v", block.Height, amt.ToABE())
 			freezedBal += amt
 			balance += amt
 			k := wire.OutPointAbe{
@@ -1758,6 +1761,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 	transferOutputs := make(map[wire.OutPointAbe]*UnspentUTXO, 0) // store the outputs which belong to the wallet
 	var blockInputs *RingHashSerialNumbers                        // save the inputs which belong to the wallet spent by this block and store the increment and the utxo ring before adding this block
 	relevantUTXORings := make(map[chainhash.Hash]*UTXORingAbe)
+
 	// handle with the transfer transactions
 	for i := 1; i < len(block.TxRecordAbes); i++ { // trace every tx in this block
 		txi := block.TxRecordAbes[i].MsgTx
@@ -1766,7 +1770,11 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 		if err != nil {
 			return err
 		}
-		// handle the inputs,TODO:need to check for this section
+
+		// traverse all the inputs of a transaction
+		// 1. add serial number to corresponding ring if needed
+		// 2. move consumed txo to spentconfirmed bucket
+		// TODO:need to check for this section
 		for j := 0; j < len(txi.TxIns); j++ {
 			// compute the ring hash of each input in every transaction to match the utxo in the database
 			ringHash := txi.TxIns[j].PreviousOutPointRing.Hash()
@@ -1792,6 +1800,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 						return fmt.Errorf("There has a same serialNumber in UTXORingAbe")
 					}
 				}
+
 				// save the previous utxoring for quick roll back
 				if blockInputs == nil {
 					blockInputs = new(RingHashSerialNumbers)
@@ -1865,6 +1874,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			//update the relevantUTXORing
 			relevantUTXORings[ringHash] = u
 		}
+
 		// update the utxo ring bucket
 		for k, v := range relevantUTXORings {
 			if v.AllSpent {
@@ -1888,7 +1898,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			}
 		}
 
-		// for all output in the given transaction
+		// traverse all outputs of a transaction and check if it is ours
 		for j := 0; j < len(txi.TxOuts); j++ {
 			valid, v := abepqringct.TxoCoinReceive(txi.TxOuts[j], serializedMPK, serializedMSVK)
 			if valid && v != 0 {
@@ -1896,7 +1906,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 				if err != nil {
 					return err
 				}
-				fmt.Printf("(Transfer) Find my txo at block height %d with value %v\n", block.Height, amt.ToABE())
+				log.Infof("(Transfer) Find my txo at block height %d with value %v", block.Height, amt.ToABE())
 				freezedBal += amt
 				balance += amt
 				k := wire.OutPointAbe{
@@ -1943,8 +1953,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 		}
 	}
 
-	// Fix for spending immarture coinbase transaction output: move it to spendable utxo bucket every 3 blocks
-	// fetch the matured coinbase output block.Height-Maturity
+	// move matured coinbase outputs to maturedOutput bucket
 	if block.Height >= int32(s.chainParams.CoinbaseMaturity)+2 && block.Height%3 == 2 {
 		for i := 0; i < len(maturedBlockHashs); i++ {
 			utxos, err := fetchImmaturedCoinbaseOutput(ns, block.Height-int32(s.chainParams.CoinbaseMaturity)-int32(i), *maturedBlockHashs[i])
@@ -1967,7 +1976,9 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 		}
 	}
 
-	//TODO(abe): check the correctness of generating ring and modify the utxo in bucket unspentUtxo
+	// fetch the outputs of recent three blocks and form rings
+	// move matured transfer outputs of previous two blocks to maturedOutput bucket
+	// TODO(abe): check the correctness of generating ring and modify the utxo in bucket unspentUtxo
 	if block.Height%3 == 2 {
 		var block1CoinbaseUTXO, block1TransferUTXO, block0CoinbaseUTXO, block0TransferUTXO map[wire.OutPointAbe]*UnspentUTXO
 		// if the height is match, it need to generate the utxo ring
@@ -2228,7 +2239,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			}
 			spendableBal += amt
 			freezedBal -= amt
-			fmt.Printf("Transfer txo at Height %d , Vlaue %v is matured!\n", utxo.Height, float64(utxo.Amount) / math.Pow10(7))
+			log.Infof("Transfer txo at Height %d , Vlaue %v is matured!", utxo.Height, float64(utxo.Amount) / math.Pow10(7))
 			err = putRawMaturedOutput(ns, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
 				return err
@@ -2242,28 +2253,30 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			}
 			spendableBal += amt
 			freezedBal -= amt
-			fmt.Printf("Transfer txo at Height %d , Vlaue %v is matured!\n", utxo.Height, float64(utxo.Amount) / math.Pow10(7))
+			log.Infof("Transfer txo at Height %d , Vlaue %v is matured!", utxo.Height, float64(utxo.Amount) / math.Pow10(7))
 			err = putRawMaturedOutput(ns, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
 				return err
 			}
 		}
 	}
-	// store this block output
-	// coinbase is immatured
+
+	// store the coinbase outputs of current block
 	if len(coinbaseOutput) != 0 {
 		err := putRawImmaturedCoinbaseOutput(ns, canonicalBlockAbe(block.Height, block.Hash), valueImmaturedCoinbaseOutput(coinbaseOutput))
 		if err != nil {
 			return err
 		}
 	}
-	if block.Height%3 == 2 { // transfer output is matured
+
+	// move the matured transfer outputs to maturedOutput bucket
+	if block.Height%3 == 2 {
 		var newBal uint64 = 0
 		if err != nil {
 			return err
 		}
 		for op, utxo := range transferOutputs {
-			fmt.Printf("Transfer txo at Height %d , Vlaue %v is matured!\n", utxo.Height, float64(utxo.Amount) / math.Pow10(7))
+			log.Infof("Transfer txo at Height %d , Value %v is matured!", utxo.Height, float64(utxo.Amount) / math.Pow10(7))
 			v := valueUnspentTXO(false, utxo.Version, utxo.Height, utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 			err = putRawMaturedOutput(ns, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
