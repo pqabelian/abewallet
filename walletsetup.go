@@ -332,23 +332,24 @@ func createWalletAbe(cfg *config) error {
 			}
 			mnemonics = strings.Split(cfg.MyMnemonic, ",")
 			seed = prompt.WordsToSeed(mnemonics, wordlists.EnglishMap)
-			if len(seed) != 66 {
+			if len(seed) != 33 {
 				return errors.New("Invalid mnemonic word list specified\n")
 			}
-			seedH := chainhash.DoubleHashH(seed[:64])
-			if !bytes.Equal(seedH[:2], seed[64:]) {
+			seedH := chainhash.DoubleHashH(seed[:32])
+			if !bytes.Equal(seedH[:1], seed[32:]) {
 				return errors.New("Invalid mnemonic word list specified\n")
 			}
-			seed = seed[:64]
+			seed = seed[:32]
 			if len(seed) <abesalrs.MinSeedBytes || len(seed) > abesalrs.MaxSeedBytes {
 				return errors.New("Invalid mnemonic word list specified\n")
 			}
 			// add the cryptoScheme before seed
-			tmp := make([]byte, 4, 4+64)
+			tmp := make([]byte, 4, 4+32)
 			binary.BigEndian.PutUint32(tmp[0:4], uint32(version))
 			seed = append(tmp, seed[:]...)
 		}
 		fmt.Println(binary.BigEndian.Uint32(seed[:4]))
+		fmt.Printf("%x\n", seed)
 		fmt.Printf("%v\n", strings.Join(mnemonics, ","))
 		w, err := loader.CreateNewWalletAbe([]byte(wallet.InsecurePubPassphrase), []byte(cfg.MyPassword), seed, time.Now())
 		if err != nil {
