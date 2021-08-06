@@ -577,7 +577,7 @@ func PrintNewUTXOs(txOutDescs []*abepqringct.AbeTxOutDesc, hasChange bool, fee a
 }
 
 func CalculateFee(txConSize uint32, witnessSize uint32, feePerKbSpecified abeutil.Amount) (abeutil.Amount, error){
-	fee, err := abeutil.NewAmountAbe(float64(txConSize+witnessSize/uint32(WitnessScaleFactor)) * feePerKbSpecified.ToUnit(abeutil.AmountNeutrino))
+	fee, err := abeutil.NewAmountAbe(float64(txConSize+witnessSize/uint32(WitnessScaleFactor)) * feePerKbSpecified.ToUnit(abeutil.AmountNeutrino) / 1000.0)
 	if err != nil {
 		return 0, err
 	}
