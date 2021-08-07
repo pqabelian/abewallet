@@ -60,7 +60,7 @@ type config struct {
 	WordMap    map[string]int `long:"wordmap" description:"The map of mnemonic code for generating deterministic keys"`
 
 	// RPC client options
-	RPCConnect       string                  `short:"c" long:"rpcconnect" description:"Hostname/IP and port of abec RPC server to connect to (default localhost:8334, testnet: localhost:18334, simnet: localhost:18556)"`
+	RPCConnect       string                  `short:"c" long:"rpcconnect" description:"Hostname/IP and port of abec RPC server to connect to (default localhost:8667, testnet: localhost:18667, simnet: localhost:18889)"`
 	CAFile           *cfgutil.ExplicitString `long:"cafile" description:"File containing root certificates to authenticate a TLS connections with abec"`
 	DisableClientTLS bool                    `long:"noclienttls" description:"Disable TLS for the RPC client -- NOTE: This is only allowed if the RPC client is connecting to localhost"`
 	AbecUsername     string                  `long:"abecusername" description:"Username for abec authentication"`
@@ -107,9 +107,9 @@ type config struct {
 
 	// Create wallet in non-interactive mode
 	NonInteractiveCreate bool   `long:"noninteractivecreate" description:"Create a wallet in non-interactive mode, just using command line args"`
-	WithMnemonic             bool   `long:"withmnemonic" description:"Whether or not the args containing wallet mnemonic"`
-	MyVersion				string	`long:"myversion" description:"Mnemonic version in non-interactive mode"`
-	MyMnemonic               string `long:"mymnemonic" description:"Mnemonic in non-interactive mode"`
+	WithMnemonic         bool   `long:"withmnemonic" description:"Whether or not the args containing wallet mnemonic"`
+	MyVersion            string `long:"myversion" description:"Mnemonic version in non-interactive mode"`
+	MyMnemonic           string `long:"mymnemonic" description:"Mnemonic in non-interactive mode"`
 	MyPassword           string `long:"mypassword" description:"Password in non-interactive mode"`
 }
 
