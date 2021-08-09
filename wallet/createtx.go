@@ -728,7 +728,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 				if currentTotal > targetValue {
 					txVersion := wire.GetCurrentTxVersion()
 					// compute the tx size with witness
-					txConSize := wire.PrecomputeTrTxConSize(txVersion, inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)), pqringctparam.GetTxMemoMaxLen(txVersion)) * uint32(len(txOutDescs)) //TODO osy 20210618
+					txConSize := wire.PrecomputeTrTxConSize(txVersion, inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)), pqringctparam.GetTxMemoMaxLen(txVersion))
 					witnessSize := pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs)))
 					fee, err := CalculateFee(txConSize, witnessSize, feePerKbSpecified)
 					if err != nil {
@@ -742,7 +742,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 						} else {
 							// need to make a change
 							flag = true
-							txConSize := wire.PrecomputeTrTxConSize(txVersion, inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)+1), pqringctparam.GetTxMemoMaxLen(txVersion)) * uint32(len(txOutDescs)+1) //TODO osy 20210618
+							txConSize := wire.PrecomputeTrTxConSize(txVersion, inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)+1), pqringctparam.GetTxMemoMaxLen(txVersion))
 							witnessSize = pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs)+1))
 							fee, err := CalculateFee(txConSize, witnessSize, feePerKbSpecified)
 							if err != nil {
