@@ -372,20 +372,42 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 				if err != nil {
 					return err
 				}
-				maturedBlockHashs :=make([]*chainhash.Hash,3)
-				if i>=int32(w.chainParams.CoinbaseMaturity)+2 && i%3==2{
-					maturedBlockHashs[0],err=client.GetBlockHash(int64(i-int32(w.chainParams.CoinbaseMaturity)))
+
+				// have not reach the target start sync height
+				if i < w.SyncFrom {
+					blockHeader, err := client.GetBlockHeader(hash)
 					if err != nil {
 						return err
 					}
-					maturedBlockHashs[1],err=client.GetBlockHash(int64(i-int32(w.chainParams.CoinbaseMaturity)-1))
+					bs := waddrmgr.BlockStamp{
+						Height:    i,
+						Hash:      *hash,
+						Timestamp: blockHeader.Timestamp,
+					}
+					err = w.ManagerAbe.SetSyncedTo(addrmgrNs, &bs)
 					if err != nil {
 						return err
 					}
-					maturedBlockHashs[2],err=client.GetBlockHash(int64(i-int32(w.chainParams.CoinbaseMaturity)-2))
+					continue
+				}
+
+				maturedBlockHashs :=make([]*chainhash.Hash, 0)
+				if i >= int32(w.chainParams.CoinbaseMaturity)+2 && i%3 == 2 && i - int32(w.chainParams.CoinbaseMaturity) - 2 >= w.SyncFrom {
+					hash1, err := client.GetBlockHash(int64(i-int32(w.chainParams.CoinbaseMaturity)))
 					if err != nil {
 						return err
 					}
+					maturedBlockHashs = append(maturedBlockHashs, hash1)
+					hash2, err := client.GetBlockHash(int64(i-int32(w.chainParams.CoinbaseMaturity)-1))
+					if err != nil {
+						return err
+					}
+					maturedBlockHashs = append(maturedBlockHashs, hash2)
+					hash3, err := client.GetBlockHash(int64(i-int32(w.chainParams.CoinbaseMaturity)-2))
+					if err != nil {
+						return err
+					}
+					maturedBlockHashs = append(maturedBlockHashs, hash3)
 				}
 				var b *wire.MsgBlockAbe
 				b, err = client.GetBlockAbe(hash)
@@ -426,7 +448,7 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 	if err!=nil{
 		return err
 	}
-	if err:=catchUpHashes(w,w.chainClient,bestBlockHeight);err!=nil{
+	if err := catchUpHashes(w, w.chainClient, bestBlockHeight);err!=nil{
 		return  err
 	}
 	//job := &RescanJob{

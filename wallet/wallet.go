@@ -132,6 +132,9 @@ type Wallet struct {
 	started bool
 	quit    chan struct{}
 	quitMu  sync.Mutex
+
+	// Information for syncing.
+	SyncFrom int32
 }
 
 // Start starts the goroutines necessary to manage a wallet.
