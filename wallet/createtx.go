@@ -635,9 +635,9 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
 		eligible, err := w.findEligibleTxosAbe(txmgrNs, minconf, bs)
-		log.Infof("Find eligible: ")
+		log.Debugf("Find eligible: ")
 		for idx, txo := range eligible {
-			log.Infof("(%d) Height: %d, Value: %v", idx, txo.Height, float64(txo.Amount) / math.Pow10(7))
+			log.Debugf("(%d) Height: %d, Value: %v", idx, txo.Height, float64(txo.Amount) / math.Pow10(7))
 		}
 		if err != nil {
 			return err
