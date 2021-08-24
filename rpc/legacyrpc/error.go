@@ -42,6 +42,10 @@ var (
 		errors.New("minconf must be positive"),
 	}
 
+	ErrSpeicifiedUTXOWrong = InvalidParameterError{
+		errors.New("specified utxo must be hex string (e.g. 0a2b12,180ac)"),
+	}
+
 	ErrAddressNotInWallet = abejson.RPCError{
 		Code:    abejson.ErrRPCWallet,
 		Message: "address not found in wallet",
@@ -51,6 +55,7 @@ var (
 		Code:    abejson.ErrRPCWalletInvalidAccountName,
 		Message: "account name not found",
 	}
+
 
 	ErrUnloadedWallet = abejson.RPCError{
 		Code:    abejson.ErrRPCWallet,

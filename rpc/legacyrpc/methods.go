@@ -12,6 +12,7 @@ import (
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abewallet/wallet/txrules"
 	"github.com/abesuite/abewallet/wtxmgr"
+	"strings"
 	"sync"
 	"time"
 
@@ -1516,6 +1517,18 @@ func isNilOrEmpty(s *string) bool {
 	return s == nil || *s == ""
 }
 
+func isHexString(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, ch := range s {
+		if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
 //	todo: to confirm : modified by AliceBob on 15 June
 /*func sendPairsAbe(w *wallet.Wallet, amounts map[string]abeutil.Amount,
 	minconf int32, feeSatPerKb abeutil.Amount) (string, error) {
@@ -1550,14 +1563,14 @@ func isNilOrEmpty(s *string) bool {
 }*/
 
 func sendPairsAbe(w *wallet.Wallet, amounts map[string]abeutil.Amount,
-	minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount) (string, error) {
+	minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string) (string, error) {
 
 	//outputs, err := makeOutputsAbe(w, amounts, w.ChainParams())
 	outputDescs, err := makeOutputDescs(w, amounts, w.ChainParams())
 	if err != nil {
 		return "", err
 	}
-	tx, err := w.SendOutputsAbe(outputDescs, minconf, feePerKbSpecified, feeSpecified, "") // TODO(abe): what's label?
+	tx, err := w.SendOutputsAbe(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, "") // TODO(abe): what's label?
 	if err != nil {
 		if err == txrules.ErrAmountNegative {
 			return "", ErrNeedPositiveAmount
@@ -1628,9 +1641,21 @@ func sendToPayees(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 		//	i.e. nothing to do
 	}
 
+	var utxoSpecified []string = nil
+	if cmd.UTXOSpecified != nil {
+		utxoSpecified = strings.Split(*cmd.UTXOSpecified, ",")
+		utxoNum := len(utxoSpecified)
+		for i := 0; i < utxoNum; i++ {
+			utxoSpecified[i] = strings.TrimSpace(utxoSpecified[i])
+			if !isHexString(utxoSpecified[i]) {
+				return nil, ErrSpeicifiedUTXOWrong
+			}
+		}
+	}
+
 	// return sendPairsAbe(w, pairs, minConf, txrules.DefaultRelayFeePerKb)
 	//	todo: AliceBobScorpio, should use the feeSatPerKb received from abec
-	return sendPairsAbe(w, pairs, minConf, feeSatPerKb, feeSpecified)
+	return sendPairsAbe(w, pairs, minConf, feeSatPerKb, feeSpecified, utxoSpecified)
 }
 
 // sendFrom handles a sendfrom RPC request by creating a new transaction

@@ -267,6 +267,7 @@ type Credit struct {
 	Received     time.Time
 	FromCoinBase bool
 }
+
 type UnspentUTXO struct {
 	Version uint32 // todo: added by AliceBob 20210616, the version of corresponding Txo in blockchain, and the same as that of the ring
 	Height  int32  // the block height used to identify whether this utox can be spent in current height
@@ -280,10 +281,31 @@ type UnspentUTXO struct {
 	GenerationTime time.Time      //at this moment, it also useless
 	RingHash       chainhash.Hash //may be zero
 	RingSize       uint8          // set together with RingHash, uint8 is reasonable and larger enough
+	UTXOHash       chainhash.Hash
 }
 
 func NewUnspentUTXO(version uint32, height int32, txOutput wire.OutPointAbe, fromCoinBase bool, amount uint64, index uint8, generationTime time.Time, ringHash chainhash.Hash, ringSize uint8) *UnspentUTXO {
 	return &UnspentUTXO{Version: version, Height: height, TxOutput: txOutput, FromCoinBase: fromCoinBase, Amount: amount, Index: index, GenerationTime: generationTime, RingHash: ringHash, RingSize: ringSize}
+}
+
+func (utxo *UnspentUTXO) Hash() chainhash.Hash {
+	if !utxo.UTXOHash.IsEqual(&chainhash.ZeroHash) {
+		return utxo.UTXOHash
+	}
+
+	// Version + Height + TxOutput.TxHash + TxOutput.Index + Amount + Index + RingHash + RingSize
+	buf := make([]byte, 83)
+	binary.LittleEndian.PutUint32(buf[0:4], utxo.Version)
+	binary.LittleEndian.PutUint32(buf[4:8], uint32(utxo.Height))
+	copy(buf[8:40], utxo.TxOutput.TxHash[0:32])
+	buf[40] = utxo.TxOutput.Index
+	binary.LittleEndian.PutUint64(buf[41:49], utxo.Amount)
+	buf[49] = utxo.Index
+	copy(buf[50:82], utxo.RingHash[0:32])
+	buf[82] = utxo.RingSize
+
+	utxo.UTXOHash = chainhash.DoubleHashH(buf)
+	return utxo.UTXOHash
 }
 
 func (utxo *UnspentUTXO) Deserialize(op *wire.OutPointAbe, v []byte) error {

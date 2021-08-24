@@ -1494,6 +1494,7 @@ type (
 		minconf           int32
 		feePerKbSpecified abeutil.Amount
 		feeSpecified      abeutil.Amount
+		utxoSpecified     []string
 		dryRun            bool
 		resp              chan createTxAbeResponse
 	}
@@ -1551,7 +1552,7 @@ out:
 			}
 			// todo(AliceBob): rename the methods
 			//tx, err := w.txAbeToOutputs(txr.txOutDescs, txr.minconf, txr.feeSatPerKB, txr.dryRun)
-			tx, err := w.txAbePqringCTToOutputs(txr.txOutDescs, txr.minconf, txr.feePerKbSpecified, txr.feeSpecified, txr.dryRun)
+			tx, err := w.txAbePqringCTToOutputs(txr.txOutDescs, txr.minconf, txr.feePerKbSpecified, txr.feeSpecified, txr.utxoSpecified, txr.dryRun)
 			heldUnlock.release()
 			txr.resp <- createTxAbeResponse{tx, err}
 		case <-quit:
@@ -1588,13 +1589,14 @@ func (w *Wallet) CreateSimpleTx(account uint32, outputs []*wire.TxOut,
 }
 
 func (w *Wallet) CreateSimpleTxAbe(outputDescs []*abepqringct.AbeTxOutDesc, minconf int32,
-	feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, dryRun bool) (*txauthor.AuthoredTxAbe, error) {
+	feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, dryRun bool) (*txauthor.AuthoredTxAbe, error) {
 
 	req := createTxAbeRequest{
 		txOutDescs:        outputDescs,
 		minconf:           minconf,
 		feePerKbSpecified: feePerKbSpecified,
 		feeSpecified:      feeSpecified,
+		utxoSpecified:     utxoSpecified,
 		dryRun:            dryRun,
 		resp:              make(chan createTxAbeResponse),
 	}
@@ -2034,7 +2036,7 @@ func (w *Wallet) CalculateBalanceAbe(confirms int32) ([]abeutil.Amount, int, err
 	return balances, needUpdateNum, err
 }
 
-func (w *Wallet) FetchDetailedUtxos(confirms int32) ([]string, error) {
+func (w *Wallet) FetchDetailedUtxos(confirms int32) (string, error) {
 	var details []string
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
@@ -2052,11 +2054,11 @@ func (w *Wallet) FetchDetailedUtxos(confirms int32) ([]string, error) {
 		}
 		details = make([]string, len(eligible))
 		for idx, utxo := range eligible {
-			details[idx] = fmt.Sprintf("(%d) Height: %d, Value: %v", idx, utxo.Height, float64(utxo.Amount)/math.Pow10(7))
+			details[idx] = fmt.Sprintf("%s %d %v", utxo.Hash().String(), utxo.Height, float64(utxo.Amount)/math.Pow10(7))
 		}
 		return err
 	})
-	return details, err
+	return strings.Join(details, "\n"), err
 }
 
 // Balances records total, spendable (by policy), and immature coinbase
@@ -4086,7 +4088,7 @@ func (w *Wallet) SendOutputs(outputs []*wire.TxOut, account uint32,
 	return createdTx.Tx, nil
 }
 
-func (w *Wallet) SendOutputsAbe(outputDescs []*abepqringct.AbeTxOutDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, label string) (*wire.MsgTxAbe, error) {
+func (w *Wallet) SendOutputsAbe(outputDescs []*abepqringct.AbeTxOutDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, label string) (*wire.MsgTxAbe, error) {
 
 	// Ensure the outputs to be created adhere to the network's consensus
 	// rules.
@@ -4103,7 +4105,7 @@ func (w *Wallet) SendOutputsAbe(outputDescs []*abepqringct.AbeTxOutDesc, minconf
 	// transaction will be added to the database in order to ensure that we
 	// continue to re-broadcast the transaction upon restarts until it has
 	// been confirmed.
-	createdTx, err := w.CreateSimpleTxAbe(outputDescs, minconf, feePerKbSpecified, feeSpecified, false)
+	createdTx, err := w.CreateSimpleTxAbe(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, false)
 	if err != nil {
 		return nil, err
 	}

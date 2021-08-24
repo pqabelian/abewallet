@@ -16,6 +16,7 @@ import (
 	"github.com/abesuite/abewallet/wtxmgr"
 	"math"
 	"sort"
+	"strings"
 )
 
 const (
@@ -557,8 +558,8 @@ func createTransferTxAbeMsgTemplate(txIn []*wire.TxInAbe, txOutNum int, txMemo [
 func PrintConsumedUTXOs(selectedTxos []*wtxmgr.UnspentUTXO){
 	log.Infof("Consumed utxos: ")
 	for idx, txo := range selectedTxos{
-		log.Infof("(%d) Value %v at height %d, TxHash: %s Index: %d, RingHash: %s RingIndex: %d (Member Size: %d), (From Coinbase: %t)",
-			idx, float64(txo.Amount) / math.Pow10(7), txo.Height, txo.TxOutput.TxHash.String(), txo.TxOutput.Index, txo.RingHash.String(), txo.Index, txo.RingSize, txo.FromCoinBase)
+		log.Infof("(%d) Value %v at height %d, utxoHash: %s (From Coinbase: %t)",
+			idx, float64(txo.Amount) / math.Pow10(7), txo.Height, txo.Hash().String(), txo.FromCoinBase)
 	}
 }
 
@@ -584,7 +585,27 @@ func CalculateFee(txConSize uint32, witnessSize uint32, feePerKbSpecified abeuti
 	return fee, nil
 }
 
-func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, dryRun bool) (
+func fetchSpecifiedUTXO(eligible []wtxmgr.UnspentUTXO, utxoSpecified []string) ([]*wtxmgr.UnspentUTXO, error){
+	selected := make([]*wtxmgr.UnspentUTXO, 0)
+	utxoSpecifiedLen := len(utxoSpecified)
+	eligibleLen := len(eligible)
+	for i := 0 ; i < utxoSpecifiedLen ; i++ {
+		var currSelected *wtxmgr.UnspentUTXO = nil
+		for j := 0; j < eligibleLen ; j++ {
+			if strings.HasPrefix(eligible[j].Hash().String(), utxoSpecified[i]) {
+				currSelected = &eligible[j]
+				break
+			}
+		}
+		if currSelected == nil {
+			return nil, errors.New(fmt.Sprintf("cannot find specified utxo %s", utxoSpecified[i]))
+		}
+		selected = append(selected, currSelected)
+	}
+	return selected, nil
+}
+
+func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, dryRun bool) (
 	unsignedTx *txauthor.AuthoredTxAbe, err error) {
 
 	chainClient, err := w.requireChainClient()
@@ -657,36 +678,19 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 			selectedTxos = make([]*wtxmgr.UnspentUTXO, 0, len(eligible))
 			currentTotal = abeutil.Amount(0) // total amount
 			selectedRingSizes := make([]uint8, 0, len(eligible))
-			for len(eligible) != 0 {
-				nextUtxo := &eligible[0]
-				if nextUtxo.Version != currentVersion {
-					currentVersion = nextUtxo.Version
-					selectedTxos = make([]*wtxmgr.UnspentUTXO, 0, len(eligible))
-					currentTotal = abeutil.Amount(0)
-					selectedRingSizes = make([]uint8, 0, len(eligible))
-					continue
+
+			if utxoSpecified != nil {
+				selectedTxos, err = fetchSpecifiedUTXO(eligible, utxoSpecified)
+				if err != nil {
+					return err
 				}
-				eligible = eligible[1:]
-				currentTotal = currentTotal + abeutil.Amount(nextUtxo.Amount)
-				selectedTxos = append(selectedTxos, nextUtxo)
-				inputRingVersions = append(inputRingVersions, nextUtxo.Version)
-				selectedRingSizes = append(selectedRingSizes, nextUtxo.RingSize)
-
-				if currentTotal >= targetValue+feeSpecified {
+				for _, txo := range selectedTxos {
+					currentTotal = currentTotal + abeutil.Amount(txo.Amount)
+					inputRingVersions = append(inputRingVersions, txo.Version)
+					selectedRingSizes = append(selectedRingSizes, txo.RingSize)
+				}
+				if currentTotal >= targetValue + feeSpecified {
 					txFee = feeSpecified
-					selectedRings = make(map[chainhash.Hash]*wtxmgr.Ring)
-					// todo: read selected rings, form the TxIn and the inputDesc, call TxGen
-					for _, txo := range selectedTxos {
-						_, ok := selectedRings[txo.RingHash]
-						if !ok {
-							ring, err := wtxmgr.FetchRingDetails(txmgrNs, txo.RingHash[:])
-							if err != nil {
-								return err
-							}
-							selectedRings[txo.RingHash] = ring
-
-						}
-					}
 					if currentTotal > targetValue+feeSpecified {
 						// the remain less than threshold so giving it to transaction fee
 						if currentTotal-targetValue-feeSpecified < ChangeThreshold {
@@ -697,7 +701,51 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 							flag = true
 						}
 					}
-					return nil
+				} else {
+					return errors.New("not Enough")
+				}
+			} else {
+				for len(eligible) != 0 {
+					nextUtxo := &eligible[0]
+					if nextUtxo.Version != currentVersion {
+						currentVersion = nextUtxo.Version
+						selectedTxos = make([]*wtxmgr.UnspentUTXO, 0, len(eligible))
+						currentTotal = abeutil.Amount(0)
+						selectedRingSizes = make([]uint8, 0, len(eligible))
+						continue
+					}
+					eligible = eligible[1:]
+					currentTotal = currentTotal + abeutil.Amount(nextUtxo.Amount)
+					selectedTxos = append(selectedTxos, nextUtxo)
+					inputRingVersions = append(inputRingVersions, nextUtxo.Version)
+					selectedRingSizes = append(selectedRingSizes, nextUtxo.RingSize)
+
+					if currentTotal >= targetValue+feeSpecified {
+						txFee = feeSpecified
+						if currentTotal > targetValue+feeSpecified {
+							// the remain less than threshold so giving it to transaction fee
+							if currentTotal-targetValue-feeSpecified < ChangeThreshold {
+								txFee = currentTotal - targetValue
+								flag = false
+							} else {
+								txFee = feeSpecified
+								flag = true
+							}
+						}
+						break
+					}
+				}
+			}
+			selectedRings = make(map[chainhash.Hash]*wtxmgr.Ring)
+			// todo: read selected rings, form the TxIn and the inputDesc, call TxGen
+			for _, txo := range selectedTxos {
+				_, ok := selectedRings[txo.RingHash]
+				if !ok {
+					ring, err := wtxmgr.FetchRingDetails(txmgrNs, txo.RingHash[:])
+					if err != nil {
+						return err
+					}
+					selectedRings[txo.RingHash] = ring
 				}
 			}
 		} else if feePerKbSpecified > 0 {
@@ -705,89 +753,127 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 			selectedTxos = make([]*wtxmgr.UnspentUTXO, 0, len(eligible))
 			currentTotal = abeutil.Amount(0) // total amount
 			selectedRingSizes := make([]int, 0, len(eligible))
-			for len(eligible) != 0 {
-				nextUtxo := &eligible[0]
 
-				if nextUtxo.Version != currentVersion {
-					currentVersion = nextUtxo.Version
-					selectedTxos = make([]*wtxmgr.UnspentUTXO, 0, len(eligible))
-					currentTotal = abeutil.Amount(0)
-					selectedRingSizes = make([]int, 0, len(eligible))
-					continue
+			if utxoSpecified != nil {
+				selectedTxos, err = fetchSpecifiedUTXO(eligible, utxoSpecified)
+				if err != nil {
+					return err
+				}
+				for _, txo := range selectedTxos {
+					currentTotal = currentTotal + abeutil.Amount(txo.Amount)
+					inputRingVersions = append(inputRingVersions, txo.Version)
+					selectedRingSizes = append(selectedRingSizes, int(txo.RingSize))
 				}
 
-				eligible = eligible[1:]
+				txVersion := wire.GetCurrentTxVersion()
+				txConSize := wire.PrecomputeTrTxConSize(txVersion, inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)+1), pqringctparam.GetTxMemoMaxLen(txVersion))
+				witnessSize := pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs))+1)
+				fee, err := CalculateFee(txConSize, witnessSize, feePerKbSpecified)
+				if err != nil {
+					return err
+				}
 
-				currentTotal = currentTotal + abeutil.Amount(nextUtxo.Amount)
-				selectedTxos = append(selectedTxos, nextUtxo)
-				inputRingVersions = append(inputRingVersions, nextUtxo.Version)
-				selectedRingSizes = append(selectedRingSizes, int(nextUtxo.RingSize))
-
-				// todo: compute tx size and witness, computes the fee, check amount, compare with changeThreshold
-
-				if currentTotal > targetValue {
-					txVersion := wire.GetCurrentTxVersion()
-					// compute the tx size with witness
+				if currentTotal >= targetValue + fee {
+					txFee = fee
+					if currentTotal > targetValue + fee {
+						// the remain less than threshold so giving it to transaction fee
+						if currentTotal - targetValue - fee < ChangeThreshold {
+							txFee = currentTotal - targetValue
+							flag = false
+						} else {
+							txFee = fee
+							flag = true
+						}
+					}
+				} else {
 					txConSize := wire.PrecomputeTrTxConSize(txVersion, inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)), pqringctparam.GetTxMemoMaxLen(txVersion))
 					witnessSize := pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs)))
 					fee, err := CalculateFee(txConSize, witnessSize, feePerKbSpecified)
 					if err != nil {
 						return err
 					}
-					txFee = fee
-					if targetValue+fee < currentTotal {
-						if currentTotal-targetValue-fee < ChangeThreshold {
-							txFee = currentTotal - targetValue
-							flag = false
-						} else {
-							// need to make a change
-							flag = true
-							txConSize := wire.PrecomputeTrTxConSize(txVersion, inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)+1), pqringctparam.GetTxMemoMaxLen(txVersion))
-							witnessSize = pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs)+1))
-							fee, err := CalculateFee(txConSize, witnessSize, feePerKbSpecified)
-							if err != nil {
-								return err
-							}
-							if targetValue+fee < currentTotal {
-								if currentTotal-targetValue < ChangeThreshold {
-									txFee = currentTotal - targetValue
-									flag = false
-								} else {
-									txFee = fee
-									flag = true
-								}
-							} else {
-								continue
-							}
+					if currentTotal >= targetValue + fee {
+						txFee = currentTotal - targetValue
+						flag = false
+					} else {
+						return errors.New("not Enough")
+					}
+				}
+			} else {
+				for len(eligible) != 0 {
+					nextUtxo := &eligible[0]
+
+					if nextUtxo.Version != currentVersion {
+						currentVersion = nextUtxo.Version
+						selectedTxos = make([]*wtxmgr.UnspentUTXO, 0, len(eligible))
+						currentTotal = abeutil.Amount(0)
+						selectedRingSizes = make([]int, 0, len(eligible))
+						continue
+					}
+
+					eligible = eligible[1:]
+
+					currentTotal = currentTotal + abeutil.Amount(nextUtxo.Amount)
+					selectedTxos = append(selectedTxos, nextUtxo)
+					inputRingVersions = append(inputRingVersions, nextUtxo.Version)
+					selectedRingSizes = append(selectedRingSizes, int(nextUtxo.RingSize))
+
+					// todo: compute tx size and witness, computes the fee, check amount, compare with changeThreshold
+
+					if currentTotal > targetValue {
+						txVersion := wire.GetCurrentTxVersion()
+						// compute the tx size with witness
+						txConSize := wire.PrecomputeTrTxConSize(txVersion, inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)), pqringctparam.GetTxMemoMaxLen(txVersion))
+						witnessSize := pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs)))
+						fee, err := CalculateFee(txConSize, witnessSize, feePerKbSpecified)
+						if err != nil {
+							return err
 						}
-						// read the ring
-						selectedRings = make(map[chainhash.Hash]*wtxmgr.Ring)
-						// todo: read selected rings, form the TxIn and the inputDesc, call TxGen
-						for _, txo := range selectedTxos {
-							_, ok := selectedRings[txo.RingHash]
-							if !ok {
-								ring, err := wtxmgr.FetchRingDetails(txmgrNs, txo.RingHash[:])
+						txFee = fee
+						if targetValue+fee < currentTotal {
+							if currentTotal-targetValue-fee < ChangeThreshold {
+								txFee = currentTotal - targetValue
+								flag = false
+							} else {
+								// need to make a change
+								flag = true
+								txConSize := wire.PrecomputeTrTxConSize(txVersion, inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)+1), pqringctparam.GetTxMemoMaxLen(txVersion))
+								witnessSize = pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs)+1))
+								fee, err := CalculateFee(txConSize, witnessSize, feePerKbSpecified)
 								if err != nil {
 									return err
 								}
-								selectedRings[txo.RingHash] = ring
-
+								if targetValue+fee < currentTotal {
+									if currentTotal-targetValue < ChangeThreshold {
+										txFee = currentTotal - targetValue
+										flag = false
+									} else {
+										txFee = fee
+										flag = true
+									}
+								} else {
+									continue
+								}
 							}
+							break
 						}
-						return nil
 					}
 				}
-				// if over changethreshold, compute tx size and witheness witness with one more output, then check the amount.
-
-				/*			approxTxSize := wire.PrecomputeTrTxConSize(wire.GetCurrentWireVersion(),  )
-
-							if currentTotal >= targetValue + feeSpecified {
-								// todo: read selected rings, form the TxIn and the inputDesc, call TxGen
-								break
-							}*/
+			}
+			selectedRings = make(map[chainhash.Hash]*wtxmgr.Ring)
+			// todo: read selected rings, form the TxIn and the inputDesc, call TxGen
+			for _, txo := range selectedTxos {
+				_, ok := selectedRings[txo.RingHash]
+				if !ok {
+					ring, err := wtxmgr.FetchRingDetails(txmgrNs, txo.RingHash[:])
+					if err != nil {
+						return err
+					}
+					selectedRings[txo.RingHash] = ring
+				}
 			}
 		}
-		if targetValue+txFee <= currentTotal {
+		if targetValue + txFee <= currentTotal {
 			return nil
 		}
 		return errors.New("not Enough")

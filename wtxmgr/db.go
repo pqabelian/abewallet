@@ -1178,6 +1178,7 @@ func fetchRawBlockAbeOutput(ns walletdb.ReadWriteBucket, k []byte) ([]*wire.OutP
 	}
 	return res, nil
 }
+
 func deleteBlockAbeOutput(ns walletdb.ReadWriteBucket, k []byte) error {
 	err := ns.NestedReadWriteBucket(bucketBlockOutputs).Delete(k)
 	if err != nil {
