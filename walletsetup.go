@@ -3,12 +3,10 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto"
-	"github.com/abesuite/abec/abecrypto/abepqringct"
-	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abewallet/wordlists"
 	"os"
@@ -319,11 +317,13 @@ func createWalletAbe(cfg *config) error {
 		var seed []byte
 		var mnemonics []string
 		if !cfg.WithMnemonic {
-			seed, _, _, _, err = abepqringct.MasterKeyGen(nil, abecrypto.CryptoSchemePQRINGCT)
+			// TODO(20220320): the length of seed should be a global parameter in config
+			seed = make([]byte, 32)
+			_, err = rand.Read(seed)
 			if err != nil {
 				return err
 			}
-			mnemonics = prompt.SeedToWords(seed[4:], wordlists.English)
+			mnemonics = prompt.SeedToWords(seed, wordlists.English)
 		} else {
 			versionStr := strings.TrimSpace(strings.ToLower(cfg.MyVersion))
 			version, err := strconv.Atoi(versionStr)
@@ -340,9 +340,6 @@ func createWalletAbe(cfg *config) error {
 				return errors.New("Invalid mnemonic word list specified\n")
 			}
 			seed = seed[:32]
-			if len(seed) <abesalrs.MinSeedBytes || len(seed) > abesalrs.MaxSeedBytes {
-				return errors.New("Invalid mnemonic word list specified\n")
-			}
 			// add the cryptoScheme before seed
 			tmp := make([]byte, 4, 4+32)
 			binary.BigEndian.PutUint32(tmp[0:4], uint32(version))
@@ -393,6 +390,7 @@ func createSimulationWallet(cfg *config) error {
 	fmt.Println("The wallet has been created successfully.")
 	return nil
 }
+
 //TODO(abe):
 func createSimulationWalletAbe(cfg *config) error {
 	// Simulation wallet password is 'password'.

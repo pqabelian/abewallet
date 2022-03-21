@@ -2,7 +2,7 @@ package txauthor
 
 import (
 	"errors"
-	"github.com/abesuite/abec/abecrypto/abepqringct"
+	"github.com/abesuite/abec/abecrypto"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abec/txscript"
@@ -18,7 +18,7 @@ func SumOutputValues(outputs []*wire.TxOut) (totalOutput abeutil.Amount) {
 	}
 	return totalOutput
 }
-func SumOutputValuesAbe(txOutDescs []*abepqringct.AbeTxOutDesc) (totalOutput abeutil.Amount) {
+func SumOutputValuesAbe(txOutDescs []*abecrypto.AbeTxOutDesc) (totalOutput abeutil.Amount) {
 	for _, txOut := range txOutDescs {
 		totalOutput += abeutil.Amount(txOut.GetValue())
 	}
@@ -64,7 +64,7 @@ type AuthoredTx struct {
 }
 
 type AuthoredTxAbe struct {
-	Tx              *wire.MsgTxAbe
+	Tx *wire.MsgTxAbe
 	//PrevScripts     [][]byte // not necessary
 	//PrevInputValues []abeutil.Amount // not necessary
 	//TotalInput      abeutil.Amount // not necessary
@@ -136,7 +136,7 @@ func NewUnsignedTransaction(outputs []*wire.TxOut, relayFeePerKb abeutil.Amount,
 		}
 
 		unsignedTransaction := &wire.MsgTx{
-			Version: int32(wire.TxVersion),
+			Version:  int32(wire.TxVersion),
 			TxIn:     inputs,
 			TxOut:    outputs,
 			LockTime: 0,
@@ -280,6 +280,7 @@ func RandomizeOutputAbePosition(outputs []*wire.TxOutAbe, index int) int {
 func (tx *AuthoredTx) RandomizeChangePosition() {
 	tx.ChangeIndex = RandomizeOutputPosition(tx.Tx.TxOut, tx.ChangeIndex)
 }
+
 //func (tx *AuthoredTxAbe) RandomizeChangePosition() {
 //	tx.ChangeIndex = RandomizeOutputAbePosition(tx.Tx.TxOuts, tx.ChangeIndex)
 //}
@@ -478,13 +479,14 @@ func spendNestedWitnessPubKeyHash(txIn *wire.TxIn, pkScript []byte,
 func (tx *AuthoredTx) AddAllInputScripts(secrets SecretsSource) error {
 	return AddAllInputScripts(tx.Tx, tx.PrevScripts, tx.PrevInputValues, secrets)
 }
+
 //func (tx *AuthoredTxAbe) AddAllInputScripts(msg []byte, m *waddrmgr.ManagerAbe, waddrmgrNs walletdb.ReadBucket, wtxmgrNs walletdb.ReadWriteBucket) error {
 //	// acquire the key
 //	//TODO(abe): this process of acquire master key will be abstract to a interface
 //	if m.IsLocked() {
 //		return fmt.Errorf("the wallet is locked")
 //	}
-//	mpkEncBytes, msvkEncBytes, msskEncBytes, err := m.FetchMasterKeyEncAbe(waddrmgrNs)
+//	mpkEncBytes, msvkEncBytes, msskEncBytes, err := m.FetchAddressKeysAbe(waddrmgrNs)
 //	if err != nil {
 //		return err
 //	}

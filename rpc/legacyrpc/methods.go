@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto/abepqringct"
+	"github.com/abesuite/abec/abecrypto"
 	"github.com/abesuite/abec/abejson"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abewallet/wallet/txrules"
@@ -80,7 +80,7 @@ var rpcHandlers = map[string]struct {
 	"getaddressesbyaccount": {handler: getAddressesByAccount},
 	"getbalance":            {handler: getBalance},
 	"getbalancesabe":        {handler: getBalanceAbe},
-	"getdetailedutxos":	     {handler: getDetailedUtxos},
+	"getdetailedutxos":      {handler: getDetailedUtxos},
 	"getbestblockhash":      {handler: getBestBlockHash},
 	"getblockcount":         {handler: getBlockCount},
 	"getinfo":               {handlerWithChain: getInfo},
@@ -1455,13 +1455,13 @@ func makeOutputsAbe(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainPara
 			return nil, fmt.Errorf("cannot get an address from given payee: %s", err)
 		}
 		targetAmount := uint64(amt)
-		abepqringct.NewAbeTxOutDesc(addr, targetAmount)
+		abecrypto.NewAbeTxOutDesc(addr, targetAmount)
 	}
 	return outputs, nil
 }
 
-func makeOutputDescs(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) ([]*abepqringct.AbeTxOutDesc, error) {
-	outputDescs := make([]*abepqringct.AbeTxOutDesc, 0, len(pairs))
+func makeOutputDescs(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) ([]*abecrypto.AbeTxOutDesc, error) {
+	outputDescs := make([]*abecrypto.AbeTxOutDesc, 0, len(pairs))
 	for name, amt := range pairs {
 		payeeManager, err := w.FetchPayeeManager(name)
 		if payeeManager == nil {
@@ -1472,7 +1472,7 @@ func makeOutputDescs(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainPar
 			return nil, fmt.Errorf("cannot get an address from given payee: %s", err)
 		}
 		targetAmount := uint64(amt)
-		outputDesc := abepqringct.NewAbeTxOutDesc(addr, targetAmount)
+		outputDesc := abecrypto.NewAbeTxOutDesc(addr, targetAmount)
 
 		outputDescs = append(outputDescs, outputDesc)
 	}
@@ -1630,11 +1630,11 @@ func sendToPayees(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 		return nil, err
 	}
 
-	if scaleToFeeSatPerKb !=1 {
+	if scaleToFeeSatPerKb != 1 {
 		// set the scaleToFeeSatPerKb
 		feeSatPerKb = feeSatPerKb.MulF64(scaleToFeeSatPerKb)
 		feeSpecified = abeutil.Amount(0)
-	} else if feeSpecified != 0 && scaleToFeeSatPerKb==1 {
+	} else if feeSpecified != 0 && scaleToFeeSatPerKb == 1 {
 		//	if neither scaleToFeeSatPerKb or feeSpecified is specified, the use scaleToFeeSatPerKb = 1
 		//	feeSatPerKb = feeSatPerKb
 		//	feeSpecified = 0

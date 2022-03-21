@@ -3,7 +3,7 @@ package wallet
 import (
 	"errors"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto/abepqringct"
+	"github.com/abesuite/abec/abecrypto"
 	"github.com/abesuite/abec/abecrypto/pqringctparam"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/btcec"
@@ -20,8 +20,8 @@ import (
 )
 
 const (
-	ChangeThreshold abeutil.Amount = 1000
-	WitnessScaleFactor = 10
+	ChangeThreshold    abeutil.Amount = 1000
+	WitnessScaleFactor                = 10
 )
 
 // byAmount defines the methods needed to satisify sort.Interface to
@@ -555,29 +555,29 @@ func createTransferTxAbeMsgTemplate(txIn []*wire.TxInAbe, txOutNum int, txMemo [
 	return msgTx, nil
 }
 
-func PrintConsumedUTXOs(selectedTxos []*wtxmgr.UnspentUTXO){
+func PrintConsumedUTXOs(selectedTxos []*wtxmgr.UnspentUTXO) {
 	log.Infof("Consumed utxos: ")
-	for idx, txo := range selectedTxos{
+	for idx, txo := range selectedTxos {
 		log.Infof("(%d) Value %v at height %d, utxoHash: %s (From Coinbase: %t)",
-			idx, float64(txo.Amount) / math.Pow10(7), txo.Height, txo.Hash().String(), txo.FromCoinBase)
+			idx, float64(txo.Amount)/math.Pow10(7), txo.Height, txo.Hash().String(), txo.FromCoinBase)
 	}
 }
 
-func PrintNewUTXOs(txOutDescs []*abepqringct.AbeTxOutDesc, hasChange bool, fee abeutil.Amount){
+func PrintNewUTXOs(txOutDescs []*abecrypto.AbeTxOutDesc, hasChange bool, fee abeutil.Amount) {
 	log.Infof("New utxos: ")
-	for idx, txo := range txOutDescs{
-		if idx != len(txOutDescs) - 1 {
-			log.Infof("(%d) Value %v", idx, float64(txo.GetValue()) / math.Pow10(7))
+	for idx, txo := range txOutDescs {
+		if idx != len(txOutDescs)-1 {
+			log.Infof("(%d) Value %v", idx, float64(txo.GetValue())/math.Pow10(7))
 		} else if hasChange {
-			log.Infof("(%d) Value %v (Change)", idx, float64(txo.GetValue()) / math.Pow10(7))
+			log.Infof("(%d) Value %v (Change)", idx, float64(txo.GetValue())/math.Pow10(7))
 		} else {
-			log.Infof("(%d) Value %v", idx, float64(txo.GetValue()) / math.Pow10(7))
+			log.Infof("(%d) Value %v", idx, float64(txo.GetValue())/math.Pow10(7))
 		}
 	}
 	log.Infof("TxFee: %v\n", fee.ToABE())
 }
 
-func CalculateFee(txConSize uint32, witnessSize uint32, feePerKbSpecified abeutil.Amount) (abeutil.Amount, error){
+func CalculateFee(txConSize uint32, witnessSize uint32, feePerKbSpecified abeutil.Amount) (abeutil.Amount, error) {
 	fee, err := abeutil.NewAmountAbe(float64(txConSize+witnessSize/uint32(WitnessScaleFactor)) * feePerKbSpecified.ToUnit(abeutil.AmountNeutrino) / 1000.0)
 	if err != nil {
 		return 0, err
@@ -585,13 +585,13 @@ func CalculateFee(txConSize uint32, witnessSize uint32, feePerKbSpecified abeuti
 	return fee, nil
 }
 
-func fetchSpecifiedUTXO(eligible []wtxmgr.UnspentUTXO, utxoSpecified []string) ([]*wtxmgr.UnspentUTXO, error){
+func fetchSpecifiedUTXO(eligible []wtxmgr.UnspentUTXO, utxoSpecified []string) ([]*wtxmgr.UnspentUTXO, error) {
 	selected := make([]*wtxmgr.UnspentUTXO, 0)
 	utxoSpecifiedLen := len(utxoSpecified)
 	eligibleLen := len(eligible)
-	for i := 0 ; i < utxoSpecifiedLen ; i++ {
+	for i := 0; i < utxoSpecifiedLen; i++ {
 		var currSelected *wtxmgr.UnspentUTXO = nil
-		for j := 0; j < eligibleLen ; j++ {
+		for j := 0; j < eligibleLen; j++ {
 			if strings.HasPrefix(eligible[j].Hash().String(), utxoSpecified[i]) {
 				currSelected = &eligible[j]
 				break
@@ -605,7 +605,7 @@ func fetchSpecifiedUTXO(eligible []wtxmgr.UnspentUTXO, utxoSpecified []string) (
 	return selected, nil
 }
 
-func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, dryRun bool) (
+func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, dryRun bool) (
 	unsignedTx *txauthor.AuthoredTxAbe, err error) {
 
 	chainClient, err := w.requireChainClient()
@@ -631,25 +631,25 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 	var selectedRings map[chainhash.Hash]*wtxmgr.Ring
 	var inputRingVersions []uint32
 	var txFee abeutil.Amount
-	var mpkBytes, msvkBytes, msskBytes []byte
+	var addrBytes, vskBytes, aSkSpBytes []byte
 	flag := false //whether need to make a change
 	// TODO(abe):should use a db.View to spend, if successful, use db.Update
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		//addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
 		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		mpkEncBytes, msvkEncBytes, msskEncBytes, err := w.ManagerAbe.FetchMasterKeyEncAbe(addrmgrNs)
+		addressEnc, addressSecretSpEnc, _, valueSecretKeyEnc, err := w.ManagerAbe.FetchAddressKeysAbe(addrmgrNs)
 		if err != nil {
 			return err
 		}
-		mpkBytes, err = w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, mpkEncBytes)
+		addrBytes, err = w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, addressEnc)
 		if err != nil {
 			return err
 		}
-		msvkBytes, err = w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, msvkEncBytes)
+		vskBytes, err = w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, valueSecretKeyEnc)
 		if err != nil {
 			return err
 		}
-		msskBytes, err = w.ManagerAbe.Decrypt(waddrmgr.CKTPrivate, msskEncBytes)
+		aSkSpBytes, err = w.ManagerAbe.Decrypt(waddrmgr.CKTPrivate, addressSecretSpEnc)
 		if err != nil {
 			return err
 		}
@@ -658,7 +658,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 		eligible, err := w.findEligibleTxosAbe(txmgrNs, minconf, bs)
 		log.Debugf("Find eligible: ")
 		for idx, txo := range eligible {
-			log.Debugf("(%d) Height: %d, Value: %v", idx, txo.Height, float64(txo.Amount) / math.Pow10(7))
+			log.Debugf("(%d) Height: %d, Value: %v", idx, txo.Height, float64(txo.Amount)/math.Pow10(7))
 		}
 		if err != nil {
 			return err
@@ -689,7 +689,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 					inputRingVersions = append(inputRingVersions, txo.Version)
 					selectedRingSizes = append(selectedRingSizes, txo.RingSize)
 				}
-				if currentTotal >= targetValue + feeSpecified {
+				if currentTotal >= targetValue+feeSpecified {
 					txFee = feeSpecified
 					if currentTotal > targetValue+feeSpecified {
 						// the remain less than threshold so giving it to transaction fee
@@ -773,11 +773,11 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 					return err
 				}
 
-				if currentTotal >= targetValue + fee {
+				if currentTotal >= targetValue+fee {
 					txFee = fee
-					if currentTotal > targetValue + fee {
+					if currentTotal > targetValue+fee {
 						// the remain less than threshold so giving it to transaction fee
-						if currentTotal - targetValue - fee < ChangeThreshold {
+						if currentTotal-targetValue-fee < ChangeThreshold {
 							txFee = currentTotal - targetValue
 							flag = false
 						} else {
@@ -792,7 +792,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 					if err != nil {
 						return err
 					}
-					if currentTotal >= targetValue + fee {
+					if currentTotal >= targetValue+fee {
 						txFee = currentTotal - targetValue
 						flag = false
 					} else {
@@ -873,7 +873,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 				}
 			}
 		}
-		if targetValue + txFee <= currentTotal {
+		if targetValue+txFee <= currentTotal {
 			return nil
 		}
 		return errors.New("not Enough")
@@ -897,7 +897,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 
 	PrintConsumedUTXOs(selectedTxos)
 
-	abeTxInputDescs := make([]*abepqringct.AbeTxInputDesc, 0, len(selectedTxos))
+	abeTxInputDescs := make([]*abecrypto.AbeTxInputDesc, 0, len(selectedTxos))
 	txIns := make([]*wire.TxInAbe, len(selectedTxos))
 	for i := 0; i < len(selectedTxos); i++ {
 		txIns[i] = &wire.TxInAbe{
@@ -925,12 +925,12 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 				TxoScript: selectedRings[selectedTxos[i].RingHash].TxoScripts[j],
 			})
 		}
-		abeTxInputDescs = append(abeTxInputDescs, abepqringct.NewAbeTxInputDesc(serializedTxoLists, int(selectedTxos[i].Index), mpkBytes, msvkBytes, msskBytes, selectedTxos[i].Amount))
+		abeTxInputDescs = append(abeTxInputDescs, abecrypto.NewAbeTxInputDesc(selectedTxos[i].RingHash, serializedTxoLists, int(selectedTxos[i].Index), aSkSpBytes))
 	}
 
 	if flag {
 		// TODO check the amount to uint64???
-		txOutDescs = append(txOutDescs, abepqringct.NewAbeTxOutDesc(mpkBytes, uint64(currentTotal-txFee-targetValue)))
+		txOutDescs = append(txOutDescs, abecrypto.NewAbeTxOutDesc(addrBytes, uint64(currentTotal-txFee-targetValue)))
 	}
 
 	PrintNewUTXOs(txOutDescs, flag, txFee)
@@ -940,7 +940,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 	if err != nil {
 		return nil, errors.New("error for creating a transfer transaction template ")
 	}
-	transferTx, err := abepqringct.TransferTxGen(abeTxInputDescs, txOutDescs, transferTxTemplate)
+	transferTx, err := abecrypto.CryptoPP.TransferTxGen(abeTxInputDescs, txOutDescs, transferTxTemplate)
 	if err != nil {
 		return nil, err
 	}
@@ -949,22 +949,22 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, 
 		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
 		for i, txo := range selectedTxos {
 			utxoRing, err := wtxmgr.FetchUTXORing(txmgrNs, txo.RingHash[:])
-			if err!=nil{
+			if err != nil {
 				return err
 			}
-			if utxoRing.OriginSerialNumberes==nil{
-				utxoRing.OriginSerialNumberes=map[uint8][]byte{}
+			if utxoRing.OriginSerialNumberes == nil {
+				utxoRing.OriginSerialNumberes = map[uint8][]byte{}
 			}
-			utxoRing.OriginSerialNumberes[txo.Index]=transferTx.TxIns[i].SerialNumber
+			utxoRing.OriginSerialNumberes[txo.Index] = transferTx.TxIns[i].SerialNumber
 			err = wtxmgr.PutUTXORing(txmgrNs, txo.RingHash[:], utxoRing)
-			if err!=nil{
+			if err != nil {
 				return err
 			}
 		}
 		return nil
 	})
-	if err!=nil{
-		return nil,err
+	if err != nil {
+		return nil, err
 	}
 	resTx := &txauthor.AuthoredTxAbe{
 		Tx: transferTx,

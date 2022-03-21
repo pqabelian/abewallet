@@ -5,7 +5,7 @@ package txrules
 
 import (
 	"errors"
-	"github.com/abesuite/abec/abecrypto/abepqringct"
+	"github.com/abesuite/abec/abecrypto"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abec/wire"
@@ -63,7 +63,7 @@ func IsDustOutput(output *wire.TxOut, relayFeePerKb abeutil.Amount) bool {
 	return IsDustAmount(abeutil.Amount(output.Value), len(output.PkScript),
 		relayFeePerKb)
 }
-func IsDustOutputAbe(outputDesc *abepqringct.AbeTxOutDesc, relayFeePerKb abeutil.Amount) bool {
+func IsDustOutputAbe(outputDesc *abecrypto.AbeTxOutDesc, relayFeePerKb abeutil.Amount) bool {
 	// Unspendable outputs which solely carry data are not checked for dust.
 	//if txscript.GetScriptClass(output.PkScript) == txscript.NullDataTy {
 	//	return false
@@ -102,7 +102,7 @@ func CheckOutput(output *wire.TxOut, relayFeePerKb abeutil.Amount) error {
 	return nil
 }
 
-func CheckOutputDescAbe(outputDesc *abepqringct.AbeTxOutDesc, relayFeePerKb abeutil.Amount) error {
+func CheckOutputDescAbe(outputDesc *abecrypto.AbeTxOutDesc, relayFeePerKb abeutil.Amount) error {
 	value := outputDesc.GetValue()
 
 	if value < 0 {

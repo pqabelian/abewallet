@@ -2,11 +2,11 @@ package wallet
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abecrypto"
-	"github.com/abesuite/abec/abecrypto/abepqringct"
 	"github.com/abesuite/abec/abejson"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/abeutil/hdkeychain"
@@ -1490,7 +1490,7 @@ type (
 		resp        chan createTxResponse
 	}
 	createTxAbeRequest struct {
-		txOutDescs        []*abepqringct.AbeTxOutDesc
+		txOutDescs        []*abecrypto.AbeTxOutDesc
 		minconf           int32
 		feePerKbSpecified abeutil.Amount
 		feeSpecified      abeutil.Amount
@@ -1588,7 +1588,7 @@ func (w *Wallet) CreateSimpleTx(account uint32, outputs []*wire.TxOut,
 	return resp.tx, resp.err
 }
 
-func (w *Wallet) CreateSimpleTxAbe(outputDescs []*abepqringct.AbeTxOutDesc, minconf int32,
+func (w *Wallet) CreateSimpleTxAbe(outputDescs []*abecrypto.AbeTxOutDesc, minconf int32,
 	feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, dryRun bool) (*txauthor.AuthoredTxAbe, error) {
 
 	req := createTxAbeRequest{
@@ -1686,19 +1686,14 @@ out:
 				if w.ManagerAbe.IsLocked() {
 					return fmt.Errorf("the wallet is locked")
 				}
-				mpkEncBytes, msvkEncBytes, msskEncBytes, err := w.ManagerAbe.FetchMasterKeyEncAbe(waddrmgrNs)
+				_, _, addressSecretSnEnc, _, err := w.ManagerAbe.FetchAddressKeysAbe(waddrmgrNs)
 				if err != nil {
 					return err
 				}
-				msskBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPrivate, msskEncBytes)
+				asksnBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPrivate, addressSecretSnEnc)
 				if err != nil {
 					return err
 				}
-				msvkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, msvkEncBytes) //TODO(abe):zero the master key byte
-				if err != nil {
-					return err
-				}
-				mpkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, mpkEncBytes)
 				if err != nil {
 					return err
 				}
@@ -1713,10 +1708,10 @@ out:
 					}
 					for i := 0; i < len(utxoring.IsMy); i++ {
 						if utxoring.IsMy[i] && (utxoring.OriginSerialNumberes == nil || bytes.Equal(utxoring.OriginSerialNumberes[uint8(i)], chainhash.ZeroHash[:])) {
-							sn, err := abepqringct.TxoSerialNumberGen(&wire.TxOutAbe{
+							sn := abecrypto.CryptoPP.TxoSerialNumberGen(&wire.TxOutAbe{
 								Version:   ring.Version,
 								TxoScript: ring.TxoScripts[i],
-							}, mpkBytes, msvkBytes, msskBytes)
+							}, utxoring.RingHash, asksnBytes)
 							if err != nil {
 								return err
 							}
@@ -4088,7 +4083,7 @@ func (w *Wallet) SendOutputs(outputs []*wire.TxOut, account uint32,
 	return createdTx.Tx, nil
 }
 
-func (w *Wallet) SendOutputsAbe(outputDescs []*abepqringct.AbeTxOutDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, label string) (*wire.MsgTxAbe, error) {
+func (w *Wallet) SendOutputsAbe(outputDescs []*abecrypto.AbeTxOutDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, label string) (*wire.MsgTxAbe, error) {
 
 	// Ensure the outputs to be created adhere to the network's consensus
 	// rules.
@@ -5122,7 +5117,8 @@ func create(db walletdb.DB, pubPass, privPass, seed []byte,
 // TODO(abe):
 func createAbe(db walletdb.DB, pubPass, privPass, seed []byte,
 	params *chaincfg.Params, birthday time.Time, isWatchingOnly bool) error {
-
+	// TODO(20220321):the length of seed should be a global paramter in config
+	seedLength := 32
 	if !isWatchingOnly {
 		// If a seed was provided, ensure that it is of valid length. Otherwise,
 		// we generate a random seed for the wallet with the recommended seed
@@ -5135,11 +5131,12 @@ func createAbe(db walletdb.DB, pubPass, privPass, seed []byte,
 			//hdSeed, err := hdkeychain.GenerateSeed(
 			//	hdkeychain.RecommendedSeedLen)
 			//salrsSeed, err := abesalrs.GenerateSeed(abesalrs.RecommendedSeedLen)
-			pqringctSeed, _, _, _, err := abepqringct.MasterKeyGen(nil, abecrypto.CryptoSchemePQRINGCT)
+			seed = make([]byte, seedLength)
+			_, err := rand.Read(seed[:])
 			if err != nil {
-				return err
+				str := "failed to read random source"
+				return errors.New(str)
 			}
-			seed = pqringctSeed
 		}
 		//if len(seed) < abesalrs.MinSeedBytes || len(seed) > abesalrs.MaxSeedBytes {
 		//	return abesalrs.ErrInvalidSeedLen

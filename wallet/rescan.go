@@ -352,16 +352,16 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 		err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 			addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 			txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-			mpkEncBytes, msvkEncBytes, _, err := w.ManagerAbe.FetchMasterKeyEncAbe(addrmgrNs)
+			addressEnc, _, _, valueSecretKeyEnc, err := w.ManagerAbe.FetchAddressKeysAbe(addrmgrNs)
 			if err != nil {
 				return err
 			}
-			msvkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, msvkEncBytes)
-			if err!=nil {
+			vskBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, valueSecretKeyEnc)
+			if err != nil {
 				return err
 			}
-			mpkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, mpkEncBytes)
-			if err!=nil {
+			addressBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, addressEnc)
+			if err != nil {
 				return err
 			}
 			//startBlock := w.Manager.SyncedTo()
@@ -391,19 +391,19 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 					continue
 				}
 
-				maturedBlockHashs :=make([]*chainhash.Hash, 0)
-				if i >= int32(w.chainParams.CoinbaseMaturity)+2 && i%3 == 2 && i - int32(w.chainParams.CoinbaseMaturity) - 2 >= w.SyncFrom {
-					hash1, err := client.GetBlockHash(int64(i-int32(w.chainParams.CoinbaseMaturity)))
+				maturedBlockHashs := make([]*chainhash.Hash, 0)
+				if i >= int32(w.chainParams.CoinbaseMaturity)+2 && i%3 == 2 && i-int32(w.chainParams.CoinbaseMaturity)-2 >= w.SyncFrom {
+					hash1, err := client.GetBlockHash(int64(i - int32(w.chainParams.CoinbaseMaturity)))
 					if err != nil {
 						return err
 					}
 					maturedBlockHashs = append(maturedBlockHashs, hash1)
-					hash2, err := client.GetBlockHash(int64(i-int32(w.chainParams.CoinbaseMaturity)-1))
+					hash2, err := client.GetBlockHash(int64(i - int32(w.chainParams.CoinbaseMaturity) - 1))
 					if err != nil {
 						return err
 					}
 					maturedBlockHashs = append(maturedBlockHashs, hash2)
-					hash3, err := client.GetBlockHash(int64(i-int32(w.chainParams.CoinbaseMaturity)-2))
+					hash3, err := client.GetBlockHash(int64(i - int32(w.chainParams.CoinbaseMaturity) - 2))
 					if err != nil {
 						return err
 					}
@@ -418,8 +418,8 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 				if err != nil {
 					return err
 				}
- 				//err = w.TxStore.InsertBlockAbe(txmgrNs,blockAbeDetail,*maturedBlockHashs, mpk,msvk)
- 				err = w.TxStore.InsertBlockAbeNew(txmgrNs,blockAbeDetail,maturedBlockHashs, mpkBytes,msvkBytes)
+				//err = w.TxStore.InsertBlockAbe(txmgrNs,blockAbeDetail,*maturedBlockHashs, mpk,msvk)
+				err = w.TxStore.InsertBlockAbeNew(txmgrNs, blockAbeDetail, maturedBlockHashs, addressBytes, vskBytes)
 				if err != nil {
 					return err
 				}
@@ -445,11 +445,11 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 		return err
 	}
 	_, bestBlockHeight, err := w.chainClient.GetBestBlock()
-	if err!=nil{
+	if err != nil {
 		return err
 	}
-	if err := catchUpHashes(w, w.chainClient, bestBlockHeight);err!=nil{
-		return  err
+	if err := catchUpHashes(w, w.chainClient, bestBlockHeight); err != nil {
+		return err
 	}
 	//job := &RescanJob{
 	//	InitialSync: true,

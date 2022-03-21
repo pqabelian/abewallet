@@ -3,11 +3,11 @@ package prompt
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto"
-	"github.com/abesuite/abec/abecrypto/abepqringct"
 	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/abeutil/hdkeychain"
 	"github.com/abesuite/abec/chainhash"
@@ -270,14 +270,15 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 		return nil, err
 	}
 	if !useUserSeed {
-		// TODO(abe): use abesarls to replace the hdkeychain
 		//seed, err := hdkeychain.GenerateSeed(hdkeychain.RecommendedSeedLen)
 		//seed, err := abesalrs.GenerateSeed(2*abesalrs.RecommendedSeedLen)
-		seed, _, _, _, err := abepqringct.MasterKeyGen(nil, abecrypto.CryptoSchemePQRINGCT)
+		// TODO(20220321): the length of seed should be a global parameter in config
+		seed := make([]byte, 32)
+		_, err := rand.Read(seed)
 		if err != nil {
-			return nil, err
+			return nil, errors.New("rand.Read() error in Seed()")
 		}
-		mnemonics := seedToWords(seed[4:], wordlists.English)
+		mnemonics := seedToWords(seed, wordlists.English)
 		fmt.Println("Your wallet generation seed is:")
 		fmt.Printf("%x\n", seed)
 		fmt.Println("the crypto version is", binary.BigEndian.Uint32(seed[:4]))

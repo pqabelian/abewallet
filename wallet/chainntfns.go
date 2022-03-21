@@ -45,15 +45,15 @@ func (w *Wallet) handleChainNotifications() {
 		err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 			addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 			txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-			mpkEncBytes, msvkEncBytes, _, err := w.ManagerAbe.FetchMasterKeyEncAbe(addrmgrNs)
+			addressEnc, _, _, valueSecretKeyEnc, err := w.ManagerAbe.FetchAddressKeysAbe(addrmgrNs)
 			if err != nil {
 				return err
 			}
-			msvkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, msvkEncBytes)
+			addressBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, addressEnc)
 			if err != nil {
 				return err
 			}
-			mpkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, mpkEncBytes)
+			valueSkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, valueSecretKeyEnc)
 			if err != nil {
 				return err
 			}
@@ -97,7 +97,7 @@ func (w *Wallet) handleChainNotifications() {
 					return err
 				}
 				//err = w.TxStore.InsertBlockAbe(txmgrNs, blockAbeDetail,*maturedBlockHash, mpk, msvk)
-				err = w.TxStore.InsertBlockAbeNew(txmgrNs, blockAbeDetail, maturedBlockHashs, mpkBytes, msvkBytes)
+				err = w.TxStore.InsertBlockAbeNew(txmgrNs, blockAbeDetail, maturedBlockHashs, addressBytes, valueSkBytes)
 				if err != nil {
 					return err
 				}
@@ -289,15 +289,15 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 	// actually we just used the addrmgrNS to manage the sync state, other content will be deleted
 	// TODO(abe): transfer to IsMyAddress function...
 	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
-	mpkEnc, msvkEnc, _, err := w.ManagerAbe.FetchMasterKeyEncAbe(addrmgrNs)
+	addressEnc, _, _, valueSecretKeyEnc, err := w.ManagerAbe.FetchAddressKeysAbe(addrmgrNs)
 	if err != nil {
 		return err
 	}
-	serializedMPK, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, mpkEnc)
+	addressBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, addressEnc)
 	if err != nil {
 		return err
 	}
-	serializedMSVK, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, msvkEnc)
+	valueSkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, valueSecretKeyEnc)
 	if err != nil {
 		return err
 	}
@@ -345,7 +345,7 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 		}
 	}
 	//err = w.TxStore.InsertBlockAbe(txmgrNs, br,*maturedBlockHash, mpk, msvk)
-	err = w.TxStore.InsertBlockAbeNew(txmgrNs, br, maturedBlockHashs, serializedMPK, serializedMSVK)
+	err = w.TxStore.InsertBlockAbeNew(txmgrNs, br, maturedBlockHashs, addressBytes, valueSkBytes)
 	if err != nil {
 		return err
 	}

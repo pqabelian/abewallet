@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto/abepqringct"
+	"github.com/abesuite/abec/abecrypto"
 	"github.com/abesuite/abec/blockchain"
 	"github.com/abesuite/abewallet/walletdb"
 	"math"
@@ -433,7 +433,7 @@ func (r Ring) Serialize() []byte {
 	addrScriptAllSize := 0 //address script size
 	bLen := len(r.BlockHashes)
 	txLen := len(r.TxHashes) //transaction number
-	txoSize:=make([]int,0,txLen)
+	txoSize := make([]int, 0, txLen)
 	for i := 0; i < txLen; i++ {
 		txoSize = append(txoSize, len(r.TxoScripts[i]))
 		addrScriptAllSize += len(r.TxoScripts[i])
@@ -442,8 +442,8 @@ func (r Ring) Serialize() []byte {
 	total := 4 + 32*bLen + 2 + (32+1+4)*txLen + addrScriptAllSize + 4
 	res := make([]byte, total)
 	offset := 0
-	byteOrder.PutUint32(res,r.Version)
-	offset+=4
+	byteOrder.PutUint32(res, r.Version)
+	offset += 4
 	for i := 0; i < bLen; i++ {
 		copy(res[offset:offset+32], r.BlockHashes[i][:])
 		offset += 32
@@ -475,8 +475,8 @@ func (r *Ring) Deserialize(b []byte) error {
 		return fmt.Errorf("wrong length of input byte slice")
 	}
 	offset := 0
-	r.Version=byteOrder.Uint32(b)
-	offset+=4
+	r.Version = byteOrder.Uint32(b)
+	offset += 4
 	for i := 0; i < wire.BlockNumPerRingGroup; i++ {
 		newHash, err := chainhash.NewHash(b[offset : offset+32])
 		if err != nil {
@@ -487,7 +487,7 @@ func (r *Ring) Deserialize(b []byte) error {
 	}
 	txLen := int(byteOrder.Uint16(b[offset : offset+2]))
 	offset += 2
-	addrSize:=make([]int,0,txLen)
+	addrSize := make([]int, 0, txLen)
 	for i := 0; i < txLen; i++ {
 		newHash, err := chainhash.NewHash(b[offset : offset+32])
 		if err != nil {
@@ -581,7 +581,7 @@ type RingHashSerialNumbers struct {
 
 // ring hash || transaction number || [transaction hash||output index...]||Origin serial number ||[index||serial number...]||isMy||Spent||Got serial number||[serial number...]
 func (u UTXORingAbe) SerializeSize() int {
-	return 4+32 + 1 + len(u.TxHashes)*(32+1) + 1 + len(u.OriginSerialNumberes)*(1+32) + 2 + 1 + len(u.GotSerialNumberes)*32
+	return 4 + 32 + 1 + len(u.TxHashes)*(32+1) + 1 + len(u.OriginSerialNumberes)*(1+32) + 2 + 1 + len(u.GotSerialNumberes)*32
 
 }
 func (u UTXORingAbe) Serialize() []byte {
@@ -1113,7 +1113,7 @@ func (s *Store) InsertTxAbe(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecordAbe,
 //	}
 //	return putMinedBalance(ns, balance)
 //}
-func (s *Store) InsertGenesisBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRecord, serializedMPK []byte, serializedMSVK []byte) error {
+func (s *Store) InsertGenesisBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRecord, addressBytes []byte, valueSkBytes []byte) error {
 	balance, err := fetchMinedBalance(ns)
 	if err != nil {
 		return err
@@ -1141,8 +1141,7 @@ func (s *Store) InsertGenesisBlockAbeNew(ns walletdb.ReadWriteBucket, block *Blo
 	coinbaseTx := block.TxRecordAbes[0].MsgTx
 	coinbaseOutput := make(map[wire.OutPointAbe]*UnspentUTXO)
 	for i := 0; i < len(coinbaseTx.TxOuts); i++ {
-		//TODO_DONE(osy) 20210608 finish the txo receive
-		valid, v := abepqringct.TxoCoinReceive(coinbaseTx.TxOuts[i], serializedMPK, serializedMSVK)
+		valid, v := abecrypto.CryptoPP.TxoCoinReceive(coinbaseTx.TxOuts[i], addressBytes, valueSkBytes)
 		if valid && v != 0 {
 			amt, err := abeutil.NewAmountAbe(float64(v))
 			if err != nil {
@@ -1720,7 +1719,7 @@ func (s *Store) InsertGenesisBlockAbeNew(ns walletdb.ReadWriteBucket, block *Blo
 //	return putMinedBalance(ns, balance)
 //}
 
-func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRecord, maturedBlockHashs []*chainhash.Hash, serializedMPK []byte, serializedMSVK []byte) error {
+func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRecord, maturedBlockHashs []*chainhash.Hash, addressBytes []byte, valueSkBytes []byte) error {
 	log.Infof("Current sync height %d", block.Height)
 
 	balance, err := fetchMinedBalance(ns)
@@ -1761,7 +1760,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 
 	// store all outputs of coinbaseTx which belong to us into a map : coinbaseOutput
 	for i := 0; i < len(coinbaseTx.TxOuts); i++ {
-		valid, v := abepqringct.TxoCoinReceive(coinbaseTx.TxOuts[i], serializedMPK, serializedMSVK)
+		valid, v := abecrypto.CryptoPP.TxoCoinReceive(coinbaseTx.TxOuts[i], addressBytes, valueSkBytes)
 		if valid && v != 0 {
 			amt, err := abeutil.NewAmountAbe(float64(v))
 			if err != nil {
@@ -1922,7 +1921,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 
 		// traverse all outputs of a transaction and check if it is ours
 		for j := 0; j < len(txi.TxOuts); j++ {
-			valid, v := abepqringct.TxoCoinReceive(txi.TxOuts[j], serializedMPK, serializedMSVK)
+			valid, v := abecrypto.CryptoPP.TxoCoinReceive(txi.TxOuts[j], addressBytes, valueSkBytes)
 			if valid && v != 0 {
 				amt, err := abeutil.NewAmountAbe(float64(v))
 				if err != nil {
@@ -2261,7 +2260,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			}
 			spendableBal += amt
 			freezedBal -= amt
-			log.Infof("Transfer txo at Height %d , Vlaue %v is matured!", utxo.Height, float64(utxo.Amount) / math.Pow10(7))
+			log.Infof("Transfer txo at Height %d , Vlaue %v is matured!", utxo.Height, float64(utxo.Amount)/math.Pow10(7))
 			err = putRawMaturedOutput(ns, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
 				return err
@@ -2275,7 +2274,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			}
 			spendableBal += amt
 			freezedBal -= amt
-			log.Infof("Transfer txo at Height %d , Vlaue %v is matured!", utxo.Height, float64(utxo.Amount) / math.Pow10(7))
+			log.Infof("Transfer txo at Height %d , Vlaue %v is matured!", utxo.Height, float64(utxo.Amount)/math.Pow10(7))
 			err = putRawMaturedOutput(ns, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
 				return err
@@ -2298,7 +2297,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 			return err
 		}
 		for op, utxo := range transferOutputs {
-			log.Infof("Transfer txo at Height %d , Value %v is matured!", utxo.Height, float64(utxo.Amount) / math.Pow10(7))
+			log.Infof("Transfer txo at Height %d , Value %v is matured!", utxo.Height, float64(utxo.Amount)/math.Pow10(7))
 			v := valueUnspentTXO(false, utxo.Version, utxo.Height, utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 			err = putRawMaturedOutput(ns, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {

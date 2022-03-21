@@ -610,11 +610,6 @@ func (m *Manager) NeuterRootKey(ns walletdb.ReadWriteBucket) error {
 	// encrypted master HD key from the database.
 	return ns.NestedReadWriteBucket(mainBucketName).Delete(masterHDPrivName)
 }
-func (m *Manager) FetchMasterKeyEncAbe(ns walletdb.ReadWriteBucket) ([]byte, []byte, []byte, error) {
-	m.mtx.Lock()
-	defer m.mtx.Unlock()
-	return fetchMasterKeyEncsAbe(ns)
-}
 
 // Address returns a managed address given the passed address if it is known to
 // the address manager. A managed address differs from the passed address in
@@ -644,6 +639,7 @@ func (m *Manager) Address(ns walletdb.ReadBucket,
 	str := fmt.Sprintf("unable to find key for addr %v", address)
 	return nil, managerError(ErrAddressNotFound, str, nil)
 }
+
 // MarkUsed updates the used flag for the provided address.
 func (m *Manager) MarkUsed(ns walletdb.ReadWriteBucket, address abeutil.Address) error {
 	m.mtx.RLock()

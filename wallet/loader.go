@@ -228,25 +228,26 @@ func (l *Loader) createNewWalletAbe(pubPassphrase, privPassphrase,
 	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 		addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-		mpkEncBytes, msvkEncBytes, _, err := w.ManagerAbe.FetchMasterKeyEncAbe(addrmgrNs)
+		addressEnc, _, _, valueSkEnc, err := w.ManagerAbe.FetchAddressKeysAbe(addrmgrNs)
 		if err != nil {
 			return err
 		}
-		msvkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, msvkEncBytes)
+		addressBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, addressEnc)
 		if err != nil {
 			return err
 		}
-		mpkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, mpkEncBytes)
+		valueSkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, valueSkEnc)
 		if err != nil {
 			return err
 		}
+
 		genesisBlockRecords, err := wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(chaincfg.MainNetParams.GenesisBlock)
-		if err!=nil{
+		if err != nil {
 			return err
 		}
-		err = w.TxStore.InsertGenesisBlockAbeNew(txmgrNs, genesisBlockRecords, mpkBytes, msvkBytes)
+		err = w.TxStore.InsertGenesisBlockAbeNew(txmgrNs, genesisBlockRecords, addressBytes, valueSkBytes)
 		if err != nil {
-			log.Error("Fail to create wallet due to:",err)
+			log.Error("Fail to create wallet due to:", err)
 		}
 		return nil
 
