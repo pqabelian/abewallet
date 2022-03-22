@@ -631,7 +631,8 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutDesc, mi
 	var selectedRings map[chainhash.Hash]*wtxmgr.Ring
 	var inputRingVersions []uint32
 	var txFee abeutil.Amount
-	var addrBytes, vskBytes, aSkSpBytes []byte
+	//var addrBytes, vskBytes, aSkSpBytes []byte
+	var addrBytes, aSkSpBytes []byte
 	flag := false //whether need to make a change
 	// TODO(abe):should use a db.View to spend, if successful, use db.Update
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
@@ -645,7 +646,8 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutDesc, mi
 		if err != nil {
 			return err
 		}
-		vskBytes, err = w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, valueSecretKeyEnc)
+		//vskBytes, err = w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, valueSecretKeyEnc)
+		_, err = w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, valueSecretKeyEnc)
 		if err != nil {
 			return err
 		}
