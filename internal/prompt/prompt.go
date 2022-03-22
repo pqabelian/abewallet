@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/abesuite/abec/abecrypto"
 	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/abeutil/hdkeychain"
 	"github.com/abesuite/abec/chainhash"
@@ -281,7 +282,7 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 		mnemonics := seedToWords(seed, wordlists.English)
 		fmt.Println("Your wallet generation seed is:")
 		fmt.Printf("%x\n", seed)
-		fmt.Println("the crypto version is", binary.BigEndian.Uint32(seed[:4]))
+		fmt.Println("the crypto version is", abecrypto.CryptoPP.Version)
 		fmt.Println("Your wallet mnemonic list is:")
 		fmt.Printf("%v\n", strings.Join(mnemonics, ","))
 		fmt.Println("IMPORTANT: Keep the version and seed in a safe place as you\n" +
@@ -314,6 +315,9 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 		version, err := strconv.Atoi(versionStr)
 		if err != nil {
 			return nil, err
+		}
+		if abecrypto.CryptoScheme(version) != abecrypto.CryptoSchemePQRINGCTV2 {
+			return nil, errors.New("unsupported scheme in this wallet version")
 		}
 		fmt.Print("Enter existing wallet mnemonic: ")
 		seedStr, err := reader.ReadString('\n')

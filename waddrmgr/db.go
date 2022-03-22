@@ -647,7 +647,7 @@ func putAddressKeysAbe(ns walletdb.ReadWriteBucket, cnt uint64, valueSecretKeyEn
 	}
 
 	if addressKeyEnc != nil {
-		err := subBucket.Put(addressKeyName, addressSecretKeySnEnc)
+		err := subBucket.Put(addressKeyName, addressKeyEnc)
 		if err != nil {
 			str := "failed to store encrypted master public key"
 			return managerError(ErrDatabase, str, err)

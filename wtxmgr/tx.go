@@ -1760,6 +1760,7 @@ func (s *Store) InsertBlockAbeNew(ns walletdb.ReadWriteBucket, block *BlockAbeRe
 
 	// store all outputs of coinbaseTx which belong to us into a map : coinbaseOutput
 	for i := 0; i < len(coinbaseTx.TxOuts); i++ {
+		// TODO(20220322): there would check the crypto version
 		valid, v := abecrypto.CryptoPP.TxoCoinReceive(coinbaseTx.TxOuts[i], addressBytes, valueSkBytes)
 		if valid && v != 0 {
 			amt, err := abeutil.NewAmountAbe(float64(v))

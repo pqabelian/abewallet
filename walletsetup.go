@@ -305,7 +305,7 @@ func createWalletAbe(cfg *config) error {
 		}
 
 		fmt.Println("Creating the wallet...")
-		w, err := loader.CreateNewWalletAbe(pubPass, privPass, seed, time.Now())
+		w, err := loader.CreateNewWalletAbe(pubPass, privPass, seed[4:], time.Now())
 		if err != nil {
 			return err
 		}
