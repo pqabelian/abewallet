@@ -305,6 +305,10 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 				break
 			}
 		}
+		// add the cryptoScheme before seed
+		tmp := make([]byte, 4, 4+32)
+		binary.BigEndian.PutUint32(tmp[0:4], uint32(abecrypto.CryptoSchemePQRINGCTV2))
+		seed = append(tmp, seed[:]...)
 		return seed, nil
 	}
 
