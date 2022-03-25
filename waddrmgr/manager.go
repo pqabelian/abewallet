@@ -261,7 +261,7 @@ const (
 	// key material such as derived extended private keys and imported
 	// private keys.
 	CKTPrivate CryptoKeyType = iota
-
+	CKTSeed
 	// CKTScript specifies the key that is used for encryption of scripts.
 	CKTScript
 
@@ -1443,7 +1443,7 @@ func loadManager(ns walletdb.ReadBucket, pubPassphrase []byte,
 	}
 
 	// Load the crypto keys from the db.
-	cryptoKeyPubEnc, cryptoKeyPrivEnc, cryptoKeyScriptEnc, err :=
+	cryptoKeyPubEnc, _, cryptoKeyPrivEnc, cryptoKeyScriptEnc, err :=
 		fetchCryptoKeys(ns)
 	if err != nil {
 		return nil, maybeConvertDbError(err)

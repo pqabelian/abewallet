@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abewallet/walletdb"
-	"strconv"
 	"time"
 )
 
@@ -228,19 +227,22 @@ var (
 	// crypto keys that encrypt all other generated keys, the watch only
 	// flag, the master private key (encrypted), the master HD private key
 	// (encrypted), and also versioning information.
-	mainBucketName = []byte("main")
-
+	mainBucketName  = []byte("main")
+	addrBukcetName  = []byte("address")
+	askspBukcetName = []byte("asksp")
+	asksnBukcetName = []byte("asksn")
+	vskBukcetName   = []byte("valuesk")
 	// masterHDPrivName is the name of the key that stores the master HD
 	// private key. This key is encrypted with the master private crypto
 	// encryption key. This resides under the main bucket.
 	masterHDPrivName     = []byte("mhdpriv") //TODO(abe):will be deleted, this is the master root private key
 	masterSecretSignName = []byte("mssk")
 
-	seedKeyName            = []byte("seed")
-	valueSecretKeyName     = []byte("vsk")
-	addressSecretKeySpName = []byte("asksp")
-	addressSecretKeySnName = []byte("asksn")
-	seedStatusName         = []byte("sdcnt")
+	seedKeyName = []byte("seed")
+	//valueSecretKeyName     = []byte("vsk")
+	//addressSecretKeySpName = []byte("asksp")
+	//addressSecretKeySnName = []byte("asksn")
+	seedStatusName = []byte("sdcnt")
 	// masterHDPubName is the name of the key that stores the master HD
 	// public key. This key is encrypted with the master public crypto
 	// encryption key. This reside under the main bucket.
@@ -248,7 +250,7 @@ var (
 	masterSecretViewName = []byte("msvk")
 	masterPubName        = []byte("mpk")
 
-	addressKeyName = []byte("address")
+	//addressKeyName = []byte("address")
 	// syncBucketName is the name of the bucket that stores the current
 	// sync state of the root manager.
 	syncBucketName = []byte("sync")
@@ -598,10 +600,19 @@ func putMasterHDKeys(ns walletdb.ReadWriteBucket, masterHDPrivEnc, masterHDPubEn
 
 	return nil
 }
-
-//TODO(abe):
-func putAddressKeysAbe(ns walletdb.ReadWriteBucket, cnt uint64, valueSecretKeyEnc,
-	addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc []byte) error {
+func fetchSeedStatusAbe(ns walletdb.ReadBucket) (uint64, error) {
+	// As this is the key for the root manager, we don't need to fetch any
+	// particular scope, and can insert directly within the main bucket.
+	bucket := ns.NestedReadBucket(mainBucketName)
+	status := bucket.Get(seedStatusName)
+	if status == nil {
+		str := "failed to fetch seed status"
+		return 0, managerError(ErrDatabase, str, errors.New("the status of seed is wrong"))
+	}
+	cnt := binary.LittleEndian.Uint64(status)
+	return cnt, nil
+}
+func putSeedStatusAbe(ns walletdb.ReadWriteBucket, cnt uint64) error {
 	// As this is the key for the root manager, we don't need to fetch any
 	// particular scope, and can insert directly within the main bucket.
 	bucket := ns.NestedReadWriteBucket(mainBucketName)
@@ -612,18 +623,31 @@ func putAddressKeysAbe(ns walletdb.ReadWriteBucket, cnt uint64, valueSecretKeyEn
 		str := "failed to store seed status"
 		return managerError(ErrDatabase, str, err)
 	}
+	return nil
+}
 
-	curKey := strconv.AppendUint([]byte("No."), cnt, 10)
-	subBucket, err := bucket.CreateBucket(curKey)
-	if err != nil {
-		str := "failed to create used number bucket"
-		return managerError(ErrDatabase, str, err)
+//TODO(abe):
+func putAddressKeysEncAbe(ns walletdb.ReadWriteBucket, addrKey []byte, valueSecretKeyEnc,
+	addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc []byte) error {
+	// As this is the key for the root manager, we don't need to fetch any
+	// particular scope, and can insert directly within the main bucket.
+	mainBucket := ns.NestedReadWriteBucket(mainBucketName)
+
+	if addressKeyEnc != nil {
+		addrBucket := mainBucket.NestedReadWriteBucket(addrBukcetName)
+		err := addrBucket.Put(addrKey, addressKeyEnc)
+		if err != nil {
+			str := "failed to store encrypted master public key"
+			return managerError(ErrDatabase, str, err)
+		}
 	}
+
 	// Now that we have the main bucket, we can directly store each of the
 	// relevant keys. If we're in watch only mode, then some or all of
 	// these keys might not be available.
 	if valueSecretKeyEnc != nil {
-		err := subBucket.Put(valueSecretKeyName, valueSecretKeyEnc)
+		vskBukcet := mainBucket.NestedReadWriteBucket(vskBukcetName)
+		err := vskBukcet.Put(addrKey, valueSecretKeyEnc)
 		if err != nil {
 			str := "failed to store encrypted master private signing key"
 			return managerError(ErrDatabase, str, err)
@@ -631,7 +655,8 @@ func putAddressKeysAbe(ns walletdb.ReadWriteBucket, cnt uint64, valueSecretKeyEn
 	}
 
 	if addressSecretKeySpEnc != nil {
-		err := subBucket.Put(addressSecretKeySpName, addressSecretKeySpEnc)
+		askspBukcet := mainBucket.NestedReadWriteBucket(askspBukcetName)
+		err := askspBukcet.Put(addrKey, addressSecretKeySpEnc)
 		if err != nil {
 			str := "failed to store encrypted master private signing key"
 			return managerError(ErrDatabase, str, err)
@@ -639,15 +664,8 @@ func putAddressKeysAbe(ns walletdb.ReadWriteBucket, cnt uint64, valueSecretKeyEn
 	}
 
 	if addressSecretKeySnEnc != nil {
-		err := subBucket.Put(addressSecretKeySnName, addressSecretKeySnEnc)
-		if err != nil {
-			str := "failed to store encrypted master public key"
-			return managerError(ErrDatabase, str, err)
-		}
-	}
-
-	if addressKeyEnc != nil {
-		err := subBucket.Put(addressKeyName, addressKeyEnc)
+		asksnBukcet := mainBucket.NestedReadWriteBucket(asksnBukcetName)
+		err := asksnBukcet.Put(addrKey, addressSecretKeySnEnc)
 		if err != nil {
 			str := "failed to store encrypted master public key"
 			return managerError(ErrDatabase, str, err)
@@ -695,7 +713,7 @@ func putSeedAbe(ns walletdb.ReadWriteBucket, seedEnc []byte) error {
 	}
 	return nil
 }
-func fetchSeedAbe(ns walletdb.ReadBucket) ([]byte, error) {
+func fetchSeedEncAbe(ns walletdb.ReadBucket) ([]byte, error) {
 	bucket := ns.NestedReadBucket(mainBucketName)
 	var seedEnc []byte
 
@@ -706,66 +724,83 @@ func fetchSeedAbe(ns walletdb.ReadBucket) ([]byte, error) {
 	}
 	return seedEnc, nil
 }
+func fetchAddressKeyEncAbe(ns walletdb.ReadBucket, addrKey []byte) ([]byte, []byte, []byte, []byte, error) {
+	mainBucket := ns.NestedReadBucket(mainBucketName)
 
-func fetchAddressKeysAbe(ns walletdb.ReadBucket) ([]byte, []byte, []byte, []byte, error) {
-	bucket := ns.NestedReadBucket(mainBucketName)
+	addrBucket := mainBucket.NestedReadBucket(addrBukcetName)
+	addrEnc := addrBucket.Get(addrKey)
+	vskBukcet := mainBucket.NestedReadBucket(vskBukcetName)
+	vskEnc := vskBukcet.Get(addrKey)
 
-	var status []byte
-	key := bucket.Get(seedStatusName)
-	if key != nil {
-		status = make([]byte, len(key))
-		copy(status[:], key)
-	} else {
-		return nil, nil, nil, nil, errors.New("read db error in fetchAddressKeysAbe()")
+	askspBucket := mainBucket.NestedReadBucket(askspBukcetName)
+	askspEnc := askspBucket.Get(addrKey)
+	asksnBucket := mainBucket.NestedReadBucket(asksnBukcetName)
+	asksnEnc := asksnBucket.Get(addrKey)
+	if addrEnc == nil || vskEnc == nil || askspEnc == nil || asksnEnc == nil {
+		return nil, nil, nil, nil, errors.New("there are something wrong or no such addrKey exist")
 	}
-	cnt := binary.LittleEndian.Uint64(status)
-	curKey := strconv.AppendUint([]byte("No."), cnt, 10)
-	subBucket := bucket.NestedReadBucket(curKey)
-
-	var addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc []byte
-
-	// First, we'll try to fetch the master private key. If this database
-	// is watch only, or the master has been neutered, then this won't be
-	// found on disk.
-	key = subBucket.Get(addressKeyName)
-	if key != nil {
-		addressEnc = make([]byte, len(key))
-		copy(addressEnc[:], key)
-	}
-	key = subBucket.Get(addressSecretKeySpName)
-	if key != nil {
-		addressSecretSpEnc = make([]byte, len(key))
-		copy(addressSecretSpEnc[:], key)
-	}
-	key = subBucket.Get(addressSecretKeySnName)
-	if key != nil {
-		addressSecretSnEnc = make([]byte, len(key))
-		copy(addressSecretSnEnc[:], key)
-	}
-	key = subBucket.Get(valueSecretKeyName)
-	if key != nil {
-		valueSecretKeyEnc = make([]byte, len(key))
-		copy(valueSecretKeyEnc[:], key)
-	}
-
-	return addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc, nil
+	return addrEnc, askspEnc, asksnEnc, vskEnc, nil
 }
+
+//func fetchAddressKeysAbe(ns walletdb.ReadBucket, addrKey []byte) ([]byte, []byte, []byte, []byte, error) {
+//	mainBucket := ns.NestedReadBucket(mainBucketName)
+//
+//	var addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc []byte
+//
+//	// First, we'll try to fetch the master private key. If this database
+//	// is watch only, or the master has been neutered, then this won't be
+//	// found on disk.
+//	addrBukcet := mainBucket.NestedReadBucket(addrBukcetName)
+//	key := addrBukcet.Get(addrKey)
+//	if key != nil {
+//		addressEnc = make([]byte, len(key))
+//		copy(addressEnc[:], key)
+//	}
+//	askspBukcet := mainBucket.NestedReadBucket(askspBukcetName)
+//	key = askspBukcet.Get(addrKey)
+//	if key != nil {
+//		addressSecretSpEnc = make([]byte, len(key))
+//		copy(addressSecretSpEnc[:], key)
+//	}
+//	asksnBukcet := mainBucket.NestedReadBucket(asksnBukcetName)
+//	key = asksnBukcet.Get(addrKey)
+//	if key != nil {
+//		addressSecretSnEnc = make([]byte, len(key))
+//		copy(addressSecretSnEnc[:], key)
+//	}
+//	vskBukcet := mainBucket.NestedReadBucket(vskBukcetName)
+//	key = vskBukcet.Get(vskBukcetName)
+//	if key != nil {
+//		valueSecretKeyEnc = make([]byte, len(key))
+//		copy(valueSecretKeyEnc[:], key)
+//	}
+//
+//	return addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc, nil
+//}
 
 // fetchCryptoKeys loads the encrypted crypto keys which are in turn used to
 // protect the extended keys, imported keys, and scripts.  Any of the returned
 // values can be nil, but in practice only the crypto private and script keys
 // will be nil for a watching-only database.
-func fetchCryptoKeys(ns walletdb.ReadBucket) ([]byte, []byte, []byte, error) {
+func fetchCryptoKeys(ns walletdb.ReadBucket) ([]byte, []byte, []byte, []byte, error) {
 	bucket := ns.NestedReadBucket(mainBucketName)
 
 	// Load the crypto public key parameters.  Required.
 	val := bucket.Get(cryptoPubKeyName)
 	if val == nil {
 		str := "required encrypted crypto public not stored in database"
-		return nil, nil, nil, managerError(ErrDatabase, str, nil)
+		return nil, nil, nil, nil, managerError(ErrDatabase, str, nil)
 	}
 	pubKey := make([]byte, len(val))
 	copy(pubKey, val)
+
+	// Load the crypto private key parameters if they were stored.
+	var seedKey []byte
+	val = bucket.Get(cryptoSeedKeyName)
+	if val != nil {
+		seedKey = make([]byte, len(val))
+		copy(seedKey, val)
+	}
 
 	// Load the crypto private key parameters if they were stored.
 	var privKey []byte
@@ -783,7 +818,7 @@ func fetchCryptoKeys(ns walletdb.ReadBucket) ([]byte, []byte, []byte, error) {
 		copy(scriptKey, val)
 	}
 
-	return pubKey, privKey, scriptKey, nil
+	return pubKey, seedKey, privKey, scriptKey, nil
 }
 
 // putCryptoKeys stores the encrypted crypto keys which are in turn used to
@@ -2029,6 +2064,10 @@ func deletePrivateKeysAbe(ns walletdb.ReadWriteBucket) error {
 		str := "failed to delete crypto private key"
 		return managerError(ErrDatabase, str, err)
 	}
+	if err := bucket.Delete(cryptoSeedKeyName); err != nil {
+		str := "failed to delete crypto seed key"
+		return managerError(ErrDatabase, str, err)
+	}
 	if err := bucket.Delete(cryptoScriptKeyName); err != nil {
 		str := "failed to delete crypto script key"
 		return managerError(ErrDatabase, str, err)
@@ -2700,6 +2739,27 @@ func createManagerNSAbe(ns walletdb.ReadWriteBucket) error {
 	err = mainBucket.Put(mgrCreateDateName, dateBytes[:])
 	if err != nil {
 		str := "failed to store database creation time"
+		return managerError(ErrDatabase, str, err)
+	}
+
+	_, err = mainBucket.CreateBucket(addrBukcetName)
+	if err != nil {
+		str := "failed to create address bucket"
+		return managerError(ErrDatabase, str, err)
+	}
+	_, err = mainBucket.CreateBucket(askspBukcetName)
+	if err != nil {
+		str := "failed to create asksp bucket"
+		return managerError(ErrDatabase, str, err)
+	}
+	_, err = mainBucket.CreateBucket(asksnBukcetName)
+	if err != nil {
+		str := "failed to create asksn bucket"
+		return managerError(ErrDatabase, str, err)
+	}
+	_, err = mainBucket.CreateBucket(vskBukcetName)
+	if err != nil {
+		str := "failed to create valuesk bucket"
 		return managerError(ErrDatabase, str, err)
 	}
 

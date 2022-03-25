@@ -1,6 +1,8 @@
 package wallet
 
 import (
+	"encoding/hex"
+	"github.com/abesuite/abec/abecrypto"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/txscript"
@@ -352,18 +354,6 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 		err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 			addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 			txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-			addressEnc, _, _, valueSecretKeyEnc, err := w.ManagerAbe.FetchAddressKeysAbe(addrmgrNs)
-			if err != nil {
-				return err
-			}
-			vskBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, valueSecretKeyEnc)
-			if err != nil {
-				return err
-			}
-			addressBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, addressEnc)
-			if err != nil {
-				return err
-			}
 			//startBlock := w.Manager.SyncedTo()
 			startBlock := w.ManagerAbe.SyncedTo()
 
@@ -418,8 +408,29 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 				if err != nil {
 					return err
 				}
+				coinAddrToVSK := map[string][]byte{}
+				coinAddrToInstanceAddr := map[string][]byte{}
+				for j := 0; j < len(b.Transactions); j++ {
+					for k := 0; k < len(b.Transactions[j].TxOuts); k++ {
+						coinAddr, err := abecrypto.CryptoPP.ExtractCoinAddressFromTxoScript(b.Transactions[j].TxOuts[k].TxoScript)
+						if err != nil {
+							return err
+						}
+						addrBytesEnc, _, _, vskBytesEnc, err := w.ManagerAbe.FetchAddressKeyEncAbe(addrmgrNs, coinAddr)
+						if addrBytesEnc != nil && vskBytesEnc != nil {
+							addrBytes, _, _, vskBytes, err := w.ManagerAbe.DecryptAddressKey(addrBytesEnc, nil, nil, vskBytesEnc)
+							if err != nil {
+								return err
+							}
+							addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
+							coinAddrToVSK[addrKey] = vskBytes
+							coinAddrToInstanceAddr[addrKey] = addrBytes
+						}
+
+					}
+				}
 				//err = w.TxStore.InsertBlockAbe(txmgrNs,blockAbeDetail,*maturedBlockHashs, mpk,msvk)
-				err = w.TxStore.InsertBlockAbeNew(txmgrNs, blockAbeDetail, maturedBlockHashs, addressBytes, vskBytes)
+				err = w.TxStore.InsertBlockAbeNew(txmgrNs, blockAbeDetail, maturedBlockHashs, coinAddrToVSK, coinAddrToInstanceAddr)
 				if err != nil {
 					return err
 				}

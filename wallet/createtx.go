@@ -632,29 +632,10 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutDesc, mi
 	var inputRingVersions []uint32
 	var txFee abeutil.Amount
 	//var addrBytes, vskBytes, aSkSpBytes []byte
-	var addrBytes, aSkSpBytes []byte
+	//var addrBytes, aSkSpBytes []byte
 	flag := false //whether need to make a change
 	// TODO(abe):should use a db.View to spend, if successful, use db.Update
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		//addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		addressEnc, addressSecretSpEnc, _, valueSecretKeyEnc, err := w.ManagerAbe.FetchAddressKeysAbe(addrmgrNs)
-		if err != nil {
-			return err
-		}
-		addrBytes, err = w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, addressEnc)
-		if err != nil {
-			return err
-		}
-		//vskBytes, err = w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, valueSecretKeyEnc)
-		_, err = w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, valueSecretKeyEnc)
-		if err != nil {
-			return err
-		}
-		aSkSpBytes, err = w.ManagerAbe.Decrypt(waddrmgr.CKTPrivate, addressSecretSpEnc)
-		if err != nil {
-			return err
-		}
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
 		eligible, err := w.findEligibleTxosAbe(txmgrNs, minconf, bs)
@@ -899,6 +880,34 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutDesc, mi
 
 	PrintConsumedUTXOs(selectedTxos)
 
+	serializeAddressBytes := make([][]byte, len(selectedTxos))
+	serializedAskspBytes := make([][]byte, len(selectedTxos))
+	serializedAsksnBytes := make([][]byte, len(selectedTxos))
+	serializedVskBytes := make([][]byte, len(selectedTxos))
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+		var serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc []byte
+		for i := 0; i < len(selectedTxos); i++ {
+			// todo:extract the address from txoScripts
+			coinAddr, err := abecrypto.CryptoPP.ExtractCoinAddressFromTxoScript(selectedRings[selectedTxos[i].RingHash].TxoScripts[selectedTxos[i].Index])
+			if err != nil {
+				return err
+			}
+			serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, err = w.ManagerAbe.FetchAddressKeyEncAbe(addrmgrNs, coinAddr)
+			if err != nil {
+				return err
+			}
+			serializeAddressBytes[i], serializedAskspBytes[i], serializedAsksnBytes[i], serializedVskBytes[i], err = w.ManagerAbe.DecryptAddressKey(serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	abeTxInputDescs := make([]*abecrypto.AbeTxInputDesc, 0, len(selectedTxos))
 	txIns := make([]*wire.TxInAbe, len(selectedTxos))
 	for i := 0; i < len(selectedTxos); i++ {
@@ -927,11 +936,25 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutDesc, mi
 				TxoScript: selectedRings[selectedTxos[i].RingHash].TxoScripts[j],
 			})
 		}
-		abeTxInputDescs = append(abeTxInputDescs, abecrypto.NewAbeTxInputDesc(selectedTxos[i].RingHash, serializedTxoLists, int(selectedTxos[i].Index), aSkSpBytes))
+		// fetch the aSkSpByte from manager
+		abeTxInputDescs = append(abeTxInputDescs, abecrypto.NewAbeTxInputDesc(
+			selectedTxos[i].RingHash,
+			serializedTxoLists,
+			int(selectedTxos[i].Index),
+			serializeAddressBytes[i],
+			serializedAskspBytes[i],
+			serializedAsksnBytes[i],
+			serializedVskBytes[i],
+			selectedTxos[i].Amount))
 	}
 
 	if flag {
 		// TODO check the amount to uint64???
+		// fetch a change address for the change
+		addrBytes, err := w.NewAddressKeyAbe()
+		if err != nil {
+			return nil, err
+		}
 		txOutDescs = append(txOutDescs, abecrypto.NewAbeTxOutDesc(addrBytes, uint64(currentTotal-txFee-targetValue)))
 	}
 

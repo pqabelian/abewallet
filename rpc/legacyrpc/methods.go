@@ -103,6 +103,8 @@ var rpcHandlers = map[string]struct {
 	"lockunspent":            {handler: lockUnspent},
 	"sendfrom":               {handlerWithChain: sendFrom},
 	"sendmany":               {handler: sendMany},
+	"sendtoaddressesabe":     {handler: sendToAddressesAbe},
+	"generateaddressabe":     {handler: generateAddressAbe},
 	"sendtoaddress":          {handler: sendToAddress},
 	"sendtopayee":            {handler: sendToPayees},
 	"settxfee":               {handler: setTxFee},
@@ -1462,16 +1464,23 @@ func makeOutputsAbe(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainPara
 
 func makeOutputDescs(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) ([]*abecrypto.AbeTxOutDesc, error) {
 	outputDescs := make([]*abecrypto.AbeTxOutDesc, 0, len(pairs))
-	for name, amt := range pairs {
-		payeeManager, err := w.FetchPayeeManager(name)
-		if payeeManager == nil {
+	for addrStr, amt := range pairs {
+		//payeeManager, err := w.FetchPayeeManager(name)
+		//if payeeManager == nil {
+		//	return nil, err
+		//}
+		//addr, err := payeeManager.ChooseMAddr()
+		//if err != nil {
+		//	return nil, fmt.Errorf("cannot get an address from given payee: %s", err)
+		//}
+		addr, err := hex.DecodeString(addrStr)
+		if err != nil {
 			return nil, err
 		}
-		addr, err := payeeManager.ChooseMAddr()
-		if err != nil {
-			return nil, fmt.Errorf("cannot get an address from given payee: %s", err)
-		}
 		targetAmount := uint64(amt)
+		// TODO: check the net ID and the check hash
+		// discard the heading net ID and tailing hash in address
+		addr = addr[1 : len(addr)-32]
 		outputDesc := abecrypto.NewAbeTxOutDesc(addr, targetAmount)
 
 		outputDescs = append(outputDescs, outputDesc)
@@ -1742,6 +1751,87 @@ func sendMany(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	}
 
 	return sendPairs(w, pairs, account, minConf, txrules.DefaultRelayFeePerKb)
+}
+func generateAddressAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	// TODO:add a GenerateAddressCmd
+	_ = icmd.(*abejson.GenerateAddressCmd)
+
+	var err error
+	var address []byte
+	address, err = w.NewAddressKeyAbe()
+	if err != nil {
+		return nil, err
+	}
+	b := make([]byte, len(address)+1)
+	// TODO: How to know the active net?
+	b[0] = chaincfg.MainNetParams.PQRingCTID
+	copy(b[1:], address)
+	// generate the hash of (abecrypto.CryptoSchemePQRINGCT || serialized address)
+	hash := chainhash.DoubleHashB(b)
+	b = append(b, hash...)
+	return hex.EncodeToString(b), nil
+}
+
+func sendToAddressesAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.SendToPayeesCmd)
+
+	// Transaction comments are not yet supported.  Error instead of
+	// pretending to save them.
+	if !isNilOrEmpty(cmd.Comment) {
+		return nil, &abejson.RPCError{
+			Code:    abejson.ErrRPCUnimplemented,
+			Message: "Transaction comments are not yet supported",
+		}
+	}
+
+	// Check that minconf is positive.
+	minConf := int32(*cmd.MinConf)
+	if minConf < 0 {
+		return nil, ErrNeedPositiveMinconf
+	}
+
+	// Recreate address/amount pairs, using abeutil.Amount.
+	pairs := make(map[string]abeutil.Amount, len(cmd.Amounts))
+	for k, v := range cmd.Amounts {
+		amt, err := abeutil.NewAmountAbe(float64(v))
+		if err != nil {
+			return nil, err
+		}
+		pairs[k] = amt
+	}
+
+	//	todo: the fee policy
+	feeSatPerKb := txrules.DefaultRelayFeePerKb // todo: AliceBobScorpio, should use the feeSatPerKb received from abec
+	scaleToFeeSatPerKb := float64(*cmd.ScaleToFeeSatPerKb)
+	feeSpecified, err := abeutil.NewAmountAbe(float64(*cmd.FeeSpecified))
+	if err != nil {
+		return nil, err
+	}
+
+	if scaleToFeeSatPerKb != 1 {
+		// set the scaleToFeeSatPerKb
+		feeSatPerKb = feeSatPerKb.MulF64(scaleToFeeSatPerKb)
+		feeSpecified = abeutil.Amount(0)
+	} else if feeSpecified != 0 && scaleToFeeSatPerKb == 1 {
+		//	if neither scaleToFeeSatPerKb or feeSpecified is specified, the use scaleToFeeSatPerKb = 1
+		//	feeSatPerKb = feeSatPerKb
+		//	feeSpecified = 0
+		//	i.e. nothing to do
+	}
+
+	var utxoSpecified []string = nil
+	if cmd.UTXOSpecified != nil {
+		utxoSpecified = strings.Split(*cmd.UTXOSpecified, ",")
+		utxoNum := len(utxoSpecified)
+		for i := 0; i < utxoNum; i++ {
+			utxoSpecified[i] = strings.TrimSpace(utxoSpecified[i])
+			if !isHexString(utxoSpecified[i]) {
+				return nil, ErrSpeicifiedUTXOWrong
+			}
+		}
+	}
+
+	return sendPairsAbe(w, pairs, minConf, feeSatPerKb, feeSpecified, utxoSpecified)
 }
 
 // sendToAddress handles a sendtoaddress RPC request by creating a new

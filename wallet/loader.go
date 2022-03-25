@@ -1,8 +1,11 @@
 package wallet
 
 import (
+	"encoding/hex"
 	"errors"
+	"github.com/abesuite/abec/abecrypto"
 	"github.com/abesuite/abec/chaincfg"
+	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abewallet/internal/prompt"
 	"github.com/abesuite/abewallet/waddrmgr"
 	"github.com/abesuite/abewallet/walletdb"
@@ -228,24 +231,34 @@ func (l *Loader) createNewWalletAbe(pubPassphrase, privPassphrase,
 	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 		addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-		addressEnc, _, _, valueSkEnc, err := w.ManagerAbe.FetchAddressKeysAbe(addrmgrNs)
-		if err != nil {
-			return err
-		}
-		addressBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, addressEnc)
-		if err != nil {
-			return err
-		}
-		valueSkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, valueSkEnc)
-		if err != nil {
-			return err
+
+		addrToVSK := map[string][]byte{}
+		coinAddrToInstanceAddr := map[string][]byte{}
+		for i := 0; i < len(chaincfg.MainNetParams.GenesisBlock.Transactions); i++ {
+			transaction := chaincfg.MainNetParams.GenesisBlock.Transactions[i]
+			for k := 0; k < len(transaction.TxOuts); k++ {
+				coinAddr, err := abecrypto.CryptoPP.ExtractCoinAddressFromTxoScript(transaction.TxOuts[k].TxoScript)
+				if err != nil {
+					return err
+				}
+				addrBytesEnc, _, _, vskBytesEnc, err := w.ManagerAbe.FetchAddressKeyEncAbe(addrmgrNs, coinAddr)
+				if addrBytesEnc != nil && vskBytesEnc != nil {
+					addrBytes, _, _, vskBytes, err := w.ManagerAbe.DecryptAddressKey(addrBytesEnc, nil, nil, vskBytesEnc)
+					if err != nil {
+						return err
+					}
+					addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
+					addrToVSK[addrKey] = vskBytes
+					coinAddrToInstanceAddr[addrKey] = addrBytes
+				}
+			}
 		}
 
 		genesisBlockRecords, err := wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(chaincfg.MainNetParams.GenesisBlock)
 		if err != nil {
 			return err
 		}
-		err = w.TxStore.InsertGenesisBlockAbeNew(txmgrNs, genesisBlockRecords, addressBytes, valueSkBytes)
+		err = w.TxStore.InsertGenesisBlockAbeNew(txmgrNs, genesisBlockRecords, addrToVSK, coinAddrToInstanceAddr)
 		if err != nil {
 			log.Error("Fail to create wallet due to:", err)
 		}

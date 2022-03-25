@@ -2,7 +2,9 @@ package wallet
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
+	"github.com/abesuite/abec/abecrypto"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abec/wire"
@@ -45,18 +47,19 @@ func (w *Wallet) handleChainNotifications() {
 		err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 			addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 			txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-			addressEnc, _, _, valueSecretKeyEnc, err := w.ManagerAbe.FetchAddressKeysAbe(addrmgrNs)
-			if err != nil {
-				return err
-			}
-			addressBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, addressEnc)
-			if err != nil {
-				return err
-			}
-			valueSkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, valueSecretKeyEnc)
-			if err != nil {
-				return err
-			}
+			//addressEnc, _, _, valueSecretKeyEnc, err := w.ManagerAbe.FetchAddressKeyEncAbe(addrmgrNs)
+			//if err != nil {
+			//	return err
+			//}
+			//addressBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, addressEnc)
+			//if err != nil {
+			//	return err
+			//}
+			//valueSkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, valueSecretKeyEnc)
+			//if err != nil {
+			//	return err
+			//}
+
 			//msvk, err := abesalrs.DeseralizeMasterSecretViewKey(msvkBytes)
 			//if err != nil {
 			//	return err
@@ -96,8 +99,31 @@ func (w *Wallet) handleChainNotifications() {
 				if err != nil {
 					return err
 				}
+				// For all address there would be check and fetch the vsk if need
+				coinAddrToVSK := map[string][]byte{}
+				coinAddrToInstanceAddr := map[string][]byte{}
+				for j := 0; j < len(b.Transactions); j++ {
+					for k := 0; k < len(b.Transactions[j].TxOuts); k++ {
+						coinAddr, err := abecrypto.CryptoPP.ExtractCoinAddressFromTxoScript(b.Transactions[j].TxOuts[k].TxoScript)
+						if err != nil {
+							return err
+						}
+						addrBytesEnc, _, _, vskBytesEnc, err := w.ManagerAbe.FetchAddressKeyEncAbe(addrmgrNs, coinAddr)
+						if err != nil {
+							return err
+						}
+						addrBytes, _, _, vskBytes, err := w.ManagerAbe.DecryptAddressKey(addrBytesEnc, nil, nil, vskBytesEnc)
+						if err != nil {
+							return err
+						}
+						addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
+						coinAddrToVSK[addrKey] = vskBytes
+						coinAddrToInstanceAddr[addrKey] = addrBytes
+					}
+				}
+
 				//err = w.TxStore.InsertBlockAbe(txmgrNs, blockAbeDetail,*maturedBlockHash, mpk, msvk)
-				err = w.TxStore.InsertBlockAbeNew(txmgrNs, blockAbeDetail, maturedBlockHashs, addressBytes, valueSkBytes)
+				err = w.TxStore.InsertBlockAbeNew(txmgrNs, blockAbeDetail, maturedBlockHashs, coinAddrToVSK, coinAddrToInstanceAddr)
 				if err != nil {
 					return err
 				}
@@ -288,19 +314,6 @@ func (w *Wallet) connectBlock(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) err
 func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) error {
 	// actually we just used the addrmgrNS to manage the sync state, other content will be deleted
 	// TODO(abe): transfer to IsMyAddress function...
-	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
-	addressEnc, _, _, valueSecretKeyEnc, err := w.ManagerAbe.FetchAddressKeysAbe(addrmgrNs)
-	if err != nil {
-		return err
-	}
-	addressBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, addressEnc)
-	if err != nil {
-		return err
-	}
-	valueSkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, valueSecretKeyEnc)
-	if err != nil {
-		return err
-	}
 	//mpk, err := abepqringct.MasterPublicKeyIfc(serializedMPK)
 	//if err != nil {
 	//	return err
@@ -309,6 +322,9 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 	//if err != nil {
 	//	return err
 	//}
+	var err error
+	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
+
 	bs := waddrmgr.BlockStamp{
 		Height:    b.Height,
 		Hash:      b.Hash,
@@ -319,6 +335,33 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 		return err
 	}
 	block, err := w.chainClient.GetBlockAbe(&b.Hash)
+	if err != nil {
+		return err
+	}
+	// handle all output address in block
+	// For all address there would be check and fetch the vsk if need
+	coinAddrToVSK := map[string][]byte{}
+	coinAddrToInstanceAddr := map[string][]byte{}
+	for j := 0; j < len(block.Transactions); j++ {
+		for k := 0; k < len(block.Transactions[j].TxOuts); k++ {
+			coinAddr, err := abecrypto.CryptoPP.ExtractCoinAddressFromTxoScript(block.Transactions[j].TxOuts[k].TxoScript)
+			if err != nil {
+				return err
+			}
+			addrBytesEnc, _, _, vskBytesEnc, err := w.ManagerAbe.FetchAddressKeyEncAbe(addrmgrNs, coinAddr)
+			if err != nil {
+				return err
+			}
+			addrBytes, _, _, vskBytes, err := w.ManagerAbe.DecryptAddressKey(addrBytesEnc, nil, nil, vskBytesEnc)
+			if err != nil {
+				return err
+			}
+			addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
+			coinAddrToVSK[addrKey] = vskBytes
+			coinAddrToInstanceAddr[addrKey] = addrBytes
+		}
+	}
+
 	br, err := wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(block)
 	if err != nil {
 		return err
@@ -345,7 +388,7 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 		}
 	}
 	//err = w.TxStore.InsertBlockAbe(txmgrNs, br,*maturedBlockHash, mpk, msvk)
-	err = w.TxStore.InsertBlockAbeNew(txmgrNs, br, maturedBlockHashs, addressBytes, valueSkBytes)
+	err = w.TxStore.InsertBlockAbeNew(txmgrNs, br, maturedBlockHashs, coinAddrToVSK, coinAddrToInstanceAddr)
 	if err != nil {
 		return err
 	}

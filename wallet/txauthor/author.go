@@ -486,7 +486,7 @@ func (tx *AuthoredTx) AddAllInputScripts(secrets SecretsSource) error {
 //	if m.IsLocked() {
 //		return fmt.Errorf("the wallet is locked")
 //	}
-//	mpkEncBytes, msvkEncBytes, msskEncBytes, err := m.FetchAddressKeysAbe(waddrmgrNs)
+//	mpkEncBytes, msvkEncBytes, msskEncBytes, err := m.FetchAddressKeyEncAbe(waddrmgrNs)
 //	if err != nil {
 //		return err
 //	}

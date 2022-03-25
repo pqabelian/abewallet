@@ -65,6 +65,8 @@ type ManagerAbe struct {
 	cryptoKeyPrivEncrypted []byte
 	cryptoKeyPriv          EncryptorDecryptor
 
+	cryptoKeySeedEncrypted []byte
+	cryptoKeySeed          EncryptorDecryptor
 	// cryptoKeyScript is the key used to encrypt script data.
 	//
 	// This key will be zeroed when the address manager is locked.
@@ -104,6 +106,7 @@ func (m *ManagerAbe) lock() {
 	// Remove clear text private master and crypto keys from memory.
 	m.cryptoKeyScript.Zero()
 	m.cryptoKeyPriv.Zero()
+	m.cryptoKeySeed.Zero()
 	m.masterKeyPriv.Zero()
 
 	// Zero the hashed passphrase.
@@ -207,12 +210,86 @@ func (m *ManagerAbe) FetchPayeeManagerFromDB(ns walletdb.ReadBucket, name string
 	m.payeeManagers = append(m.payeeManagers, manager)
 	return manager, err
 }
+func (m *ManagerAbe) DecryptAddressKey(addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc []byte) ([]byte, []byte, []byte, []byte, error) {
+	var addressBytes, valueSecretKeyBytes []byte
+	var err error
 
-// FetchAddressKeysAbe got addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc,
-func (m *ManagerAbe) FetchAddressKeysAbe(ns walletdb.ReadBucket) ([]byte, []byte, []byte, []byte, error) {
+	if addressEnc != nil {
+		addressBytes, err = m.Decrypt(CKTPublic, addressEnc)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+	}
+
+	if valueSecretKeyEnc != nil {
+		valueSecretKeyBytes, err = m.Decrypt(CKTPublic, valueSecretKeyEnc)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+	}
+
+	var addressSecretSpBytes, addressSecretSnBytes []byte
+	if !m.IsLocked() {
+		if addressSecretSpEnc != nil {
+			addressSecretSpBytes, err = m.Decrypt(CKTPrivate, addressSecretSpEnc)
+			if err != nil {
+				return nil, nil, nil, nil, err
+			}
+		}
+		if addressSecretSnEnc != nil {
+			addressSecretSnBytes, err = m.Decrypt(CKTPrivate, addressSecretSnEnc)
+			if err != nil {
+				return nil, nil, nil, nil, err
+			}
+		}
+	}
+	return addressBytes, addressSecretSpBytes, addressSecretSnBytes, valueSecretKeyBytes, nil
+}
+
+// FetchAddressKeyEncAbe got addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc,
+func (m *ManagerAbe) FetchAddressKeyEncAbe(ns walletdb.ReadBucket, coinAddrBytes []byte) ([]byte, []byte, []byte, []byte, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
-	return fetchAddressKeysAbe(ns)
+	addrKey := chainhash.DoubleHashB(coinAddrBytes)
+	return fetchAddressKeyEncAbe(ns, addrKey)
+}
+
+//func (m *ManagerAbe) FetchAddressKeyEncAbe(ns walletdb.ReadBucket, serializedAddress []byte) ([]byte, []byte, []byte, []byte, error) {
+//	m.mtx.Lock()
+//	defer m.mtx.Unlock()
+//	return fetchAddressKeyEncAbe(ns, serializedAddress)
+//}
+func (m *ManagerAbe) FetchSeedEncAbe(ns walletdb.ReadBucket) ([]byte, error) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	return fetchSeedEncAbe(ns)
+}
+func (m *ManagerAbe) PutAddressKeysEncAbe(ns walletdb.ReadWriteBucket, addrKey []byte, valueSecretKeyEnc,
+	addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc []byte) error {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	return putAddressKeysEncAbe(ns, addrKey, valueSecretKeyEnc, addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
+
+}
+func (m *ManagerAbe) GenerateAddressKeysAbe(ns walletdb.ReadWriteBucket, seed []byte) ([]byte, []byte, []byte, []byte, error) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	// fetch the seed status
+	cnt, err := fetchSeedStatusAbe(ns)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	// update the seedStatus
+	err = putSeedStatusAbe(ns, cnt+1)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	serializedCryptoAddress, serializedVSk, serializedASksp, serializedASksn, err := generateAddressSk(seed, len(seed), cnt+1)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("failed to generate address and key")
+	}
+
+	return serializedCryptoAddress, serializedVSk, serializedASksp, serializedASksn, nil
 }
 
 // TODO(osy) 20200608 use txoReceive "replace" the IsMyAddress OR discard this function
@@ -339,6 +416,20 @@ func (m *ManagerAbe) ChangePassphrase(ns walletdb.ReadWriteBucket, oldPassphrase
 			return managerError(ErrCrypto, str, err)
 		}
 
+		// Re-encrypt the crypto private key using the new master
+		// private key.
+		decSeed, err := secretKey.Decrypt(m.cryptoKeySeedEncrypted)
+		if err != nil {
+			str := "failed to decrypt crypto seed key"
+			return managerError(ErrCrypto, str, err)
+		}
+		encSeed, err := newMasterKey.Encrypt(decSeed)
+		zero.Bytes(encSeed)
+		if err != nil {
+			str := "failed to encrypt crypto seed key"
+			return managerError(ErrCrypto, str, err)
+		}
+
 		// Re-encrypt the crypto script key using the new master
 		// private key.
 		decScript, err := secretKey.Decrypt(m.cryptoKeyScriptEncrypted)
@@ -381,6 +472,7 @@ func (m *ManagerAbe) ChangePassphrase(ns walletdb.ReadWriteBucket, oldPassphrase
 
 		// Now that the db has been successfully updated, clear the old
 		// key and set the new one.
+		copy(m.cryptoKeySeedEncrypted[:], encSeed)
 		copy(m.cryptoKeyPrivEncrypted[:], encPriv)
 		copy(m.cryptoKeyScriptEncrypted[:], encScript)
 		m.masterKeyPriv.Zero() // Clear the old key.
@@ -462,6 +554,9 @@ func (m *ManagerAbe) ConvertToWatchingOnly(ns walletdb.ReadWriteBucket) error {
 	zero.Bytes(m.cryptoKeyPrivEncrypted)
 	m.cryptoKeyPrivEncrypted = nil
 	m.cryptoKeyPriv = nil
+	zero.Bytes(m.cryptoKeySeedEncrypted)
+	m.cryptoKeySeedEncrypted = nil
+	m.cryptoKeySeed = nil
 
 	// The master private key is derived from a passphrase when the manager
 	// is unlocked, so there is no encrypted version to zero.  However,
@@ -475,7 +570,8 @@ func (m *ManagerAbe) ConvertToWatchingOnly(ns walletdb.ReadWriteBucket) error {
 }
 
 func (m *ManagerAbe) NewChangeAddress(ns walletdb.ReadBucket) ([]byte, error) {
-	addressEnc, _, _, _, err := fetchAddressKeysAbe(ns)
+	// TODO: this function would be delete, the addrKey = nil is wrong code.
+	addressEnc, _, _, _, err := fetchAddressKeyEncAbe(ns, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -584,6 +680,16 @@ func (m *ManagerAbe) Unlock(ns walletdb.ReadBucket, passphrase []byte) error {
 	m.cryptoKeyPriv.CopyBytes(decryptedKey)
 	zero.Bytes(decryptedKey)
 
+	// Use the master private key to decrypt the crypto private key.
+	decryptedKey, err = m.masterKeyPriv.Decrypt(m.cryptoKeySeedEncrypted)
+	if err != nil {
+		m.lock()
+		str := "failed to decrypt crypto seed key"
+		return managerError(ErrCrypto, str, err)
+	}
+	m.cryptoKeySeed.CopyBytes(decryptedKey)
+	zero.Bytes(decryptedKey)
+
 	m.locked = false
 	saltedPassphrase := append(m.privPassphraseSalt[:], passphrase...)
 	m.hashedPrivPassphrase = sha512.Sum512(saltedPassphrase)
@@ -597,7 +703,7 @@ func (m *ManagerAbe) Unlock(ns walletdb.ReadBucket, passphrase []byte) error {
 //
 // This function MUST be called with the manager lock held for reads.
 func (m *ManagerAbe) selectCryptoKey(keyType CryptoKeyType) (EncryptorDecryptor, error) {
-	if keyType == CKTPrivate || keyType == CKTScript {
+	if keyType == CKTPrivate || keyType == CKTSeed || keyType == CKTScript {
 		// The manager must be unlocked to work with the private keys.
 		if m.locked || m.watchingOnly {
 			return nil, managerError(ErrLocked, errLocked, nil)
@@ -608,6 +714,8 @@ func (m *ManagerAbe) selectCryptoKey(keyType CryptoKeyType) (EncryptorDecryptor,
 	switch keyType {
 	case CKTPrivate:
 		cryptoKey = m.cryptoKeyPriv
+	case CKTSeed:
+		cryptoKey = m.cryptoKeySeed
 	case CKTScript:
 		cryptoKey = m.cryptoKeyScript
 	case CKTPublic:
@@ -661,7 +769,7 @@ func (m *ManagerAbe) Decrypt(keyType CryptoKeyType, in []byte) ([]byte, error) {
 // newManager returns a new locked address manager with the given parameters.
 func newManagerAbe(chainParams *chaincfg.Params, masterKeyPub *snacl.SecretKey,
 	masterKeyPriv *snacl.SecretKey, cryptoKeyPub EncryptorDecryptor,
-	cryptoKeyPrivEncrypted, cryptoKeyScriptEncrypted []byte, syncInfo *syncState,
+	cryptoKeySeedEncrypted, cryptoKeyPrivEncrypted, cryptoKeyScriptEncrypted []byte, syncInfo *syncState,
 	birthday time.Time, privPassphraseSalt [saltSize]byte,
 	payeeManager []*PayeeManager, watchingOnly bool) *ManagerAbe {
 
@@ -673,6 +781,8 @@ func newManagerAbe(chainParams *chaincfg.Params, masterKeyPub *snacl.SecretKey,
 		masterKeyPub:             masterKeyPub,
 		masterKeyPriv:            masterKeyPriv,
 		cryptoKeyPub:             cryptoKeyPub,
+		cryptoKeySeedEncrypted:   cryptoKeySeedEncrypted,
+		cryptoKeySeed:            &cryptoKey{},
 		cryptoKeyPrivEncrypted:   cryptoKeyPrivEncrypted,
 		cryptoKeyPriv:            &cryptoKey{},
 		cryptoKeyScriptEncrypted: cryptoKeyScriptEncrypted,
@@ -729,7 +839,7 @@ func loadManagerAbe(ns walletdb.ReadBucket, pubPassphrase []byte,
 	}
 
 	// Load the crypto keys from the db.
-	cryptoKeyPubEnc, cryptoKeyPrivEnc, cryptoKeyScriptEnc, err :=
+	cryptoKeyPubEnc, cryptoKeySeedEnc, cryptoKeyPrivEnc, cryptoKeyScriptEnc, err :=
 		fetchCryptoKeys(ns)
 	if err != nil {
 		return nil, maybeConvertDbError(err)
@@ -834,7 +944,7 @@ func loadManagerAbe(ns walletdb.ReadBucket, pubPassphrase []byte,
 	// database.
 	mgr := newManagerAbe(
 		chainParams, &masterKeyPub, &masterKeyPriv,
-		cryptoKeyPub, cryptoKeyPrivEnc, cryptoKeyScriptEnc, syncInfo,
+		cryptoKeyPub, cryptoKeySeedEnc, cryptoKeyPrivEnc, cryptoKeyScriptEnc, syncInfo,
 		birthday, privPassphraseSalt, payeeManagers, watchingOnly,
 	)
 
@@ -1039,7 +1149,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 		cryptoKeySeedEnc, err =
 			masterKeyPriv.Encrypt(cryptoKeySeed.Bytes())
 		if err != nil {
-			str := "failed to encrypt crypto private key"
+			str := "failed to encrypt crypto seed key"
 			return managerError(ErrCrypto, str, err)
 		}
 		// Generate the BIP0044 HD key structure to ensure the
@@ -1047,7 +1157,6 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 		// issues.
 
 		// Derive the master extended key from the seed.
-		//	todo(ABE): generate the master public key, master secret view key, and master secret spend key.
 		//rootKey, err := hdkeychain.NewMaster(seed, chainParams)
 		//if err != nil {
 		//	str := "failed to derive master extended key"
@@ -1059,7 +1168,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 		//	return managerError(ErrKeyChain, str, err)
 		//}
 
-		// generate a more longer seed from origin seed
+		// generate a longer seed from origin seed via hash function such as shake256
 		seedLength := len(seed)
 		usedSeed := make([]byte, seedLength*2)
 		shake256 := sha3.NewShake256()
@@ -1081,9 +1190,9 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 			return maybeConvertDbError(err)
 		}
 
+		startSeedStatus := uint64(0)
 		// generate an address and information for spending
-		serializedCryptoAddress, serializedVSk, serializedASksp, serializedASksn, err := generateAddressSk(usedSeed, 2*len(seed), 0)
-
+		serializedCryptoAddress, serializedVSk, serializedASksp, serializedASksn, err := generateAddressSk(usedSeed, 2*len(seed), startSeedStatus)
 		if err != nil {
 			return fmt.Errorf("failed to generate address and key")
 		}
@@ -1107,12 +1216,11 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 		//		return maybeConvertDbError(err)
 		//	}
 		//}
-
+		addKey := chainhash.DoubleHashB(serializedCryptoAddress[4:7684])
 		// Before we proceed, we'll also store the root master private
 		// key within the database in an encrypted format. This is
 		// required as in the future, we may need to create additional
 		// scoped key managers.
-
 		//masterHDPrivKeyEnc, err :=
 		//	cryptoKeyPriv.Encrypt([]byte(rootKey.String()))
 		//if err != nil {
@@ -1123,6 +1231,16 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 		//if err != nil {
 		//	return maybeConvertDbError(err)
 		//}
+
+		err = putSeedAbe(ns, seedEnc)
+		if err != nil {
+			return maybeConvertDbError(err)
+		}
+		err = putSeedStatusAbe(ns, startSeedStatus)
+		if err != nil {
+			return maybeConvertDbError(err)
+		}
+
 		addressSecretKeySpEnc, err :=
 			cryptoKeyPriv.Encrypt(serializedASksp)
 		if err != nil {
@@ -1144,11 +1262,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 			return maybeConvertDbError(err)
 		}
 
-		err = putSeedAbe(ns, seedEnc)
-		if err != nil {
-			return maybeConvertDbError(err)
-		}
-		err = putAddressKeysAbe(ns, 0, valueSecretKeyEnc,
+		err = putAddressKeysEncAbe(ns, addKey, valueSecretKeyEnc,
 			addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
 		if err != nil {
 			return maybeConvertDbError(err)
@@ -1191,7 +1305,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 	return putBirthday(ns, birthday.Add(-48*time.Hour))
 }
 
-func generateAddressSk(seed []byte, length int, cnt int) ([]byte, []byte, []byte, []byte, error) {
+func generateAddressSk(seed []byte, length int, cnt uint64) ([]byte, []byte, []byte, []byte, error) {
 	if len(seed) != length {
 		return nil, nil, nil, nil, errors.New("the length of given seed is not matched")
 	}
@@ -1200,16 +1314,44 @@ func generateAddressSk(seed []byte, length int, cnt int) ([]byte, []byte, []byte
 
 	shake256 := sha3.NewShake256()
 	shake256.Reset()
-	tmp := make([]byte, halfLength+3)
+	var tmp []byte
 	copy(tmp, seed[:halfLength])
-	tmp = append(tmp, 'N', 'o', byte(cnt))
+	if cnt == 0 {
+		// TODO: would be delete, just for compatibility to branch 20220322release
+		tmp = make([]byte, halfLength+3)
+		tmp = append(tmp, 'N', 'o', byte(cnt))
+	} else {
+		tmp = make([]byte, halfLength+10)
+		tmp = append(tmp, 'N', 'o')
+		tmp = append(tmp, byte(cnt>>0))
+		tmp = append(tmp, byte(cnt>>1))
+		tmp = append(tmp, byte(cnt>>2))
+		tmp = append(tmp, byte(cnt>>3))
+		tmp = append(tmp, byte(cnt>>4))
+		tmp = append(tmp, byte(cnt>>5))
+		tmp = append(tmp, byte(cnt>>6))
+		tmp = append(tmp, byte(cnt>>7))
+	}
 	shake256.Write(tmp)
 	shake256.Read(usedSeed[:halfLength])
 
 	shake256.Reset()
-	tmp = make([]byte, halfLength+3)
 	copy(tmp, seed[halfLength:])
-	tmp = append(tmp, 'N', 'o', byte(cnt))
+	if cnt == 0 {
+		tmp = make([]byte, halfLength+3)
+		tmp = append(tmp, 'N', 'o', byte(cnt))
+	} else {
+		tmp = make([]byte, halfLength+10)
+		tmp = append(tmp, 'N', 'o')
+		tmp = append(tmp, byte(cnt>>0))
+		tmp = append(tmp, byte(cnt>>1))
+		tmp = append(tmp, byte(cnt>>2))
+		tmp = append(tmp, byte(cnt>>3))
+		tmp = append(tmp, byte(cnt>>4))
+		tmp = append(tmp, byte(cnt>>5))
+		tmp = append(tmp, byte(cnt>>6))
+		tmp = append(tmp, byte(cnt>>7))
+	}
 	shake256.Write(tmp)
 	shake256.Read(usedSeed[halfLength:])
 

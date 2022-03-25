@@ -1686,17 +1686,6 @@ out:
 				if w.ManagerAbe.IsLocked() {
 					return fmt.Errorf("the wallet is locked")
 				}
-				_, _, addressSecretSnEnc, _, err := w.ManagerAbe.FetchAddressKeysAbe(waddrmgrNs)
-				if err != nil {
-					return err
-				}
-				asksnBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPrivate, addressSecretSnEnc)
-				if err != nil {
-					return err
-				}
-				if err != nil {
-					return err
-				}
 				err = wtxmgr.ForEachNeedUpdateUTXORing(wtxmgrNs, func(k, v []byte) error {
 					utxoring, err := wtxmgr.FetchUTXORing(wtxmgrNs, k)
 					if err != nil {
@@ -1708,10 +1697,22 @@ out:
 					}
 					for i := 0; i < len(utxoring.IsMy); i++ {
 						if utxoring.IsMy[i] && (utxoring.OriginSerialNumberes == nil || bytes.Equal(utxoring.OriginSerialNumberes[uint8(i)], chainhash.ZeroHash[:])) {
+							coinAddr, err := abecrypto.CryptoPP.ExtractCoinAddressFromTxoScript(ring.TxoScripts[i])
+							if err != nil {
+								return err
+							}
+							_, _, asksnEnc, _, err := w.ManagerAbe.FetchAddressKeyEncAbe(waddrmgrNs, coinAddr)
+							if err != nil {
+								return err
+							}
+							_, _, asksn, _, err := w.ManagerAbe.DecryptAddressKey(nil, nil, asksnEnc, nil)
+							if err != nil {
+								return err
+							}
 							sn := abecrypto.CryptoPP.TxoSerialNumberGen(&wire.TxOutAbe{
 								Version:   ring.Version,
 								TxoScript: ring.TxoScripts[i],
-							}, utxoring.RingHash, asksnBytes)
+							}, utxoring.RingHash, asksn)
 							if err != nil {
 								return err
 							}
@@ -3859,6 +3860,60 @@ func (w *Wallet) NewChangeAddress(account uint32,
 		return nil, err
 	}
 
+	return addr, nil
+}
+
+func (w *Wallet) NewAddressKeyAbe() ([]byte, error) {
+	var addr []byte
+	err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+		addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+		var err error
+		seedEnc, err := w.ManagerAbe.FetchSeedEncAbe(addrmgrNs)
+		if err != nil {
+			return err
+		}
+		seed, err := w.ManagerAbe.Decrypt(waddrmgr.CKTSeed, seedEnc)
+		if err != nil {
+			return err
+		}
+		var serializedASksp, serializedASksn, serializedVSk []byte
+		addr, serializedASksp, serializedASksn, serializedVSk, err = w.ManagerAbe.GenerateAddressKeysAbe(addrmgrNs, seed)
+		if err != nil {
+			return err
+		}
+		addressSecretKeySpEnc, err :=
+			w.ManagerAbe.Encrypt(waddrmgr.CKTPrivate, serializedASksp)
+		if err != nil {
+			return err
+		}
+		addressSecretKeySnEnc, err :=
+			w.ManagerAbe.Encrypt(waddrmgr.CKTPrivate, serializedASksn)
+		if err != nil {
+			return err
+		}
+		addressKeyEnc, err :=
+			w.ManagerAbe.Encrypt(waddrmgr.CKTPublic, addr)
+		if err != nil {
+			return err
+		}
+		valueSecretKeyEnc, err :=
+			w.ManagerAbe.Encrypt(waddrmgr.CKTPublic, serializedVSk)
+		if err != nil {
+			return err
+		}
+		addKey := chainhash.DoubleHashB(addr)
+
+		err = w.ManagerAbe.PutAddressKeysEncAbe(addrmgrNs, addKey[:], valueSecretKeyEnc,
+			addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
+		if err != nil {
+			return err
+		}
+
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
 	return addr, nil
 }
 
