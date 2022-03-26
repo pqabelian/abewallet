@@ -736,9 +736,6 @@ func fetchAddressKeyEncAbe(ns walletdb.ReadBucket, addrKey []byte) ([]byte, []by
 	askspEnc := askspBucket.Get(addrKey)
 	asksnBucket := mainBucket.NestedReadBucket(asksnBukcetName)
 	asksnEnc := asksnBucket.Get(addrKey)
-	if addrEnc == nil || vskEnc == nil || askspEnc == nil || asksnEnc == nil {
-		return nil, nil, nil, nil, errors.New("there are something wrong or no such addrKey exist")
-	}
 	return addrEnc, askspEnc, asksnEnc, vskEnc, nil
 }
 

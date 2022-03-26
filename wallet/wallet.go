@@ -1702,7 +1702,7 @@ out:
 								return err
 							}
 							_, _, asksnEnc, _, err := w.ManagerAbe.FetchAddressKeyEncAbe(waddrmgrNs, coinAddr)
-							if err != nil {
+							if asksnEnc == nil || err != nil {
 								return err
 							}
 							_, _, asksn, _, err := w.ManagerAbe.DecryptAddressKey(nil, nil, asksnEnc, nil)
@@ -3877,7 +3877,7 @@ func (w *Wallet) NewAddressKeyAbe() ([]byte, error) {
 			return err
 		}
 		var serializedASksp, serializedASksn, serializedVSk []byte
-		addr, serializedASksp, serializedASksn, serializedVSk, err = w.ManagerAbe.GenerateAddressKeysAbe(addrmgrNs, seed)
+		addr, serializedVSk, serializedASksp, serializedASksn, err = w.ManagerAbe.GenerateAddressKeysAbe(addrmgrNs, seed)
 		if err != nil {
 			return err
 		}
@@ -3901,7 +3901,8 @@ func (w *Wallet) NewAddressKeyAbe() ([]byte, error) {
 		if err != nil {
 			return err
 		}
-		addKey := chainhash.DoubleHashB(addr)
+
+		addKey := chainhash.DoubleHashB(addr[4:7684])
 
 		err = w.ManagerAbe.PutAddressKeysEncAbe(addrmgrNs, addKey[:], valueSecretKeyEnc,
 			addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)

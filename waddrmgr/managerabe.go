@@ -1319,18 +1319,23 @@ func generateAddressSk(seed []byte, length int, cnt uint64) ([]byte, []byte, []b
 	if cnt == 0 {
 		// TODO: would be delete, just for compatibility to branch 20220322release
 		tmp = make([]byte, halfLength+3)
-		tmp = append(tmp, 'N', 'o', byte(cnt))
+		copy(tmp[:halfLength], seed)
+		tmp[halfLength+0] = 'N'
+		tmp[halfLength+1] = 'o'
+		tmp[halfLength+2] = byte(cnt)
 	} else {
 		tmp = make([]byte, halfLength+10)
-		tmp = append(tmp, 'N', 'o')
-		tmp = append(tmp, byte(cnt>>0))
-		tmp = append(tmp, byte(cnt>>1))
-		tmp = append(tmp, byte(cnt>>2))
-		tmp = append(tmp, byte(cnt>>3))
-		tmp = append(tmp, byte(cnt>>4))
-		tmp = append(tmp, byte(cnt>>5))
-		tmp = append(tmp, byte(cnt>>6))
-		tmp = append(tmp, byte(cnt>>7))
+		copy(tmp[:halfLength], seed)
+		tmp[halfLength+0] = 'N'
+		tmp[halfLength+1] = 'o'
+		tmp[halfLength+2] = byte(cnt >> 0)
+		tmp[halfLength+3] = byte(cnt >> 1)
+		tmp[halfLength+4] = byte(cnt >> 2)
+		tmp[halfLength+5] = byte(cnt >> 3)
+		tmp[halfLength+6] = byte(cnt >> 4)
+		tmp[halfLength+7] = byte(cnt >> 5)
+		tmp[halfLength+8] = byte(cnt >> 6)
+		tmp[halfLength+9] = byte(cnt >> 7)
 	}
 	shake256.Write(tmp)
 	shake256.Read(usedSeed[:halfLength])

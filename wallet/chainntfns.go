@@ -112,13 +112,15 @@ func (w *Wallet) handleChainNotifications() {
 						if err != nil {
 							return err
 						}
-						addrBytes, _, _, vskBytes, err := w.ManagerAbe.DecryptAddressKey(addrBytesEnc, nil, nil, vskBytesEnc)
-						if err != nil {
-							return err
+						if addrBytesEnc != nil && vskBytesEnc != nil {
+							addrBytes, _, _, vskBytes, err := w.ManagerAbe.DecryptAddressKey(addrBytesEnc, nil, nil, vskBytesEnc)
+							if err != nil {
+								return err
+							}
+							addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
+							coinAddrToVSK[addrKey] = vskBytes
+							coinAddrToInstanceAddr[addrKey] = addrBytes
 						}
-						addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
-						coinAddrToVSK[addrKey] = vskBytes
-						coinAddrToInstanceAddr[addrKey] = addrBytes
 					}
 				}
 
@@ -352,13 +354,15 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 			if err != nil {
 				return err
 			}
-			addrBytes, _, _, vskBytes, err := w.ManagerAbe.DecryptAddressKey(addrBytesEnc, nil, nil, vskBytesEnc)
-			if err != nil {
-				return err
+			if addrBytesEnc != nil && vskBytesEnc != nil {
+				addrBytes, _, _, vskBytes, err := w.ManagerAbe.DecryptAddressKey(addrBytesEnc, nil, nil, vskBytesEnc)
+				if err != nil {
+					return err
+				}
+				addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
+				coinAddrToVSK[addrKey] = vskBytes
+				coinAddrToInstanceAddr[addrKey] = addrBytes
 			}
-			addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
-			coinAddrToVSK[addrKey] = vskBytes
-			coinAddrToInstanceAddr[addrKey] = addrBytes
 		}
 	}
 

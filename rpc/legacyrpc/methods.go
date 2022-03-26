@@ -1753,7 +1753,6 @@ func sendMany(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	return sendPairs(w, pairs, account, minConf, txrules.DefaultRelayFeePerKb)
 }
 func generateAddressAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	// TODO:add a GenerateAddressCmd
 	_ = icmd.(*abejson.GenerateAddressCmd)
 
 	var err error
