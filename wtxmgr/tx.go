@@ -1949,7 +1949,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 
 		// traverse all outputs of a transaction and check if it is ours
 		for j := 0; j < len(txi.TxOuts); j++ {
-			coinAddr, err := abecrypto.CryptoPP.ExtractCoinAddressFromTxoScript(coinbaseTx.TxOuts[i].TxoScript)
+			coinAddr, err := abecrypto.CryptoPP.ExtractCoinAddressFromTxoScript(txi.TxOuts[j].TxoScript)
 			if err != nil {
 				return err
 			}
