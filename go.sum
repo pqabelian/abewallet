@@ -1,7 +1,7 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/abesuite/abec v0.9.0-beta.0.20220325150238-a6dffa7dcc4a h1:op23DoSiar/ZkLPUUmeTvWJVjnDfvnM3Qcq3sL17rFY=
-github.com/abesuite/abec v0.9.0-beta.0.20220325150238-a6dffa7dcc4a/go.mod h1:e9WwwIuL/xxlsBXKP230SkJViq7U3wqFqMvjWVNAaks=
+github.com/abesuite/abec v0.9.0-beta.0.20220326043758-77735d68e189 h1:cX4xK2Qz4+zM4gYU8Yc6oSNslDhMipXnJOLt7uuttnM=
+github.com/abesuite/abec v0.9.0-beta.0.20220326043758-77735d68e189/go.mod h1:t8EQka5NlEQA6g+WOSLff9OVIL3ZMxF9FJwDv0lV1Zs=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd h1:BNI2MkhhtofxM0sTP8WmdcT4chaAKZOsyhspB58DSrM=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd/go.mod h1:eo8+6JwPaqdnrzzGmGXEH3nOYknOkk8GtuXw7Bo+f08=
 github.com/abesuite/go-spew v1.1.1 h1:8v1IQu/pRuElOpgwrBLmtxsSTEEK+fCBBOw4VYE9fx8=
@@ -13,8 +13,8 @@ github.com/cncf/udpa/go v0.0.0-20191209042840-269d4d468f6f/go.mod h1:M8M6+tZqaGX
 github.com/cryptosuite/kyber-go v0.0.0-20200701012546-a87ecb4b2ce3/go.mod h1:1G0Jh7bXJGSUCTrC6ZB9lFpmCF+VFQehDqIwm9dJU3s=
 github.com/cryptosuite/kyber-go v0.0.2-alpha h1:JHvNqZho24qJq7c4JnyKGtyQuF03VOeEH7TcsKk8yZc=
 github.com/cryptosuite/kyber-go v0.0.2-alpha/go.mod h1:1G0Jh7bXJGSUCTrC6ZB9lFpmCF+VFQehDqIwm9dJU3s=
-github.com/cryptosuite/pqringct v0.0.2-alpha.0.20220325125827-1a075a0505e0 h1:oVFJencUEWGQazNdVbZUchnkYPhC1mHZurk+0qrmm+g=
-github.com/cryptosuite/pqringct v0.0.2-alpha.0.20220325125827-1a075a0505e0/go.mod h1:kJOGcHk4w5NNw2KDnVrGDPpUJr/H21+KnM6yjtu+7UA=
+github.com/cryptosuite/pqringct v0.0.2-alpha.0.20220326040330-1061f4aa4edb h1:cJ6A+/vV3nUCU96p/rs55mocNlg6tpdmkZwuxSBDirM=
+github.com/cryptosuite/pqringct v0.0.2-alpha.0.20220326040330-1061f4aa4edb/go.mod h1:kJOGcHk4w5NNw2KDnVrGDPpUJr/H21+KnM6yjtu+7UA=
 github.com/cryptosuite/salrs-go v0.0.0-20200918155434-c02eea3b36d1 h1:vN3Cibtye7f3YuPvrJWG4Kp/jrb/XfxS5oIwl8XZBQY=
 github.com/cryptosuite/salrs-go v0.0.0-20200918155434-c02eea3b36d1/go.mod h1:mJeCa86eOqj3kCJO+O4245Wnq5U07P9K9RfJplI8bQ4=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
