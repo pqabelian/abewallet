@@ -263,12 +263,12 @@ func PublicPass(reader *bufio.Reader, privPass []byte,
 // the user along with prompting them for confirmation.  When the user answers
 // yes, a the user is prompted for it.  All prompts are repeated until the user
 // enters a valid response.
-func Seed(reader *bufio.Reader) ([]byte, error) {
+func Seed(reader *bufio.Reader) ([]byte, uint64, error) {
 	// Ascertain the wallet generation seed.
 	useUserSeed, err := promptListBool(reader, "Do you have an "+
 		"existing wallet seed you want to use?", "no")
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if !useUserSeed {
 		//seed, err := hdkeychain.GenerateSeed(hdkeychain.RecommendedSeedLen)
@@ -277,7 +277,7 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 		seed := make([]byte, 32)
 		_, err := rand.Read(seed)
 		if err != nil {
-			return nil, errors.New("rand.Read() error in Seed()")
+			return nil, 0, errors.New("rand.Read() error in Seed()")
 		}
 		mnemonics := seedToWords(seed, wordlists.English)
 		fmt.Println("Your wallet generation seed is:")
@@ -297,7 +297,7 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 				`and secure location, enter "OK" to continue: `)
 			confirmSeed, err := reader.ReadString('\n')
 			if err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 			confirmSeed = strings.TrimSpace(confirmSeed)
 			confirmSeed = strings.Trim(confirmSeed, `"`)
@@ -309,7 +309,7 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 		tmp := make([]byte, 4, 4+32)
 		binary.BigEndian.PutUint32(tmp[0:4], uint32(abecrypto.CryptoSchemePQRINGCTV2))
 		seed = append(tmp, seed[:]...)
-		return seed, nil
+		return seed, 0, nil
 	}
 
 	for {
@@ -318,15 +318,15 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 		versionStr = strings.TrimSpace(strings.ToLower(versionStr))
 		version, err := strconv.Atoi(versionStr)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if abecrypto.CryptoScheme(version) != abecrypto.CryptoSchemePQRINGCTV2 {
-			return nil, errors.New("unsupported scheme in this wallet version")
+			return nil, 0, errors.New("unsupported scheme in this wallet version")
 		}
 		fmt.Print("Enter existing wallet mnemonic: ")
 		seedStr, err := reader.ReadString('\n')
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		seedStr = strings.TrimSpace(strings.ToLower(seedStr))
 		mnemonics := strings.Split(seedStr, ",")
@@ -340,6 +340,15 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 			fmt.Printf("Invalid mnemonic word list specified\n")
 			continue
 		}
+
+		fmt.Print("Enter the restore number of address :")
+		numStr, err := reader.ReadString('\n')
+		numStr = strings.TrimSpace(numStr)
+		num, err := strconv.ParseUint(numStr, 10, 0)
+		if err != nil {
+			return nil, 0, err
+		}
+
 		seed = seed[:32]
 		//seed, err := hex.DecodeString(seedStr)
 		//TODO(abe20210801):remove the salrs dependency
@@ -358,7 +367,7 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 		tmp := make([]byte, 4, 4+32)
 		binary.BigEndian.PutUint32(tmp[0:4], uint32(version))
 		seed = append(tmp, seed[:]...)
-		return seed, nil
+		return seed, num, nil
 	}
 }
 

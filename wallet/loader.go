@@ -103,11 +103,11 @@ func (l *Loader) CreateNewWallet(pubPassphrase, privPassphrase, seed []byte,
 		pubPassphrase, privPassphrase, seed, bday, false,
 	)
 }
-func (l *Loader) CreateNewWalletAbe(pubPassphrase, privPassphrase, seed []byte,
+func (l *Loader) CreateNewWalletAbe(pubPassphrase, privPassphrase, seed []byte, end uint64,
 	bday time.Time) (*Wallet, error) {
 
 	return l.createNewWalletAbe(
-		pubPassphrase, privPassphrase, seed, bday, false,
+		pubPassphrase, privPassphrase, seed, end, bday, false,
 	)
 }
 
@@ -179,7 +179,7 @@ func (l *Loader) createNewWallet(pubPassphrase, privPassphrase,
 
 //TODO(abe):
 func (l *Loader) createNewWalletAbe(pubPassphrase, privPassphrase,
-	seed []byte, bday time.Time, isWatchingOnly bool) (*Wallet, error) {
+	seed []byte, end uint64, bday time.Time, isWatchingOnly bool) (*Wallet, error) {
 
 	defer l.mu.Unlock()
 	l.mu.Lock()
@@ -215,7 +215,7 @@ func (l *Loader) createNewWalletAbe(pubPassphrase, privPassphrase,
 		}
 	} else {
 		err = CreateAbe(
-			db, pubPassphrase, privPassphrase, seed, l.chainParams, bday,
+			db, pubPassphrase, privPassphrase, seed, end, l.chainParams, bday,
 		)
 		if err != nil {
 			return nil, err

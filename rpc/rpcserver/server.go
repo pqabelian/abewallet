@@ -733,6 +733,7 @@ func (s *loaderServer) CreateWallet(ctx context.Context, req *pb.CreateWalletReq
 
 	return &pb.CreateWalletResponse{}, nil
 }
+
 //TODO(abe):
 func (s *loaderServer) CreateWalletAbe(ctx context.Context, req *pb.CreateWalletRequest) (
 	*pb.CreateWalletResponse, error) {
@@ -748,8 +749,8 @@ func (s *loaderServer) CreateWalletAbe(ctx context.Context, req *pb.CreateWallet
 		pubPassphrase = []byte(wallet.InsecurePubPassphrase)
 	}
 
-	wallet, err := s.loader.CreateNewWalletAbe(
-		pubPassphrase, req.PrivatePassphrase, req.Seed, time.Now(),
+	createdWallet, err := s.loader.CreateNewWalletAbe(
+		pubPassphrase, req.PrivatePassphrase, req.Seed, 0, time.Now(),
 	)
 	if err != nil {
 		return nil, translateError(err)
@@ -757,7 +758,7 @@ func (s *loaderServer) CreateWalletAbe(ctx context.Context, req *pb.CreateWallet
 
 	s.mu.Lock()
 	if s.rpcClient != nil {
-		wallet.SynchronizeRPC(s.rpcClient)
+		createdWallet.SynchronizeRPC(s.rpcClient)
 	}
 	s.mu.Unlock()
 

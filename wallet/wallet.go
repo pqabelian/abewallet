@@ -5097,11 +5097,11 @@ func Create(db walletdb.DB, pubPass, privPass, seed []byte,
 }
 
 // TODO(abe):
-func CreateAbe(db walletdb.DB, pubPass, privPass, seed []byte,
+func CreateAbe(db walletdb.DB, pubPass, privPass, seed []byte, end uint64,
 	params *chaincfg.Params, birthday time.Time) error {
 
 	return createAbe(
-		db, pubPass, privPass, seed, params, birthday, false,
+		db, pubPass, privPass, seed, end, params, birthday, false,
 	)
 }
 
@@ -5122,7 +5122,7 @@ func CreateWatchingOnlyAbe(db walletdb.DB, pubPass []byte,
 	params *chaincfg.Params, birthday time.Time) error {
 
 	return createAbe(
-		db, pubPass, nil, nil, params, birthday, true,
+		db, pubPass, nil, nil, 0, params, birthday, true,
 	)
 }
 
@@ -5171,9 +5171,10 @@ func create(db walletdb.DB, pubPass, privPass, seed []byte,
 }
 
 // TODO(abe):
-func createAbe(db walletdb.DB, pubPass, privPass, seed []byte,
+func createAbe(db walletdb.DB, pubPass, privPass, seed []byte, end uint64,
 	params *chaincfg.Params, birthday time.Time, isWatchingOnly bool) error {
 	// TODO(20220321):the length of seed should be a global paramter in config
+	// TODO: the following snippet is not run?
 	seedLength := 32
 	if !isWatchingOnly {
 		// If a seed was provided, ensure that it is of valid length. Otherwise,
@@ -5210,7 +5211,7 @@ func createAbe(db walletdb.DB, pubPass, privPass, seed []byte,
 		}
 
 		err = waddrmgr.CreateAbe(
-			addrmgrNs, seed, pubPass, privPass, params, nil, birthday,
+			addrmgrNs, seed, pubPass, privPass, end, params, nil, birthday,
 		)
 		if err != nil {
 			return err

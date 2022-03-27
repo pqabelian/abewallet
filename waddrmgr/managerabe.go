@@ -1019,7 +1019,7 @@ func OpenAbe(ns walletdb.ReadBucket, pubPassphrase []byte,
 // pubpassphrase -> masterkeypub     | [cryptoKeyPub -> 				 masterPubKey]
 
 func CreateAbe(ns walletdb.ReadWriteBucket,
-	seed, pubPassphrase, privPassphrase []byte,
+	seed, pubPassphrase, privPassphrase []byte, end uint64,
 	chainParams *chaincfg.Params, config *ScryptOptions,
 	birthday time.Time) error {
 
@@ -1190,7 +1190,43 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 			return maybeConvertDbError(err)
 		}
 
-		startSeedStatus := uint64(0)
+		// restore the previous address
+		for i := uint64(0); i < end; i++ {
+			// generate an address and information for spending
+			serializedCryptoAddress, serializedVSk, serializedASksp, serializedASksn, err := generateAddressSk(usedSeed, 2*len(seed), i)
+			if err != nil {
+				return fmt.Errorf("failed to generate address and key")
+			}
+			addKey := chainhash.DoubleHashB(serializedCryptoAddress[4:7684])
+			addressSecretKeySpEnc, err :=
+				cryptoKeyPriv.Encrypt(serializedASksp)
+			if err != nil {
+				return maybeConvertDbError(err)
+			}
+			addressSecretKeySnEnc, err :=
+				cryptoKeyPriv.Encrypt(serializedASksn)
+			if err != nil {
+				return maybeConvertDbError(err)
+			}
+			addressKeyEnc, err :=
+				cryptoKeyPub.Encrypt(serializedCryptoAddress)
+			if err != nil {
+				return maybeConvertDbError(err)
+			}
+			valueSecretKeyEnc, err :=
+				cryptoKeyPub.Encrypt(serializedVSk)
+			if err != nil {
+				return maybeConvertDbError(err)
+			}
+
+			err = putAddressKeysEncAbe(ns, addKey, valueSecretKeyEnc,
+				addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
+			if err != nil {
+				return maybeConvertDbError(err)
+			}
+		}
+
+		startSeedStatus := end
 		// generate an address and information for spending
 		serializedCryptoAddress, serializedVSk, serializedASksp, serializedASksn, err := generateAddressSk(usedSeed, 2*len(seed), startSeedStatus)
 		if err != nil {
@@ -1216,6 +1252,8 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 		//		return maybeConvertDbError(err)
 		//	}
 		//}
+		// TODO: not hardcode, check the version and using the method of
+		//  public parameter to get the address public key
 		addKey := chainhash.DoubleHashB(serializedCryptoAddress[4:7684])
 		// Before we proceed, we'll also store the root master private
 		// key within the database in an encrypted format. This is
