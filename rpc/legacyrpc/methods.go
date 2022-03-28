@@ -1770,6 +1770,12 @@ func generateAddressAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 	b = append(b, hash...)
 	return hex.EncodeToString(b), nil
 }
+func freshen(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	_ = icmd.(*abejson.FreshenCmd)
+
+	flag, err := w.Refresh()
+	return flag, err
+}
 
 func sendToAddressesAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.SendToPayeesCmd)
@@ -2411,12 +2417,6 @@ func walletPassphrase(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 		unlockAfter = time.After(timeout)
 	}
 	err := w.Unlock([]byte(cmd.Passphrase), unlockAfter)
-	return nil, err
-}
-func freshen(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.FreshenCmd)
-
-	err := w.Refresh([]byte(cmd.Passphrase))
 	return nil, err
 }
 

@@ -109,10 +109,10 @@ type Wallet struct {
 	// Channel for transaction creation requests.
 	createTxRequests    chan createTxRequest
 	createTxAbeRequests chan createTxAbeRequest
+	refreshRequests     chan refreshRequest
 
 	// Channels for the manager locker.
 	unlockRequests     chan unlockRequest
-	refreshRequests    chan refreshRequest
 	lockRequests       chan struct{}
 	holdUnlockRequests chan chan heldUnlock
 	lockState          chan bool
@@ -156,9 +156,11 @@ func (w *Wallet) Start() {
 	w.quitMu.Unlock()
 
 	//w.wg.Add(2)
-	w.wg.Add(3)
+	//w.wg.Add(3)
+	w.wg.Add(4)
 	go w.txCreator() // TODO(abe) :this go routine will be delete   ,and the Add will be modified
 	go w.txAbeCreator()
+	go w.ringFresher()
 	go w.walletLocker()
 }
 
@@ -1498,6 +1500,9 @@ type (
 		dryRun            bool
 		resp              chan createTxAbeResponse
 	}
+	refreshRequest struct {
+		resp chan refreshResponse
+	}
 	createTxResponse struct {
 		tx  *txauthor.AuthoredTx
 		err error
@@ -1505,6 +1510,10 @@ type (
 	createTxAbeResponse struct {
 		tx  *txauthor.AuthoredTxAbe
 		err error
+	}
+	refreshResponse struct {
+		flag bool
+		err  error
 	}
 )
 
@@ -1562,124 +1571,17 @@ out:
 	w.wg.Done()
 }
 
-// CreateSimpleTx creates a new signed transaction spending unspent P2PKH
-// outputs with at least minconf confirmations spending to any number of
-// address/amount pairs.  Change and an appropriate transaction fee are
-// automatically included, if necessary.  All transaction creation through this
-// function is serialized to prevent the creation of many transactions which
-// spend the same outputs.
-//
-// NOTE: The dryRun argument can be set true to create a tx that doesn't alter
-// the database. A tx created with this set to true SHOULD NOT be broadcasted.
-func (w *Wallet) CreateSimpleTx(account uint32, outputs []*wire.TxOut,
-	minconf int32, satPerKb abeutil.Amount, dryRun bool) (
-	*txauthor.AuthoredTx, error) {
-
-	req := createTxRequest{
-		account:     account,
-		outputs:     outputs,
-		minconf:     minconf,
-		feeSatPerKB: satPerKb,
-		dryRun:      dryRun,
-		resp:        make(chan createTxResponse),
-	}
-	w.createTxRequests <- req
-	resp := <-req.resp
-	return resp.tx, resp.err
-}
-
-func (w *Wallet) CreateSimpleTxAbe(outputDescs []*abecrypto.AbeTxOutDesc, minconf int32,
-	feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, dryRun bool) (*txauthor.AuthoredTxAbe, error) {
-
-	req := createTxAbeRequest{
-		txOutDescs:        outputDescs,
-		minconf:           minconf,
-		feePerKbSpecified: feePerKbSpecified,
-		feeSpecified:      feeSpecified,
-		utxoSpecified:     utxoSpecified,
-		dryRun:            dryRun,
-		resp:              make(chan createTxAbeResponse),
-	}
-	w.createTxAbeRequests <- req
-	resp := <-req.resp
-	return resp.tx, resp.err
-}
-
-type (
-	unlockRequest struct {
-		passphrase []byte
-		lockAfter  <-chan time.Time // nil prevents the timeout.
-		err        chan error
-	}
-	refreshRequest struct {
-		passphrase []byte
-		refreshed  chan bool // refreshed channel
-		err        chan error
-	}
-
-	changePassphraseRequest struct {
-		old, new []byte
-		private  bool
-		err      chan error
-	}
-
-	changePassphrasesRequest struct {
-		publicOld, publicNew   []byte
-		privateOld, privateNew []byte
-		err                    chan error
-	}
-
-	// heldUnlock is a tool to prevent the wallet from automatically
-	// locking after some timeout before an operation which needed
-	// the unlocked wallet has finished.  Any aquired heldUnlock
-	// *must* be released (preferably with a defer) or the wallet
-	// will forever remain unlocked.
-	heldUnlock chan struct{}
-)
-
-// walletLocker manages the locked/unlocked state of a wallet.
-func (w *Wallet) walletLocker() {
-	var timeout <-chan time.Time
-	var refreshed chan bool
-	holdChan := make(heldUnlock)
+func (w *Wallet) ringFresher() {
 	quit := w.quitChan()
 out:
 	for {
 		select {
-		case req := <-w.unlockRequests:
-			err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-				addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-				//return w.Manager.Unlock(addrmgrNs, req.passphrase)
-				return w.ManagerAbe.Unlock(addrmgrNs, req.passphrase)
-			})
-			if err != nil {
-				req.err <- err
-				continue
-			}
-			timeout = req.lockAfter
-			if timeout == nil {
-				log.Info("The wallet has been unlocked without a time limit")
-			} else {
-				log.Info("The wallet has been temporarily unlocked")
-			}
-			req.err <- nil
-			continue
 		case req := <-w.refreshRequests:
-			err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-				addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-				//return w.Manager.Unlock(addrmgrNs, req.passphrase)
-				return w.ManagerAbe.Unlock(addrmgrNs, req.passphrase)
-			})
+			heldUnlock, err := w.holdUnlock()
 			if err != nil {
-				req.err <- err
+				req.resp <- refreshResponse{false, err}
 				continue
 			}
-			//
-			refreshed = req.refreshed
-			if refreshed != nil {
-				log.Info("The wallet has been temporarily unlocked for refreshing")
-			}
-
 			err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 				waddrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
 				wtxmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
@@ -1712,7 +1614,7 @@ out:
 							sn := abecrypto.CryptoPP.TxoSerialNumberGen(&wire.TxOutAbe{
 								Version:   ring.Version,
 								TxoScript: ring.TxoScripts[i],
-							}, utxoring.RingHash, asksn)
+							}, utxoring.RingHash, i, asksn)
 							if err != nil {
 								return err
 							}
@@ -1763,12 +1665,127 @@ out:
 				return nil
 			})
 			if err != nil {
-				req.err <- err
+				req.resp <- refreshResponse{false, err}
 			} else {
-				req.err <- nil
+				req.resp <- refreshResponse{true, nil}
 			}
-			refreshed <- true
 			continue
+			heldUnlock.release()
+
+		case <-quit:
+			break out
+		}
+	}
+	w.wg.Done()
+}
+
+// CreateSimpleTx creates a new signed transaction spending unspent P2PKH
+// outputs with at least minconf confirmations spending to any number of
+// address/amount pairs.  Change and an appropriate transaction fee are
+// automatically included, if necessary.  All transaction creation through this
+// function is serialized to prevent the creation of many transactions which
+// spend the same outputs.
+//
+// NOTE: The dryRun argument can be set true to create a tx that doesn't alter
+// the database. A tx created with this set to true SHOULD NOT be broadcasted.
+func (w *Wallet) CreateSimpleTx(account uint32, outputs []*wire.TxOut,
+	minconf int32, satPerKb abeutil.Amount, dryRun bool) (
+	*txauthor.AuthoredTx, error) {
+
+	req := createTxRequest{
+		account:     account,
+		outputs:     outputs,
+		minconf:     minconf,
+		feeSatPerKB: satPerKb,
+		dryRun:      dryRun,
+		resp:        make(chan createTxResponse),
+	}
+	w.createTxRequests <- req
+	resp := <-req.resp
+	return resp.tx, resp.err
+}
+
+func (w *Wallet) CreateSimpleTxAbe(outputDescs []*abecrypto.AbeTxOutDesc, minconf int32,
+	feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, dryRun bool) (*txauthor.AuthoredTxAbe, error) {
+
+	req := createTxAbeRequest{
+		txOutDescs:        outputDescs,
+		minconf:           minconf,
+		feePerKbSpecified: feePerKbSpecified,
+		feeSpecified:      feeSpecified,
+		utxoSpecified:     utxoSpecified,
+		dryRun:            dryRun,
+		resp:              make(chan createTxAbeResponse),
+	}
+	w.createTxAbeRequests <- req
+	resp := <-req.resp
+	return resp.tx, resp.err
+}
+
+func (w *Wallet) Refresh() (bool, error) {
+	req := refreshRequest{
+		resp: make(chan refreshResponse),
+	}
+	w.refreshRequests <- req
+	resp := <-req.resp
+	return resp.flag, resp.err
+}
+
+type (
+	unlockRequest struct {
+		passphrase []byte
+		lockAfter  <-chan time.Time // nil prevents the timeout.
+		err        chan error
+	}
+
+	changePassphraseRequest struct {
+		old, new []byte
+		private  bool
+		err      chan error
+	}
+
+	changePassphrasesRequest struct {
+		publicOld, publicNew   []byte
+		privateOld, privateNew []byte
+		err                    chan error
+	}
+
+	// heldUnlock is a tool to prevent the wallet from automatically
+	// locking after some timeout before an operation which needed
+	// the unlocked wallet has finished.  Any aquired heldUnlock
+	// *must* be released (preferably with a defer) or the wallet
+	// will forever remain unlocked.
+	heldUnlock chan struct{}
+)
+
+// walletLocker manages the locked/unlocked state of a wallet.
+func (w *Wallet) walletLocker() {
+	var timeout <-chan time.Time
+	var refreshed chan bool
+	holdChan := make(heldUnlock)
+	quit := w.quitChan()
+out:
+	for {
+		select {
+		case req := <-w.unlockRequests:
+			err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+				addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+				//return w.Manager.Unlock(addrmgrNs, req.passphrase)
+				return w.ManagerAbe.Unlock(addrmgrNs, req.passphrase)
+			})
+			if err != nil {
+				req.err <- err
+				continue
+			}
+			timeout = req.lockAfter
+			if timeout == nil {
+				log.Info("The wallet has been unlocked without a time limit")
+			} else {
+				log.Info("The wallet has been temporarily unlocked")
+			}
+			req.err <- nil
+			continue
+
 		case req := <-w.changePassphrase:
 			err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 				addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
@@ -1863,16 +1880,6 @@ func (w *Wallet) Unlock(passphrase []byte, lock <-chan time.Time) error {
 	w.unlockRequests <- unlockRequest{
 		passphrase: passphrase,
 		lockAfter:  lock,
-		err:        err,
-	}
-	return <-err
-}
-func (w *Wallet) Refresh(passphrase []byte) error {
-	err := make(chan error, 1)
-	refreshed := make(chan bool, 1)
-	w.refreshRequests <- refreshRequest{
-		passphrase: passphrase,
-		refreshed:  refreshed,
 		err:        err,
 	}
 	return <-err
