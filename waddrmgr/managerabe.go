@@ -1349,21 +1349,18 @@ func generateAddressSk(seed []byte, length int, cnt uint64) ([]byte, []byte, []b
 	}
 	usedSeed := make([]byte, length)
 	halfLength := length >> 1
-
+	//
 	shake256 := sha3.NewShake256()
 	shake256.Reset()
 	var tmp []byte
-	copy(tmp, seed[:halfLength])
 	if cnt == 0 {
 		// TODO: would be delete, just for compatibility to branch 20220322release
 		tmp = make([]byte, halfLength+3)
-		copy(tmp[:halfLength], seed)
-		tmp[halfLength+0] = 'N'
-		tmp[halfLength+1] = 'o'
-		tmp[halfLength+2] = byte(cnt)
+		copy(tmp, seed[:halfLength])
+		tmp = append(tmp, 'N', 'o', byte(cnt))
 	} else {
 		tmp = make([]byte, halfLength+10)
-		copy(tmp[:halfLength], seed)
+		copy(tmp, seed[:halfLength])
 		tmp[halfLength+0] = 'N'
 		tmp[halfLength+1] = 'o'
 		tmp[halfLength+2] = byte(cnt >> 0)
@@ -1379,12 +1376,13 @@ func generateAddressSk(seed []byte, length int, cnt uint64) ([]byte, []byte, []b
 	shake256.Read(usedSeed[:halfLength])
 
 	shake256.Reset()
-	copy(tmp, seed[halfLength:])
 	if cnt == 0 {
 		tmp = make([]byte, halfLength+3)
+		copy(tmp, seed[halfLength:])
 		tmp = append(tmp, 'N', 'o', byte(cnt))
 	} else {
 		tmp = make([]byte, halfLength+10)
+		copy(tmp, seed[halfLength:])
 		tmp = append(tmp, 'N', 'o')
 		tmp = append(tmp, byte(cnt>>0))
 		tmp = append(tmp, byte(cnt>>1))
