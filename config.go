@@ -112,6 +112,7 @@ type config struct {
 	MyVersion            string `long:"myversion" description:"Mnemonic version in non-interactive mode"`
 	MyMnemonic           string `long:"mymnemonic" description:"Mnemonic in non-interactive mode"`
 	MyPassword           string `long:"mypassword" description:"Password in non-interactive mode"`
+	MyRestoreNumber      uint64 `long:"myrestorenumber" description:"Number of restore address in non-interactive mode"`
 }
 
 // cleanAndExpandPath expands environement variables and leading ~ in the
