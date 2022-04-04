@@ -18,7 +18,7 @@ func SumOutputValues(outputs []*wire.TxOut) (totalOutput abeutil.Amount) {
 	}
 	return totalOutput
 }
-func SumOutputValuesAbe(txOutDescs []*abecrypto.AbeTxOutDesc) (totalOutput abeutil.Amount) {
+func SumOutputValuesAbe(txOutDescs []*abecrypto.AbeTxOutputDesc) (totalOutput abeutil.Amount) {
 	for _, txOut := range txOutDescs {
 		totalOutput += abeutil.Amount(txOut.GetValue())
 	}

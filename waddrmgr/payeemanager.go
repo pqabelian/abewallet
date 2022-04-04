@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto"
+	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abewallet/walletdb"
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	mathrand "math/rand"
@@ -136,14 +136,14 @@ func (p PayeeManager) Serialize() []byte {
 	return res
 }
 func (p *PayeeManager) Deserialize(b []byte) error {
-	offset:=0
-	totalSize := int(binary.BigEndian.Uint64(b[offset:offset+8]))
-	offset+=8
+	offset := 0
+	totalSize := int(binary.BigEndian.Uint64(b[offset : offset+8]))
+	offset += 8
 	if len(b) < totalSize {
 		return fmt.Errorf("wrong size of serialized payee manager")
 	}
-	nameSize := int(binary.BigEndian.Uint16(b[offset:offset+2]))
-	offset+=2
+	nameSize := int(binary.BigEndian.Uint16(b[offset : offset+2]))
+	offset += 2
 	p.name = string(b[offset : offset+nameSize])
 	offset += nameSize
 	numOfMPK := int(binary.BigEndian.Uint16(b[offset : offset+2]))
@@ -154,8 +154,8 @@ func (p *PayeeManager) Deserialize(b []byte) error {
 	for i := 0; i < numOfMPK; i++ {
 		lengthOfMPK := int(binary.BigEndian.Uint32(b[offset : offset+4]))
 		offset += 4
-		scheme := abecrypto.CryptoScheme(binary.BigEndian.Uint32(b[offset : offset+4]))
-		if scheme == abecrypto.CryptoSchemePQRINGCT {
+		scheme := abecryptoparam.CryptoScheme(binary.BigEndian.Uint32(b[offset : offset+4]))
+		if scheme == abecryptoparam.CryptoSchemePQRingCT {
 		} else {
 			return errors.New("unsupported address scheme")
 		}
@@ -167,9 +167,9 @@ func (p *PayeeManager) Deserialize(b []byte) error {
 		//case abecrypto.CryptoSchemePQRINGCT:
 		//
 		//}
-		mpk:=make([]byte,lengthOfMPK)
-		copy(mpk,b[offset:offset+lengthOfMPK])
-		offset+=lengthOfMPK
+		mpk := make([]byte, lengthOfMPK)
+		copy(mpk, b[offset:offset+lengthOfMPK])
+		offset += lengthOfMPK
 		p.mpks = append(p.mpks, mpk)
 	}
 	p.totalAmount = int64(binary.BigEndian.Uint64(b[offset : offset+8]))
@@ -177,7 +177,7 @@ func (p *PayeeManager) Deserialize(b []byte) error {
 	numOfStates := int(binary.BigEndian.Uint16(b[offset : offset+2]))
 	offset += 2
 	if p.states == nil {
-		p.states =make([]state,0,numOfStates)
+		p.states = make([]state, 0, numOfStates)
 	}
 	for i := 0; i < numOfStates; i++ {
 		s := new(state)

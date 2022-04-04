@@ -1462,8 +1462,8 @@ func makeOutputsAbe(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainPara
 	return outputs, nil
 }
 
-func makeOutputDescs(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) ([]*abecrypto.AbeTxOutDesc, error) {
-	outputDescs := make([]*abecrypto.AbeTxOutDesc, 0, len(pairs))
+func makeOutputDescs(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) ([]*abecrypto.AbeTxOutputDesc, error) {
+	outputDescs := make([]*abecrypto.AbeTxOutputDesc, 0, len(pairs))
 	for addrStr, amt := range pairs {
 		//payeeManager, err := w.FetchPayeeManager(name)
 		//if payeeManager == nil {

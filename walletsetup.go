@@ -7,7 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto"
+	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abewallet/wordlists"
 	"os"
@@ -326,7 +326,7 @@ func createWalletAbe(cfg *config) error {
 			}
 			mnemonics = prompt.SeedToWords(seed, wordlists.English)
 			tmp := make([]byte, 4, 4+32)
-			binary.BigEndian.PutUint32(tmp[0:4], uint32(abecrypto.CryptoSchemePQRINGCTV2))
+			binary.BigEndian.PutUint32(tmp[0:4], uint32(abecryptoparam.CryptoSchemePQRingCT))
 			seed = append(tmp, seed[:]...)
 		} else {
 			versionStr := strings.TrimSpace(strings.ToLower(cfg.MyVersion))

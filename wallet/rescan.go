@@ -3,6 +3,7 @@ package wallet
 import (
 	"encoding/hex"
 	"github.com/abesuite/abec/abecrypto"
+	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/txscript"
@@ -412,7 +413,7 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 				coinAddrToInstanceAddr := map[string][]byte{}
 				for j := 0; j < len(b.Transactions); j++ {
 					for k := 0; k < len(b.Transactions[j].TxOuts); k++ {
-						coinAddr, err := abecrypto.CryptoPP.ExtractCoinAddressFromTxoScript(b.Transactions[j].TxOuts[k].TxoScript)
+						coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(b.Transactions[j].TxOuts[k].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
 						if err != nil {
 							return err
 						}

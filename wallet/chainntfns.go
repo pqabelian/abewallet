@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/abesuite/abec/abecrypto"
+	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abec/wire"
@@ -104,7 +105,7 @@ func (w *Wallet) handleChainNotifications() {
 				coinAddrToInstanceAddr := map[string][]byte{}
 				for j := 0; j < len(b.Transactions); j++ {
 					for k := 0; k < len(b.Transactions[j].TxOuts); k++ {
-						coinAddr, err := abecrypto.CryptoPP.ExtractCoinAddressFromTxoScript(b.Transactions[j].TxOuts[k].TxoScript)
+						coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(b.Transactions[j].TxOuts[k].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
 						if err != nil {
 							return err
 						}
@@ -346,7 +347,7 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 	coinAddrToInstanceAddr := map[string][]byte{}
 	for j := 0; j < len(block.Transactions); j++ {
 		for k := 0; k < len(block.Transactions[j].TxOuts); k++ {
-			coinAddr, err := abecrypto.CryptoPP.ExtractCoinAddressFromTxoScript(block.Transactions[j].TxOuts[k].TxoScript)
+			coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(block.Transactions[j].TxOuts[k].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
 			if err != nil {
 				return err
 			}

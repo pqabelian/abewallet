@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abecrypto"
+	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abec/abejson"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/abeutil/hdkeychain"
@@ -1492,7 +1493,7 @@ type (
 		resp        chan createTxResponse
 	}
 	createTxAbeRequest struct {
-		txOutDescs        []*abecrypto.AbeTxOutDesc
+		txOutDescs        []*abecrypto.AbeTxOutputDesc
 		minconf           int32
 		feePerKbSpecified abeutil.Amount
 		feeSpecified      abeutil.Amount
@@ -1599,7 +1600,7 @@ out:
 					}
 					for i := 0; i < len(utxoring.IsMy); i++ {
 						if utxoring.IsMy[i] && (utxoring.OriginSerialNumberes == nil || bytes.Equal(utxoring.OriginSerialNumberes[uint8(i)], chainhash.ZeroHash[:])) {
-							coinAddr, err := abecrypto.CryptoPP.ExtractCoinAddressFromTxoScript(ring.TxoScripts[i])
+							coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(ring.TxoScripts[i], abecryptoparam.CryptoSchemePQRingCT)
 							if err != nil {
 								return err
 							}
@@ -1611,7 +1612,7 @@ out:
 							if err != nil {
 								return err
 							}
-							sn := abecrypto.CryptoPP.TxoSerialNumberGen(&wire.TxOutAbe{
+							sn, err := abecrypto.TxoCoinSerialNumberGen(&wire.TxOutAbe{
 								Version:   ring.Version,
 								TxoScript: ring.TxoScripts[i],
 							}, utxoring.RingHash, i, asksn)
@@ -1705,7 +1706,7 @@ func (w *Wallet) CreateSimpleTx(account uint32, outputs []*wire.TxOut,
 	return resp.tx, resp.err
 }
 
-func (w *Wallet) CreateSimpleTxAbe(outputDescs []*abecrypto.AbeTxOutDesc, minconf int32,
+func (w *Wallet) CreateSimpleTxAbe(outputDescs []*abecrypto.AbeTxOutputDesc, minconf int32,
 	feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, dryRun bool) (*txauthor.AuthoredTxAbe, error) {
 
 	req := createTxAbeRequest{
@@ -3884,7 +3885,7 @@ func (w *Wallet) NewAddressKeyAbe() ([]byte, error) {
 			return err
 		}
 		var serializedASksp, serializedASksn, serializedVSk []byte
-		addr, serializedVSk, serializedASksp, serializedASksn, err = w.ManagerAbe.GenerateAddressKeysAbe(addrmgrNs, seed)
+		addr, serializedASksp, serializedASksn, serializedVSk, err = w.ManagerAbe.GenerateAddressKeysAbe(addrmgrNs, seed)
 		if err != nil {
 			return err
 		}
@@ -4146,7 +4147,7 @@ func (w *Wallet) SendOutputs(outputs []*wire.TxOut, account uint32,
 	return createdTx.Tx, nil
 }
 
-func (w *Wallet) SendOutputsAbe(outputDescs []*abecrypto.AbeTxOutDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, label string) (*wire.MsgTxAbe, error) {
+func (w *Wallet) SendOutputsAbe(outputDescs []*abecrypto.AbeTxOutputDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, label string) (*wire.MsgTxAbe, error) {
 
 	// Ensure the outputs to be created adhere to the network's consensus
 	// rules.

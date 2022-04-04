@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abecrypto"
+	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/txscript"
@@ -284,12 +285,12 @@ func (m *ManagerAbe) GenerateAddressKeysAbe(ns walletdb.ReadWriteBucket, seed []
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	serializedCryptoAddress, serializedVSk, serializedASksp, serializedASksn, err := generateAddressSk(seed, len(seed), cnt+1)
+	serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, err := generateAddressSk(seed, len(seed), cnt+1)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("failed to generate address and key")
 	}
 
-	return serializedCryptoAddress, serializedVSk, serializedASksp, serializedASksn, nil
+	return serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, nil
 }
 
 // TODO(osy) 20200608 use txoReceive "replace" the IsMyAddress OR discard this function
@@ -1193,7 +1194,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 		// restore the previous address
 		for i := uint64(0); i < end; i++ {
 			// generate an address and information for spending
-			serializedCryptoAddress, serializedVSk, serializedASksp, serializedASksn, err := generateAddressSk(usedSeed, 2*len(seed), i)
+			serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, err := generateAddressSk(usedSeed, 2*len(seed), i)
 			if err != nil {
 				return fmt.Errorf("failed to generate address and key")
 			}
@@ -1228,7 +1229,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 
 		startSeedStatus := end
 		// generate an address and information for spending
-		serializedCryptoAddress, serializedVSk, serializedASksp, serializedASksn, err := generateAddressSk(usedSeed, 2*len(seed), startSeedStatus)
+		serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, err := generateAddressSk(usedSeed, 2*len(seed), startSeedStatus)
 		if err != nil {
 			return fmt.Errorf("failed to generate address and key")
 		}
@@ -1353,48 +1354,35 @@ func generateAddressSk(seed []byte, length int, cnt uint64) ([]byte, []byte, []b
 	shake256 := sha3.NewShake256()
 	shake256.Reset()
 	var tmp []byte
-	if cnt == 0 {
-		// TODO: would be delete, just for compatibility to branch 20220322release
-		tmp = make([]byte, halfLength+3)
-		copy(tmp, seed[:halfLength])
-		tmp = append(tmp, 'N', 'o', byte(cnt))
-	} else {
-		tmp = make([]byte, halfLength+10)
-		copy(tmp, seed[:halfLength])
-		tmp[halfLength+0] = 'N'
-		tmp[halfLength+1] = 'o'
-		tmp[halfLength+2] = byte(cnt >> 0)
-		tmp[halfLength+3] = byte(cnt >> 1)
-		tmp[halfLength+4] = byte(cnt >> 2)
-		tmp[halfLength+5] = byte(cnt >> 3)
-		tmp[halfLength+6] = byte(cnt >> 4)
-		tmp[halfLength+7] = byte(cnt >> 5)
-		tmp[halfLength+8] = byte(cnt >> 6)
-		tmp[halfLength+9] = byte(cnt >> 7)
-	}
+	tmp = make([]byte, halfLength+10)
+	copy(tmp, seed[:halfLength])
+	tmp[halfLength+0] = 'N'
+	tmp[halfLength+1] = 'o'
+	tmp[halfLength+2] = byte(cnt >> 0)
+	tmp[halfLength+3] = byte(cnt >> 1)
+	tmp[halfLength+4] = byte(cnt >> 2)
+	tmp[halfLength+5] = byte(cnt >> 3)
+	tmp[halfLength+6] = byte(cnt >> 4)
+	tmp[halfLength+7] = byte(cnt >> 5)
+	tmp[halfLength+8] = byte(cnt >> 6)
+	tmp[halfLength+9] = byte(cnt >> 7)
 	shake256.Write(tmp)
 	shake256.Read(usedSeed[:halfLength])
 
 	shake256.Reset()
-	if cnt == 0 {
-		tmp = make([]byte, halfLength+3)
-		copy(tmp, seed[halfLength:])
-		tmp = append(tmp, 'N', 'o', byte(cnt))
-	} else {
-		tmp = make([]byte, halfLength+10)
-		copy(tmp, seed[halfLength:])
-		tmp = append(tmp, 'N', 'o')
-		tmp = append(tmp, byte(cnt>>0))
-		tmp = append(tmp, byte(cnt>>1))
-		tmp = append(tmp, byte(cnt>>2))
-		tmp = append(tmp, byte(cnt>>3))
-		tmp = append(tmp, byte(cnt>>4))
-		tmp = append(tmp, byte(cnt>>5))
-		tmp = append(tmp, byte(cnt>>6))
-		tmp = append(tmp, byte(cnt>>7))
-	}
+	tmp = make([]byte, halfLength+10)
+	copy(tmp, seed[halfLength:])
+	tmp = append(tmp, 'N', 'o')
+	tmp = append(tmp, byte(cnt>>0))
+	tmp = append(tmp, byte(cnt>>1))
+	tmp = append(tmp, byte(cnt>>2))
+	tmp = append(tmp, byte(cnt>>3))
+	tmp = append(tmp, byte(cnt>>4))
+	tmp = append(tmp, byte(cnt>>5))
+	tmp = append(tmp, byte(cnt>>6))
+	tmp = append(tmp, byte(cnt>>7))
 	shake256.Write(tmp)
 	shake256.Read(usedSeed[halfLength:])
 
-	return abecrypto.CryptoPP.AbeCryptoAddressGen(usedSeed)
+	return abecrypto.CryptoAddressKeyGen(usedSeed, abecryptoparam.CryptoSchemePQRingCT)
 }

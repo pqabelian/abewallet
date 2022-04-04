@@ -8,7 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto"
+	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/abeutil/hdkeychain"
 	"github.com/abesuite/abec/chainhash"
@@ -282,7 +282,7 @@ func Seed(reader *bufio.Reader) ([]byte, uint64, error) {
 		mnemonics := seedToWords(seed, wordlists.English)
 		fmt.Println("Your wallet generation seed is:")
 		fmt.Printf("%x\n", seed)
-		fmt.Println("the crypto version is", abecrypto.CryptoPP.Version)
+		fmt.Println("the crypto version is", abecryptoparam.CryptoSchemePQRingCT)
 		fmt.Println("Your wallet mnemonic list is:")
 		fmt.Printf("%v\n", strings.Join(mnemonics, ","))
 		fmt.Println("IMPORTANT: Keep the version and seed in a safe place as you\n" +
@@ -307,7 +307,7 @@ func Seed(reader *bufio.Reader) ([]byte, uint64, error) {
 		}
 		// add the cryptoScheme before seed
 		tmp := make([]byte, 4, 4+32)
-		binary.BigEndian.PutUint32(tmp[0:4], uint32(abecrypto.CryptoSchemePQRINGCTV2))
+		binary.BigEndian.PutUint32(tmp[0:4], uint32(abecryptoparam.CryptoSchemePQRingCT))
 		seed = append(tmp, seed[:]...)
 		return seed, 0, nil
 	}
@@ -320,7 +320,7 @@ func Seed(reader *bufio.Reader) ([]byte, uint64, error) {
 		if err != nil {
 			return nil, 0, err
 		}
-		if abecrypto.CryptoScheme(version) != abecrypto.CryptoSchemePQRINGCTV2 {
+		if abecryptoparam.CryptoScheme(version) != abecryptoparam.CryptoSchemePQRingCT {
 			return nil, 0, errors.New("unsupported scheme in this wallet version")
 		}
 		fmt.Print("Enter existing wallet mnemonic: ")

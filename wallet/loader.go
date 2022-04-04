@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"github.com/abesuite/abec/abecrypto"
+	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abewallet/internal/prompt"
@@ -237,7 +238,7 @@ func (l *Loader) createNewWalletAbe(pubPassphrase, privPassphrase,
 		for i := 0; i < len(chaincfg.MainNetParams.GenesisBlock.Transactions); i++ {
 			transaction := chaincfg.MainNetParams.GenesisBlock.Transactions[i]
 			for k := 0; k < len(transaction.TxOuts); k++ {
-				coinAddr, err := abecrypto.CryptoPP.ExtractCoinAddressFromTxoScript(transaction.TxOuts[k].TxoScript)
+				coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(transaction.TxOuts[k].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
 				if err != nil {
 					return err
 				}

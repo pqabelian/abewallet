@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abecrypto"
-	"github.com/abesuite/abec/abecrypto/pqringctparam"
+	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/btcec"
 	"github.com/abesuite/abec/chainhash"
@@ -535,7 +535,7 @@ func (w *Wallet) txToOutputs(outputs []*wire.TxOut, account uint32,
 
 func createTransferTxAbeMsgTemplate(txIn []*wire.TxInAbe, txOutNum int, txMemo []byte, fee uint64) (*wire.MsgTxAbe, error) {
 	msgTx := &wire.MsgTxAbe{
-		Version:   wire.GetCurrentTxVersion(),
+		Version:   wire.TxVersion,
 		TxIns:     nil,
 		TxOuts:    make([]*wire.TxOutAbe, txOutNum),
 		TxFee:     fee,
@@ -563,7 +563,7 @@ func PrintConsumedUTXOs(selectedTxos []*wtxmgr.UnspentUTXO) {
 	}
 }
 
-func PrintNewUTXOs(txOutDescs []*abecrypto.AbeTxOutDesc, hasChange bool, fee abeutil.Amount) {
+func PrintNewUTXOs(txOutDescs []*abecrypto.AbeTxOutputDesc, hasChange bool, fee abeutil.Amount) {
 	log.Infof("New utxos: ")
 	for idx, txo := range txOutDescs {
 		if idx != len(txOutDescs)-1 {
@@ -605,7 +605,7 @@ func fetchSpecifiedUTXO(eligible []wtxmgr.UnspentUTXO, utxoSpecified []string) (
 	return selected, nil
 }
 
-func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, dryRun bool) (
+func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, dryRun bool) (
 	unsignedTx *txauthor.AuthoredTxAbe, err error) {
 
 	chainClient, err := w.requireChainClient()
@@ -748,10 +748,16 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutDesc, mi
 					selectedRingSizes = append(selectedRingSizes, int(txo.RingSize))
 				}
 
-				txVersion := wire.GetCurrentTxVersion()
-				txConSize := wire.PrecomputeTrTxConSize(txVersion, inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)+1), pqringctparam.GetTxMemoMaxLen(txVersion))
-				witnessSize := pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs))+1)
-				fee, err := CalculateFee(txConSize, witnessSize, feePerKbSpecified)
+				txVersion := wire.TxVersion
+				txConSize, err := wire.PrecomputeTrTxConSize(uint32(txVersion), inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)+1), abecryptoparam.TxMemoSerializeSizeMaxAllowed)
+				if err != nil {
+					return err
+				}
+				witnessSize, err := abecryptoparam.GetTrTxWitnessSerializeSizeApprox(uint32(txVersion), currentVersion, selectedRingSizes, (len(txOutDescs))+1)
+				if err != nil {
+					return err
+				}
+				fee, err := CalculateFee(txConSize, uint32(witnessSize), feePerKbSpecified)
 				if err != nil {
 					return err
 				}
@@ -769,9 +775,15 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutDesc, mi
 						}
 					}
 				} else {
-					txConSize := wire.PrecomputeTrTxConSize(txVersion, inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)), pqringctparam.GetTxMemoMaxLen(txVersion))
-					witnessSize := pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs)))
-					fee, err := CalculateFee(txConSize, witnessSize, feePerKbSpecified)
+					txConSize, err := wire.PrecomputeTrTxConSize(uint32(txVersion), inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)), abecryptoparam.TxMemoSerializeSizeMaxAllowed)
+					if err != nil {
+						return err
+					}
+					witnessSize, err := abecryptoparam.GetTrTxWitnessSerializeSizeApprox(uint32(txVersion), currentVersion, selectedRingSizes, (len(txOutDescs)))
+					if err != nil {
+						return err
+					}
+					fee, err := CalculateFee(txConSize, uint32(witnessSize), feePerKbSpecified)
 					if err != nil {
 						return err
 					}
@@ -804,11 +816,17 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutDesc, mi
 					// todo: compute tx size and witness, computes the fee, check amount, compare with changeThreshold
 
 					if currentTotal > targetValue {
-						txVersion := wire.GetCurrentTxVersion()
+						txVersion := wire.TxVersion
 						// compute the tx size with witness
-						txConSize := wire.PrecomputeTrTxConSize(txVersion, inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)), pqringctparam.GetTxMemoMaxLen(txVersion))
-						witnessSize := pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs)))
-						fee, err := CalculateFee(txConSize, witnessSize, feePerKbSpecified)
+						txConSize, err := wire.PrecomputeTrTxConSize(uint32(txVersion), inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)), abecryptoparam.TxMemoSerializeSizeMaxAllowed)
+						if err != nil {
+							return err
+						}
+						witnessSize, err := abecryptoparam.GetTrTxWitnessSerializeSizeApprox(uint32(txVersion), currentVersion, selectedRingSizes, len(txOutDescs))
+						if err != nil {
+							return err
+						}
+						fee, err := CalculateFee(txConSize, uint32(witnessSize), feePerKbSpecified)
 						if err != nil {
 							return err
 						}
@@ -820,9 +838,15 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutDesc, mi
 							} else {
 								// need to make a change
 								flag = true
-								txConSize := wire.PrecomputeTrTxConSize(txVersion, inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)+1), pqringctparam.GetTxMemoMaxLen(txVersion))
-								witnessSize = pqringctparam.GetTrTxWitnessSize(txVersion, currentVersion, selectedRingSizes, uint8(len(txOutDescs)+1))
-								fee, err := CalculateFee(txConSize, witnessSize, feePerKbSpecified)
+								txConSize, err := wire.PrecomputeTrTxConSize(uint32(txVersion), inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)+1), abecryptoparam.TxMemoSerializeSizeMaxAllowed)
+								if err != nil {
+									return err
+								}
+								witnessSize, err = abecryptoparam.GetTrTxWitnessSerializeSizeApprox(uint32(txVersion), currentVersion, selectedRingSizes, len(txOutDescs)+1)
+								if err != nil {
+									return err
+								}
+								fee, err := CalculateFee(txConSize, uint32(witnessSize), feePerKbSpecified)
 								if err != nil {
 									return err
 								}
@@ -889,7 +913,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutDesc, mi
 		var serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc []byte
 		for i := 0; i < len(selectedTxos); i++ {
 			// todo:extract the address from txoScripts
-			coinAddr, err := abecrypto.CryptoPP.ExtractCoinAddressFromTxoScript(selectedRings[selectedTxos[i].RingHash].TxoScripts[selectedTxos[i].Index])
+			coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(selectedRings[selectedTxos[i].RingHash].TxoScripts[selectedTxos[i].Index], abecryptoparam.CryptoSchemePQRingCT)
 			if err != nil {
 				return err
 			}
@@ -965,7 +989,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutDesc, mi
 	if err != nil {
 		return nil, errors.New("error for creating a transfer transaction template ")
 	}
-	transferTx, err := abecrypto.CryptoPP.TransferTxGen(abeTxInputDescs, txOutDescs, transferTxTemplate)
+	transferTx, err := abecrypto.TransferTxGen(abeTxInputDescs, txOutDescs, transferTxTemplate)
 	if err != nil {
 		return nil, err
 	}

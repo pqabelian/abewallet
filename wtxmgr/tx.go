@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abecrypto"
+	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abec/blockchain"
 	"github.com/abesuite/abewallet/walletdb"
 	"math"
@@ -518,14 +519,18 @@ func (r Ring) Hash() []byte {
 	//	todo: AliceBob 20210616, Version is not handled
 	//  todo: what is the relation between the ring here and the utxoring in abec? Shall they be kept consistent?
 
-	size := 4 + 1 + int(wire.GetWireParamBlockNumPerRingGroup(r.Version))*chainhash.HashSize + 1 + len(r.TxHashes)*(chainhash.HashSize+1)
+	blockNum, err := wire.GetBlockNumPerRingGroupByRingVersion(r.Version)
+	if err != nil {
+		return nil
+	}
+	size := 4 + 1 + int(blockNum)*chainhash.HashSize + 1 + len(r.TxHashes)*(chainhash.HashSize+1)
 	v := make([]byte, size)
 	offset := 0
 	byteOrder.PutUint32(v[offset:offset+4], r.Version)
 	offset += 4
-	v[offset] = wire.GetWireParamBlockNumPerRingGroup(r.Version)
+	v[offset] = blockNum
 	offset += 1
-	for i := 0; i < int(wire.GetWireParamBlockNumPerRingGroup(r.Version)); i++ {
+	for i := 0; i < int(blockNum); i++ {
 		copy(v[offset:offset+32], r.BlockHashes[i][:])
 		offset += 32
 	}
@@ -1143,7 +1148,7 @@ func (s *Store) InsertGenesisBlockAbeNew(ns walletdb.ReadWriteBucket, block *Blo
 	coinbaseOutput := make(map[wire.OutPointAbe]*UnspentUTXO)
 	for i := 0; i < len(coinbaseTx.TxOuts); i++ {
 		// TODO: the genesis block is handled when creating a new wallet, so this time the address would be just initial address
-		coinAddr, err := abecrypto.CryptoPP.ExtractCoinAddressFromTxoScript(coinbaseTx.TxOuts[i].TxoScript)
+		coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(coinbaseTx.TxOuts[i].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
 		if err != nil {
 			return err
 		}
@@ -1153,7 +1158,10 @@ func (s *Store) InsertGenesisBlockAbeNew(ns walletdb.ReadWriteBucket, block *Blo
 		if vskBytes, ok = addrToVskMap[key]; !ok {
 			continue
 		}
-		valid, v := abecrypto.CryptoPP.TxoCoinReceive(coinbaseTx.TxOuts[i], coinAddrToInstanceAddr[key], vskBytes)
+		valid, v, err := abecrypto.TxoCoinReceive(coinbaseTx.TxOuts[i], coinAddrToInstanceAddr[key], vskBytes)
+		if err != nil {
+			return err
+		}
 		if valid && v != 0 {
 			amt, err := abeutil.NewAmountAbe(float64(v))
 			if err != nil {
@@ -1774,7 +1782,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 	for i := 0; i < len(coinbaseTx.TxOuts); i++ {
 		// TODO(20220322): there would check the crypto version
 		// TODO: there would Extract the coin-address from the TxOut[i].TxoScript
-		coinAddr, err := abecrypto.CryptoPP.ExtractCoinAddressFromTxoScript(coinbaseTx.TxOuts[i].TxoScript)
+		coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(coinbaseTx.TxOuts[i].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
 		if err != nil {
 			return err
 		}
@@ -1784,7 +1792,10 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 		if vskBytes, ok = addrToVskMap[key]; !ok {
 			continue
 		}
-		valid, v := abecrypto.CryptoPP.TxoCoinReceive(coinbaseTx.TxOuts[i], coinAddrToInstanceAddr[key], vskBytes)
+		valid, v, err := abecrypto.TxoCoinReceive(coinbaseTx.TxOuts[i], coinAddrToInstanceAddr[key], vskBytes)
+		if err != nil {
+			return err
+		}
 		if valid && v != 0 {
 			amt, err := abeutil.NewAmountAbe(float64(v))
 			if err != nil {
@@ -1949,7 +1960,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 
 		// traverse all outputs of a transaction and check if it is ours
 		for j := 0; j < len(txi.TxOuts); j++ {
-			coinAddr, err := abecrypto.CryptoPP.ExtractCoinAddressFromTxoScript(txi.TxOuts[j].TxoScript)
+			coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(txi.TxOuts[j].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
 			if err != nil {
 				return err
 			}
@@ -1959,7 +1970,10 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 			if vskBytes, ok = addrToVskMap[key]; !ok {
 				continue
 			}
-			valid, v := abecrypto.CryptoPP.TxoCoinReceive(txi.TxOuts[j], coinAddrToInstanceAddr[key], vskBytes)
+			valid, v, err := abecrypto.TxoCoinReceive(txi.TxOuts[j], coinAddrToInstanceAddr[key], vskBytes)
+			if err != nil {
+				return err
+			}
 			if valid && v != 0 {
 				amt, err := abeutil.NewAmountAbe(float64(v))
 				if err != nil {
@@ -2171,12 +2185,12 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 		}
 		//create a view to generate the all rings
 		view := blockchain.NewUtxoRingViewpoint()
-		err = view.NewUtxoRingEntriesFromTxos(allCoinBaseRmTxos, ringBlockHeight, blockHashs, true)
+		err = view.NewUtxoRingEntriesFromTxos(allCoinBaseRmTxos, ringBlockHeight, blockHashs, int(wire.GetTxoRingSizeByBlockHeight(ringBlockHeight)), true)
 		if err != nil {
 			return err
 		}
 
-		err = view.NewUtxoRingEntriesFromTxos(allTransferRmTxos, ringBlockHeight, blockHashs, false)
+		err = view.NewUtxoRingEntriesFromTxos(allTransferRmTxos, ringBlockHeight, blockHashs, int(wire.GetTxoRingSizeByBlockHeight(ringBlockHeight)), false)
 		if err != nil {
 			return err
 		}
