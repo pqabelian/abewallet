@@ -228,8 +228,15 @@ func (m *ManagerAbe) DecryptAddressKey(addressEnc, addressSecretSpEnc, addressSe
 			return nil, nil, nil, nil, err
 		}
 	}
+	var addressSecretSnBytes []byte
+	if addressSecretSnEnc != nil {
+		addressSecretSnBytes, err = m.Decrypt(CKTPublic, addressSecretSnEnc)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+	}
 
-	var addressSecretSpBytes, addressSecretSnBytes []byte
+	var addressSecretSpBytes []byte
 	if !m.IsLocked() {
 		if addressSecretSpEnc != nil {
 			addressSecretSpBytes, err = m.Decrypt(CKTPrivate, addressSecretSpEnc)
@@ -237,12 +244,7 @@ func (m *ManagerAbe) DecryptAddressKey(addressEnc, addressSecretSpEnc, addressSe
 				return nil, nil, nil, nil, err
 			}
 		}
-		if addressSecretSnEnc != nil {
-			addressSecretSnBytes, err = m.Decrypt(CKTPrivate, addressSecretSnEnc)
-			if err != nil {
-				return nil, nil, nil, nil, err
-			}
-		}
+
 	}
 	return addressBytes, addressSecretSpBytes, addressSecretSnBytes, valueSecretKeyBytes, nil
 }
@@ -1286,7 +1288,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 			return maybeConvertDbError(err)
 		}
 		addressSecretKeySnEnc, err :=
-			cryptoKeyPriv.Encrypt(serializedASksn)
+			cryptoKeyPub.Encrypt(serializedASksn)
 		if err != nil {
 			return maybeConvertDbError(err)
 		}

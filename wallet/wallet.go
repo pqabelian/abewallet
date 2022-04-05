@@ -3895,7 +3895,7 @@ func (w *Wallet) NewAddressKeyAbe() ([]byte, error) {
 			return err
 		}
 		addressSecretKeySnEnc, err :=
-			w.ManagerAbe.Encrypt(waddrmgr.CKTPrivate, serializedASksn)
+			w.ManagerAbe.Encrypt(waddrmgr.CKTPublic, serializedASksn)
 		if err != nil {
 			return err
 		}

@@ -203,31 +203,32 @@ func PrivatePass(reader *bufio.Reader, legacyKeyStore *keystore.Store) ([]byte, 
 func PublicPass(reader *bufio.Reader, privPass []byte,
 	defaultPubPassphrase, configPubPassphrase []byte) ([]byte, error) {
 
-	pubPass := defaultPubPassphrase
-	usePubPass, err := promptListBool(reader, "Do you want "+
-		"to add an additional layer of encryption for public "+
-		"data?", "no")
-	if err != nil {
-		return nil, err
-	}
-
-	if !usePubPass {
-		return pubPass, nil
-	}
-
-	if !bytes.Equal(configPubPassphrase, pubPass) {
-		useExisting, err := promptListBool(reader, "Use the "+
-			"existing configured public passphrase for encryption "+
-			"of public data?", "no")
-		if err != nil {
-			return nil, err
-		}
-
-		if useExisting {
-			return configPubPassphrase, nil
-		}
-	}
-
+	//pubPass := defaultPubPassphrase
+	//usePubPass, err := promptListBool(reader, "Do you want "+
+	//	"to add an additional layer of encryption for public "+
+	//	"data?", "no")
+	//if err != nil {
+	//	return nil, err
+	//}
+	//
+	//if !usePubPass {
+	//	return pubPass, nil
+	//}
+	//
+	//if !bytes.Equal(configPubPassphrase, pubPass) {
+	//	useExisting, err := promptListBool(reader, "Use the "+
+	//		"existing configured public passphrase for encryption "+
+	//		"of public data?", "no")
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//
+	//	if useExisting {
+	//		return configPubPassphrase, nil
+	//	}
+	//}
+	var pubPass []byte
+	var err error
 	for {
 		pubPass, err = promptPass(reader, "Enter the public "+
 			"passphrase for your new wallet", true)
