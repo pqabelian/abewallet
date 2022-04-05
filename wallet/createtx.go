@@ -964,7 +964,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 		abeTxInputDescs = append(abeTxInputDescs, abecrypto.NewAbeTxInputDesc(
 			selectedTxos[i].RingHash,
 			serializedTxoLists,
-			int(selectedTxos[i].Index),
+			selectedTxos[i].Index,
 			serializeAddressBytes[i],
 			serializedAskspBytes[i],
 			serializedAsksnBytes[i],

@@ -1615,7 +1615,7 @@ out:
 							sn, err := abecrypto.TxoCoinSerialNumberGen(&wire.TxOutAbe{
 								Version:   ring.Version,
 								TxoScript: ring.TxoScripts[i],
-							}, utxoring.RingHash, i, asksn)
+							}, utxoring.RingHash, uint8(i), asksn)
 							if err != nil {
 								return err
 							}

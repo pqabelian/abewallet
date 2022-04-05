@@ -1,7 +1,7 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/abesuite/abec v0.9.2-beta.0.20220404105352-a91324834345 h1:pC1Le78cMi+9s1ZIiq+4+ONoF+LYbqNnDVNgOb84IlI=
-github.com/abesuite/abec v0.9.2-beta.0.20220404105352-a91324834345/go.mod h1:JK4uetUCsf2OGJsOs+nDJ1xeS2/WR1O0PY/ysHpap5Q=
+github.com/abesuite/abec v0.9.2-beta.0.20220405014500-266bee2943ca h1:slZnziBdDmzZAxeuU7f2H1PAWLQ4HN712L4b/LwWtgE=
+github.com/abesuite/abec v0.9.2-beta.0.20220405014500-266bee2943ca/go.mod h1:w6CFipK4S/UYcVIU2DHhM7um3NBRZzRnAIFDVX5YuOA=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd h1:BNI2MkhhtofxM0sTP8WmdcT4chaAKZOsyhspB58DSrM=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd/go.mod h1:eo8+6JwPaqdnrzzGmGXEH3nOYknOkk8GtuXw7Bo+f08=
 github.com/abesuite/go-spew v1.1.1 h1:8v1IQu/pRuElOpgwrBLmtxsSTEEK+fCBBOw4VYE9fx8=
@@ -15,8 +15,8 @@ github.com/cryptosuite/kyber-go v0.0.2-alpha h1:JHvNqZho24qJq7c4JnyKGtyQuF03VOeE
 github.com/cryptosuite/kyber-go v0.0.2-alpha/go.mod h1:1G0Jh7bXJGSUCTrC6ZB9lFpmCF+VFQehDqIwm9dJU3s=
 github.com/cryptosuite/liboqs-go v0.0.0-20220402044024-a952f3d76a7c h1:u8EXL1L/4DsjHJMKlDLGgi7hL4oR6tTRaha2d6o8WYM=
 github.com/cryptosuite/liboqs-go v0.0.0-20220402044024-a952f3d76a7c/go.mod h1:LzuvuQAJHbED51lHoYr91rBbKRdv2MewGcVCwjE1JCk=
-github.com/cryptosuite/pqringct v0.0.2-alpha.0.20220404105155-f359c6282c76 h1:/4YMGCOuWpQ5EfAgcO7Cx5eG3xOK9BHcJ16YQfXqSr4=
-github.com/cryptosuite/pqringct v0.0.2-alpha.0.20220404105155-f359c6282c76/go.mod h1:mR2GSd29Q9pfGP20JT6T+gwLE0v8YPUa22IzLsV4WIQ=
+github.com/cryptosuite/pqringct v0.0.2-alpha.0.20220404150003-e909fa18ad54 h1:j+l89ZumjnjErG3A2vnCpAD2VsowspoZmNd+HaWX300=
+github.com/cryptosuite/pqringct v0.0.2-alpha.0.20220404150003-e909fa18ad54/go.mod h1:mR2GSd29Q9pfGP20JT6T+gwLE0v8YPUa22IzLsV4WIQ=
 github.com/cryptosuite/salrs-go v0.0.0-20200918155434-c02eea3b36d1 h1:vN3Cibtye7f3YuPvrJWG4Kp/jrb/XfxS5oIwl8XZBQY=
 github.com/cryptosuite/salrs-go v0.0.0-20200918155434-c02eea3b36d1/go.mod h1:mJeCa86eOqj3kCJO+O4245Wnq5U07P9K9RfJplI8bQ4=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
