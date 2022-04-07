@@ -2310,7 +2310,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 			}
 			spendableBal += amt
 			freezedBal -= amt
-			log.Infof("Transfer txo at Height %d , Vlaue %v is matured!", utxo.Height, float64(utxo.Amount)/math.Pow10(7))
+			log.Infof("Transfer txo at Height %d , Value %v is matured!", utxo.Height, float64(utxo.Amount)/math.Pow10(7))
 			err = putRawMaturedOutput(txMgrNs, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
 				return err
@@ -2324,7 +2324,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 			}
 			spendableBal += amt
 			freezedBal -= amt
-			log.Infof("Transfer txo at Height %d , Vlaue %v is matured!", utxo.Height, float64(utxo.Amount)/math.Pow10(7))
+			log.Infof("Transfer txo at Height %d , Value %v is matured!", utxo.Height, float64(utxo.Amount)/math.Pow10(7))
 			err = putRawMaturedOutput(txMgrNs, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
 				return err
