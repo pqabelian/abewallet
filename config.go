@@ -106,13 +106,14 @@ type config struct {
 	// Deprecated options
 	DataDir *cfgutil.ExplicitString `short:"b" long:"datadir" default-mask:"-" description:"DEPRECATED -- use appdata instead"`
 
-	// Create wallet in non-interactive mode
+	// Options that are used when creating wallet in non-interactive mode
 	NonInteractiveCreate bool   `long:"noninteractivecreate" description:"Create a wallet in non-interactive mode, just using command line args"`
 	WithMnemonic         bool   `long:"withmnemonic" description:"Whether or not the args containing wallet mnemonic"`
 	MyVersion            string `long:"myversion" description:"Mnemonic version in non-interactive mode"`
 	MyMnemonic           string `long:"mymnemonic" description:"Mnemonic in non-interactive mode"`
 	MyPassword           string `long:"mypassword" description:"Password in non-interactive mode"`
 	MyRestoreNumber      uint64 `long:"myrestorenumber" description:"Number of restore address in non-interactive mode"`
+	MyWalletPass         string `long:"mywalletpass" description:"The public passphrase in non-interactive mode"`
 }
 
 // cleanAndExpandPath expands environement variables and leading ~ in the

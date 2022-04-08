@@ -352,7 +352,10 @@ func createWalletAbe(cfg *config) error {
 		fmt.Println(binary.BigEndian.Uint32(seed[:4]))
 		fmt.Printf("%x\n", seed[4:])
 		fmt.Printf("%v\n", strings.Join(mnemonics, ","))
-		w, err := loader.CreateNewWalletAbe([]byte(wallet.InsecurePubPassphrase), []byte(cfg.MyPassword), seed[4:], cfg.MyRestoreNumber, time.Now())
+		if cfg.MyWalletPass == "" {
+			cfg.MyWalletPass = wallet.InsecurePubPassphrase
+		}
+		w, err := loader.CreateNewWalletAbe([]byte(cfg.MyWalletPass), []byte(cfg.MyPassword), seed[4:], cfg.MyRestoreNumber, time.Now())
 		if err != nil {
 			return err
 		}
