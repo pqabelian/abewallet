@@ -1207,7 +1207,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 				return maybeConvertDbError(err)
 			}
 			addressSecretKeySnEnc, err :=
-				cryptoKeyPriv.Encrypt(serializedASksn)
+				cryptoKeyPub.Encrypt(serializedASksn)
 			if err != nil {
 				return maybeConvertDbError(err)
 			}
