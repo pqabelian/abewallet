@@ -320,21 +320,6 @@ func (w *Wallet) rescanWithTarget(addrs []abeutil.Address,
 	}
 }
 func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
-
-	//outpoints := make(map[wire.OutPoint]abeutil.Address, len(unspent))
-	//for _, output := range unspent {
-	//	_, outputAddrs, _, err := txscript.ExtractPkScriptAddrs(
-	//		output.PkScript, w.chainParams,
-	//	)
-	//	if err != nil {
-	//		return err
-	//	}
-	//
-	//	outpoints[output.OutPoint] = outputAddrs[0]
-	//}
-	//
-	//// If a start block stamp was provided, we will use that as the initial
-	//// starting point for the rescan.
 	if startStamp == nil {
 		startStamp = &waddrmgr.BlockStamp{}
 		*startStamp = w.ManagerAbe.SyncedTo()

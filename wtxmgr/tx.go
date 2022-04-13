@@ -2071,7 +2071,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 		}
 		_, v := fetchRawBlockAbe(txMgrNs, block.Height-1, msgBlock2.Header.PrevBlock)
 		msgBlock1 := new(wire.MsgBlockAbe)
-		err = msgBlock1.Deserialize(bytes.NewReader(v))
+		err = msgBlock1.DeserializeNoWitness(bytes.NewReader(v))
 		if err != nil {
 			return err
 		}
@@ -2110,7 +2110,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 		// generate the utxoring
 		_, v = fetchRawBlockAbe(txMgrNs, block.Height-2, msgBlock1.Header.PrevBlock)
 		msgBlock0 := new(wire.MsgBlockAbe)
-		err = msgBlock0.Deserialize(bytes.NewReader(v))
+		err = msgBlock0.DeserializeNoWitness(bytes.NewReader(v))
 		if err != nil {
 			return err
 		}
