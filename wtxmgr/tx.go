@@ -1158,7 +1158,9 @@ func (s *Store) InsertGenesisBlockAbeNew(ns walletdb.ReadWriteBucket, block *Blo
 		if vskBytes, ok = addrToVskMap[key]; !ok {
 			continue
 		}
-		valid, v, err := abecrypto.TxoCoinReceive(coinbaseTx.TxOuts[i], coinAddrToInstanceAddr[key], vskBytes)
+		copyedVskBytes := make([]byte, len(vskBytes))
+		copy(copyedVskBytes, vskBytes)
+		valid, v, err := abecrypto.TxoCoinReceive(coinbaseTx.TxOuts[i], coinAddrToInstanceAddr[key], copyedVskBytes)
 		if err != nil {
 			return err
 		}
@@ -1793,7 +1795,9 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 		if vskBytes, ok = addrToVskMap[key]; !ok {
 			continue
 		}
-		valid, v, err := abecrypto.TxoCoinReceive(coinbaseTx.TxOuts[i], coinAddrToInstanceAddr[key], vskBytes)
+		copyedVskBytes := make([]byte, len(vskBytes))
+		copy(copyedVskBytes, vskBytes)
+		valid, v, err := abecrypto.TxoCoinReceive(coinbaseTx.TxOuts[i], coinAddrToInstanceAddr[key], copyedVskBytes)
 		if err != nil {
 			return err
 		}
@@ -1968,7 +1972,9 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 			if vskBytes, ok = addrToVskMap[key]; !ok {
 				continue
 			}
-			valid, v, err := abecrypto.TxoCoinReceive(txi.TxOuts[j], coinAddrToInstanceAddr[key], vskBytes)
+			copyedVskBytes := make([]byte, len(vskBytes))
+			copy(copyedVskBytes, vskBytes)
+			valid, v, err := abecrypto.TxoCoinReceive(txi.TxOuts[j], coinAddrToInstanceAddr[key], copyedVskBytes)
 			if err != nil {
 				return err
 			}

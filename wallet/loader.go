@@ -242,13 +242,16 @@ func (l *Loader) createNewWalletAbe(pubPassphrase, privPassphrase,
 				if err != nil {
 					return err
 				}
+				addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
+				if _, ok := addrToVSK[addrKey]; ok {
+					continue
+				}
 				addrBytesEnc, _, _, vskBytesEnc, err := w.ManagerAbe.FetchAddressKeyEncAbe(addrmgrNs, coinAddr)
 				if addrBytesEnc != nil && vskBytesEnc != nil {
 					addrBytes, _, _, vskBytes, err := w.ManagerAbe.DecryptAddressKey(addrBytesEnc, nil, nil, vskBytesEnc)
 					if err != nil {
 						return err
 					}
-					addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
 					addrToVSK[addrKey] = vskBytes
 					coinAddrToInstanceAddr[addrKey] = addrBytes
 				}

@@ -961,6 +961,8 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 			})
 		}
 		// fetch the aSkSpByte from manager
+		copyedVskBytes := make([]byte, len(serializedVskBytes[i]))
+		copy(copyedVskBytes, serializedVskBytes[i])
 		abeTxInputDescs = append(abeTxInputDescs, abecrypto.NewAbeTxInputDesc(
 			selectedTxos[i].RingHash,
 			serializedTxoLists,
@@ -968,7 +970,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 			serializeAddressBytes[i],
 			serializedAskspBytes[i],
 			serializedAsksnBytes[i],
-			serializedVskBytes[i],
+			copyedVskBytes,
 			selectedTxos[i].Amount))
 	}
 
