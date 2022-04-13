@@ -94,7 +94,7 @@ func NewBlockAbeRecord(serializedBlockAbe []byte) (*BlockAbeRecord, error) {
 	rec := &BlockAbeRecord{
 		SerializedBlockAbe: serializedBlockAbe,
 	}
-	err := rec.MsgBlockAbe.Deserialize(bytes.NewReader(serializedBlockAbe))
+	err := rec.MsgBlockAbe.DeserializeNoWitness(bytes.NewReader(serializedBlockAbe))
 	if err != nil {
 		str := "failed to deserialize block"
 		return nil, storeError(ErrInput, str, err)
