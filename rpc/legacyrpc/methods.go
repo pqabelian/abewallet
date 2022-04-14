@@ -1461,6 +1461,21 @@ func makeOutputsAbe(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainPara
 	}
 	return outputs, nil
 }
+func makeOutputDescsForPairs(w *wallet.Wallet, pairs []abejson.Pair, chainParams *chaincfg.Params) ([]*abecrypto.AbeTxOutputDesc, error) {
+	outputDescs := make([]*abecrypto.AbeTxOutputDesc, 0, len(pairs))
+	for i := 0; i < len(pairs); i++ {
+		addr, err := hex.DecodeString(pairs[i].Address)
+		if err != nil {
+			return nil, err
+		}
+		targetAmount := uint64(pairs[i].Amount)
+		addr = addr[1 : len(addr)-32]
+		outputDesc := abecrypto.NewAbeTxOutDesc(addr, targetAmount)
+
+		outputDescs = append(outputDescs, outputDesc)
+	}
+	return outputDescs, nil
+}
 
 func makeOutputDescs(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) ([]*abecrypto.AbeTxOutputDesc, error) {
 	outputDescs := make([]*abecrypto.AbeTxOutputDesc, 0, len(pairs))
@@ -1570,6 +1585,38 @@ func isHexString(s string) bool {
 	log.Infof("Successfully sent transaction %v", txHashStr)
 	return txHashStr, nil
 }*/
+
+func sendAddressAbe(w *wallet.Wallet, amounts []abejson.Pair,
+	minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string) (string, error) {
+
+	//outputs, err := makeOutputsAbe(w, amounts, w.ChainParams())
+	outputDescs, err := makeOutputDescsForPairs(w, amounts, w.ChainParams())
+	if err != nil {
+		return "", err
+	}
+	tx, err := w.SendOutputsAbe(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, "") // TODO(abe): what's label?
+	if err != nil {
+		if err == txrules.ErrAmountNegative {
+			return "", ErrNeedPositiveAmount
+		}
+		if waddrmgr.IsError(err, waddrmgr.ErrLocked) {
+			return "", &ErrWalletUnlockNeeded
+		}
+		switch err.(type) {
+		case abejson.RPCError:
+			return "", err
+		}
+
+		return "", &abejson.RPCError{
+			Code:    abejson.ErrRPCInternal.Code,
+			Message: err.Error(),
+		}
+	}
+
+	txHashStr := tx.TxHash().String()
+	log.Infof("Successfully sent transaction %v", txHashStr)
+	return txHashStr, nil
+}
 
 func sendPairsAbe(w *wallet.Wallet, amounts map[string]abeutil.Amount,
 	minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string) (string, error) {
@@ -1778,7 +1825,7 @@ func freshen(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 }
 
 func sendToAddressesAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.SendToPayeesCmd)
+	cmd := icmd.(*abejson.SendToAddressAbeCmd)
 
 	// Transaction comments are not yet supported.  Error instead of
 	// pretending to save them.
@@ -1795,20 +1842,10 @@ func sendToAddressesAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 		return nil, ErrNeedPositiveMinconf
 	}
 
-	// Recreate address/amount pairs, using abeutil.Amount.
-	pairs := make(map[string]abeutil.Amount, len(cmd.Amounts))
-	for k, v := range cmd.Amounts {
-		amt, err := abeutil.NewAmountAbe(float64(v))
-		if err != nil {
-			return nil, err
-		}
-		pairs[k] = amt
-	}
-
 	//	todo: the fee policy
 	feeSatPerKb := txrules.DefaultRelayFeePerKb // todo: AliceBobScorpio, should use the feeSatPerKb received from abec
-	scaleToFeeSatPerKb := float64(*cmd.ScaleToFeeSatPerKb)
-	feeSpecified, err := abeutil.NewAmountAbe(float64(*cmd.FeeSpecified))
+	scaleToFeeSatPerKb := *cmd.ScaleToFeeSatPerKb
+	feeSpecified, err := abeutil.NewAmountAbe(*cmd.FeeSpecified)
 	if err != nil {
 		return nil, err
 	}
@@ -1836,7 +1873,7 @@ func sendToAddressesAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 		}
 	}
 
-	return sendPairsAbe(w, pairs, minConf, feeSatPerKb, feeSpecified, utxoSpecified)
+	return sendAddressAbe(w, cmd.Amounts, minConf, feeSatPerKb, feeSpecified, utxoSpecified)
 }
 
 // sendToAddress handles a sendtoaddress RPC request by creating a new
