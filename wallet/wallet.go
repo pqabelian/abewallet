@@ -3910,7 +3910,7 @@ func (w *Wallet) NewAddressKeyAbe() ([]byte, error) {
 			return err
 		}
 
-		addKey := chainhash.DoubleHashB(addr[4:7684])
+		addKey := chainhash.DoubleHashB(addr[4 : 4+abecryptoparam.PQRingCTPP.AddressPublicKeySerializeSize()])
 
 		err = w.ManagerAbe.PutAddressKeysEncAbe(addrmgrNs, addKey[:], valueSecretKeyEnc,
 			addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)

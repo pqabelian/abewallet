@@ -749,7 +749,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 				}
 
 				txVersion := wire.TxVersion
-				txConSize, err := wire.PrecomputeTrTxConSize(uint32(txVersion), inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)+1), abecryptoparam.TxMemoSerializeSizeMaxAllowed)
+				txConSize, err := wire.PrecomputeTrTxConSize(uint32(txVersion), inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)+1), abecryptoparam.MaxAllowedTxMemoSize)
 				if err != nil {
 					return err
 				}
@@ -775,7 +775,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 						}
 					}
 				} else {
-					txConSize, err := wire.PrecomputeTrTxConSize(uint32(txVersion), inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)), abecryptoparam.TxMemoSerializeSizeMaxAllowed)
+					txConSize, err := wire.PrecomputeTrTxConSize(uint32(txVersion), inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)), abecryptoparam.MaxAllowedTxMemoSize)
 					if err != nil {
 						return err
 					}
@@ -818,7 +818,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 					if currentTotal > targetValue {
 						txVersion := wire.TxVersion
 						// compute the tx size with witness
-						txConSize, err := wire.PrecomputeTrTxConSize(uint32(txVersion), inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)), abecryptoparam.TxMemoSerializeSizeMaxAllowed)
+						txConSize, err := wire.PrecomputeTrTxConSize(uint32(txVersion), inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)), abecryptoparam.MaxAllowedTxMemoSize)
 						if err != nil {
 							return err
 						}
@@ -838,7 +838,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 							} else {
 								// need to make a change
 								flag = true
-								txConSize, err := wire.PrecomputeTrTxConSize(uint32(txVersion), inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)+1), abecryptoparam.TxMemoSerializeSizeMaxAllowed)
+								txConSize, err := wire.PrecomputeTrTxConSize(uint32(txVersion), inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)+1), abecryptoparam.MaxAllowedTxMemoSize)
 								if err != nil {
 									return err
 								}

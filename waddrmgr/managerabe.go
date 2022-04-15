@@ -1155,21 +1155,6 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 			str := "failed to encrypt crypto seed key"
 			return managerError(ErrCrypto, str, err)
 		}
-		// Generate the BIP0044 HD key structure to ensure the
-		// provided seed can generate the required structure with no
-		// issues.
-
-		// Derive the master extended key from the seed.
-		//rootKey, err := hdkeychain.NewMaster(seed, chainParams)
-		//if err != nil {
-		//	str := "failed to derive master extended key"
-		//	return managerError(ErrKeyChain, str, err)
-		//}
-		//rootPubKey, err := rootKey.Neuter()
-		//if err != nil {
-		//	str := "failed to neuter master extended key"
-		//	return managerError(ErrKeyChain, str, err)
-		//}
 
 		// generate a longer seed from origin seed via hash function such as shake256
 		seedLength := len(seed)
@@ -1196,11 +1181,11 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 		// restore the previous address
 		for i := uint64(0); i < end; i++ {
 			// generate an address and information for spending
-			serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, err := generateAddressSk(usedSeed, 2*len(seed), i)
+			serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, err := generateAddressSk(usedSeed, 2*seedLength, i)
 			if err != nil {
 				return fmt.Errorf("failed to generate address and key")
 			}
-			addKey := chainhash.DoubleHashB(serializedCryptoAddress[4:7684])
+			addKey := chainhash.DoubleHashB(serializedCryptoAddress[4 : 4+abecryptoparam.PQRingCTPP.AddressPublicKeySerializeSize()])
 			addressSecretKeySpEnc, err :=
 				cryptoKeyPriv.Encrypt(serializedASksp)
 			if err != nil {
@@ -1231,7 +1216,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 
 		startSeedStatus := end
 		// generate an address and information for spending
-		serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, err := generateAddressSk(usedSeed, 2*len(seed), startSeedStatus)
+		serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, err := generateAddressSk(usedSeed, 2*seedLength, startSeedStatus)
 		if err != nil {
 			return fmt.Errorf("failed to generate address and key")
 		}
@@ -1255,9 +1240,8 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 		//		return maybeConvertDbError(err)
 		//	}
 		//}
-		// TODO: not hardcode, check the version and using the method of
-		//  public parameter to get the address public key
-		addKey := chainhash.DoubleHashB(serializedCryptoAddress[4:7684])
+
+		addKey := chainhash.DoubleHashB(serializedCryptoAddress[4 : 4+abecryptoparam.PQRingCTPP.AddressPublicKeySerializeSize()])
 		// Before we proceed, we'll also store the root master private
 		// key within the database in an encrypted format. This is
 		// required as in the future, we may need to create additional
@@ -1350,41 +1334,40 @@ func generateAddressSk(seed []byte, length int, cnt uint64) ([]byte, []byte, []b
 	if len(seed) != length {
 		return nil, nil, nil, nil, errors.New("the length of given seed is not matched")
 	}
-	usedSeed := make([]byte, length)
-	halfLength := length >> 1
-	//
-	shake256 := sha3.NewShake256()
-	shake256.Reset()
-	var tmp []byte
-	tmp = make([]byte, halfLength+10)
-	copy(tmp, seed[:halfLength])
-	tmp[halfLength+0] = 'N'
-	tmp[halfLength+1] = 'o'
-	tmp[halfLength+2] = byte(cnt >> 0)
-	tmp[halfLength+3] = byte(cnt >> 1)
-	tmp[halfLength+4] = byte(cnt >> 2)
-	tmp[halfLength+5] = byte(cnt >> 3)
-	tmp[halfLength+6] = byte(cnt >> 4)
-	tmp[halfLength+7] = byte(cnt >> 5)
-	tmp[halfLength+8] = byte(cnt >> 6)
-	tmp[halfLength+9] = byte(cnt >> 7)
-	shake256.Write(tmp)
-	shake256.Read(usedSeed[:halfLength])
+	seedHalfLength := length >> 1
+	halfLength := abecryptoparam.PQRingCTPP.ParamSeedBytesLen()
+	usedSeed := make([]byte, 2*halfLength)
 
-	shake256.Reset()
-	tmp = make([]byte, halfLength+10)
-	copy(tmp, seed[halfLength:])
-	tmp = append(tmp, 'N', 'o')
-	tmp = append(tmp, byte(cnt>>0))
-	tmp = append(tmp, byte(cnt>>1))
-	tmp = append(tmp, byte(cnt>>2))
-	tmp = append(tmp, byte(cnt>>3))
-	tmp = append(tmp, byte(cnt>>4))
-	tmp = append(tmp, byte(cnt>>5))
-	tmp = append(tmp, byte(cnt>>6))
-	tmp = append(tmp, byte(cnt>>7))
-	shake256.Write(tmp)
-	shake256.Read(usedSeed[halfLength:])
+	var tmp []byte
+	tmp = make([]byte, seedHalfLength+10)
+	copy(tmp, seed[:seedHalfLength])
+	tmp[seedHalfLength+0] = 'N'
+	tmp[seedHalfLength+1] = 'o'
+	tmp[seedHalfLength+2] = byte(cnt >> 0)
+	tmp[seedHalfLength+3] = byte(cnt >> 1)
+	tmp[seedHalfLength+4] = byte(cnt >> 2)
+	tmp[seedHalfLength+5] = byte(cnt >> 3)
+	tmp[seedHalfLength+6] = byte(cnt >> 4)
+	tmp[seedHalfLength+7] = byte(cnt >> 5)
+	tmp[seedHalfLength+8] = byte(cnt >> 6)
+	tmp[seedHalfLength+9] = byte(cnt >> 7)
+	t := sha3.Sum512(tmp)
+	copy(usedSeed[:halfLength], t[:])
+
+	tmp = make([]byte, seedHalfLength+10)
+	copy(tmp, seed[seedHalfLength:])
+	tmp[seedHalfLength+0] = 'N'
+	tmp[seedHalfLength+1] = 'o'
+	tmp[seedHalfLength+2] = byte(cnt >> 0)
+	tmp[seedHalfLength+3] = byte(cnt >> 1)
+	tmp[seedHalfLength+4] = byte(cnt >> 2)
+	tmp[seedHalfLength+5] = byte(cnt >> 3)
+	tmp[seedHalfLength+6] = byte(cnt >> 4)
+	tmp[seedHalfLength+7] = byte(cnt >> 5)
+	tmp[seedHalfLength+8] = byte(cnt >> 6)
+	tmp[seedHalfLength+9] = byte(cnt >> 7)
+	t = sha3.Sum512(tmp)
+	copy(usedSeed[halfLength:], t[:])
 
 	return abecrypto.CryptoAddressKeyGen(usedSeed, abecryptoparam.CryptoSchemePQRingCT)
 }
