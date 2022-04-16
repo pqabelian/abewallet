@@ -1,7 +1,7 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/abesuite/abec v0.9.2-beta.0.20220415121809-0b786c28ece2 h1:8n5ESJmX66TObDGBgGfO+f4OZnHMwQkgzkvNreKfn/o=
-github.com/abesuite/abec v0.9.2-beta.0.20220415121809-0b786c28ece2/go.mod h1:xrpOPCODZJkTmoKAGi7JpwRQjgBL0s4Y1WRxZgwRKFk=
+github.com/abesuite/abec v0.9.2-beta.0.20220416122405-4dad45547cf7 h1:tL2x/WYV3JpLoI2aZuHghFVrpGeHDC6hRleBJmn/fCg=
+github.com/abesuite/abec v0.9.2-beta.0.20220416122405-4dad45547cf7/go.mod h1:xrpOPCODZJkTmoKAGi7JpwRQjgBL0s4Y1WRxZgwRKFk=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd h1:BNI2MkhhtofxM0sTP8WmdcT4chaAKZOsyhspB58DSrM=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd/go.mod h1:eo8+6JwPaqdnrzzGmGXEH3nOYknOkk8GtuXw7Bo+f08=
 github.com/abesuite/go-spew v1.1.1 h1:8v1IQu/pRuElOpgwrBLmtxsSTEEK+fCBBOw4VYE9fx8=

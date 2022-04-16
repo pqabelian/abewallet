@@ -1,6 +1,7 @@
 package wallet
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abecrypto"
@@ -15,6 +16,7 @@ import (
 	"github.com/abesuite/abewallet/walletdb"
 	"github.com/abesuite/abewallet/wtxmgr"
 	"math"
+	"math/big"
 	"sort"
 	"strings"
 )
@@ -623,7 +625,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 		targetValue += abeutil.Amount(txOutDescs[i].GetValue())
 	}
 
-	if targetValue < 0 || targetValue > abeutil.MaxNeutrino {
+	if targetValue < 0 || targetValue > abeutil.Amount(abeutil.MaxNeutrino) {
 		return nil, fmt.Errorf("target output value %v exceeds the maximum allowd value %v", targetValue, abeutil.MaxNeutrino)
 	}
 	var selectedTxos []*wtxmgr.UnspentUTXO
@@ -982,9 +984,16 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 			return nil, err
 		}
 		txOutDescs = append(txOutDescs, abecrypto.NewAbeTxOutDesc(addrBytes, uint64(currentTotal-txFee-targetValue)))
+		// random the outputs
+		r, err := rand.Int(rand.Reader, big.NewInt(int64(len(txOutDescs))))
+		if err != nil {
+			return nil, err
+		}
+		index := r.Int64()
+		txOutDescs[len(txOutDescs)-1], txOutDescs[index] = txOutDescs[index], txOutDescs[len(txOutDescs)-1]
 	}
 
-	PrintNewUTXOs(txOutDescs, flag, txFee)
+	//PrintNewUTXOs(txOutDescs, flag, txFee)
 
 	//TODO(abe) 20210627: to sure the txmemo?
 	transferTxTemplate, err := createTransferTxAbeMsgTemplate(txIns, len(txOutDescs), []byte{}, uint64(txFee))

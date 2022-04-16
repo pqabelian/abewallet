@@ -519,18 +519,19 @@ func (r Ring) Hash() []byte {
 	//	todo: AliceBob 20210616, Version is not handled
 	//  todo: what is the relation between the ring here and the utxoring in abec? Shall they be kept consistent?
 
-	blockNum, err := wire.GetBlockNumPerRingGroupByRingVersion(r.Version)
-	if err != nil {
-		return nil
-	}
-	size := 4 + 1 + int(blockNum)*chainhash.HashSize + 1 + len(r.TxHashes)*(chainhash.HashSize+1)
+	//blockNum, err := wire.GetBlockNumPerRingGroupByRingVersion(r.Version)
+	//if err != nil {
+	//	return nil
+	//}
+	blockNum := len(r.BlockHashes)
+	size := 4 + 1 + blockNum*chainhash.HashSize + 1 + len(r.TxHashes)*(chainhash.HashSize+1)
 	v := make([]byte, size)
 	offset := 0
 	byteOrder.PutUint32(v[offset:offset+4], r.Version)
 	offset += 4
-	v[offset] = blockNum
+	v[offset] = uint8(blockNum)
 	offset += 1
-	for i := 0; i < int(blockNum); i++ {
+	for i := 0; i < blockNum; i++ {
 		copy(v[offset:offset+32], r.BlockHashes[i][:])
 		offset += 32
 	}
@@ -587,7 +588,8 @@ type RingHashSerialNumbers struct {
 
 // ring hash || transaction number || [transaction hash||output index...]||Origin serial number ||[index||serial number...]||isMy||Spent||Got serial number||[serial number...]
 func (u UTXORingAbe) SerializeSize() int {
-	return 4 + 32 + 1 + len(u.TxHashes)*(32+1) + 1 + len(u.OriginSerialNumberes)*(1+32) + 2 + 1 + len(u.GotSerialNumberes)*32
+	snSize, _ := abecryptoparam.GetSerialNumberSerializeSize(u.Version)
+	return 4 + 32 + 1 + len(u.TxHashes)*(32+1) + 1 + len(u.OriginSerialNumberes)*(1+snSize) + 2 + 1 + len(u.GotSerialNumberes)*snSize
 
 }
 func (u UTXORingAbe) Serialize() []byte {
@@ -609,11 +611,12 @@ func (u UTXORingAbe) Serialize() []byte {
 	}
 	res[offset] = uint8(len(u.OriginSerialNumberes))
 	offset += 1
+	snSize, _ := abecryptoparam.GetSerialNumberSerializeSize(u.Version)
 	for index, sn := range u.OriginSerialNumberes {
 		res[offset] = index
 		offset += 1
-		copy(res[offset:offset+32], sn[:])
-		offset += 32
+		copy(res[offset:offset+snSize], sn[:])
+		offset += snSize
 	}
 	var temp uint16
 	for i := 0; i < txLen; i++ {
@@ -629,8 +632,8 @@ func (u UTXORingAbe) Serialize() []byte {
 	res[offset] = uint8(len(u.GotSerialNumberes))
 	offset += 1
 	for i := 0; i < len(u.GotSerialNumberes); i++ {
-		copy(res[offset:offset+32], u.GotSerialNumberes[i][:])
-		offset += 32
+		copy(res[offset:offset+snSize], u.GotSerialNumberes[i][:])
+		offset += snSize
 	}
 	return res
 }
@@ -655,16 +658,15 @@ func (u *UTXORingAbe) Deserialize(b []byte) error {
 	}
 	originSnSize := int(b[offset])
 	offset += 1
+	snSize, _ := abecryptoparam.GetSerialNumberSerializeSize(u.Version)
 	for i := 0; i < originSnSize; i++ {
-		h, err := chainhash.NewHash(b[offset+1 : offset+33])
-		if err != nil {
-			return err
-		}
+		h := make([]byte, snSize)
+		copy(h, b[offset+1:offset+1+snSize])
 		if u.OriginSerialNumberes == nil {
 			u.OriginSerialNumberes = make(map[uint8][]byte)
 		}
 		u.OriginSerialNumberes[b[offset]] = h[:]
-		offset += 33
+		offset += 1 + snSize
 	}
 	temp := byteOrder.Uint16(b[offset : offset+2])
 	offset += 2
@@ -682,9 +684,9 @@ func (u *UTXORingAbe) Deserialize(b []byte) error {
 	offset += 1
 	u.GotSerialNumberes = make([][]byte, gotSnSize)
 	for i := 0; i < gotSnSize; i++ {
-		u.GotSerialNumberes[i] = make([]byte, 32)
-		copy(u.GotSerialNumberes[i][:], b[offset:offset+32])
-		offset += 32
+		u.GotSerialNumberes[i] = make([]byte, snSize)
+		copy(u.GotSerialNumberes[i][:], b[offset:offset+snSize])
+		offset += snSize
 	}
 	u.AllSpent = false
 	return nil
@@ -1783,8 +1785,6 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 
 	// store all outputs of coinbaseTx which belong to us into a map : coinbaseOutput
 	for i := 0; i < len(coinbaseTx.TxOuts); i++ {
-		// TODO(20220322): there would check the crypto version
-		// TODO: there would Extract the coin-address from the TxOut[i].TxoScript
 		coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(coinbaseTx.TxOuts[i].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
 		if err != nil {
 			return err
@@ -1801,11 +1801,12 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 		if err != nil {
 			return err
 		}
-		if valid && v != 0 {
+		if valid {
 			amt := abeutil.Amount(v)
 			log.Infof("(Coinbase) Find my txo at block height %d with value %v", block.Height, amt.ToABE())
 			freezedBal += amt
 			balance += amt
+			// TODO: the transaction hash and index cannot be a unique key
 			k := wire.OutPointAbe{
 				TxHash: coinbaseTx.TxHash(),
 				Index:  uint8(i),
@@ -1946,6 +1947,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 				if err != nil {
 					return err
 				}
+				DeleteNeedUpdateUTXORing(txMgrNs, k[:])
 				// TODO(abe):when delete the utxo ring, we also delete the ring? no,take a heigh flag
 				err = updateDeletedHeightRingDetails(txMgrNs, k[:], block.Height)
 				if err != nil {

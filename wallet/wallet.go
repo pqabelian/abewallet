@@ -1594,8 +1594,9 @@ out:
 					if err != nil {
 						return err
 					}
+					nullSn, _ := abecryptoparam.GetNullSerialNumber(utxoring.Version)
 					for i := 0; i < len(utxoring.IsMy); i++ {
-						if utxoring.IsMy[i] && (utxoring.OriginSerialNumberes == nil || bytes.Equal(utxoring.OriginSerialNumberes[uint8(i)], chainhash.ZeroHash[:])) {
+						if utxoring.IsMy[i] && (utxoring.OriginSerialNumberes == nil || bytes.Equal(utxoring.OriginSerialNumberes[uint8(i)], nullSn)) {
 							coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(ring.TxoScripts[i], abecryptoparam.CryptoSchemePQRingCT)
 							if err != nil {
 								return err
@@ -1666,7 +1667,6 @@ out:
 			} else {
 				req.resp <- refreshResponse{true, nil}
 			}
-			continue
 			heldUnlock.release()
 
 		case <-quit:
