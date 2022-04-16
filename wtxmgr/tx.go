@@ -561,17 +561,13 @@ type UTXORingAbe struct {
 	//InputIndexes         []uint8
 }
 
-func NewUTXORingAbeFromRing(r *Ring) (*UTXORingAbe, error) {
-	hash, err := chainhash.NewHash(r.Hash())
-	if err != nil {
-		return nil, err
-	}
+func NewUTXORingAbeFromRing(r *Ring, ringHash chainhash.Hash) (*UTXORingAbe, error) {
 	ringSize := len(r.TxHashes)
 	return &UTXORingAbe{
 		Version:              r.Version,
 		AllSpent:             false,
 		Refreshed:            false,
-		RingHash:             *hash,
+		RingHash:             ringHash,
 		TxHashes:             r.TxHashes,
 		OutputIndexes:        r.Index,
 		OriginSerialNumberes: make(map[uint8][]byte),
@@ -2247,7 +2243,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 						}
 
 						//generate the utxoring, then add it to wllAddUTXORing for updating
-						utxoRing, err = NewUTXORingAbeFromRing(&ring)
+						utxoRing, err = NewUTXORingAbeFromRing(&ring, ringHash)
 						if err != nil {
 							return err
 						}
