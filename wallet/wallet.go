@@ -706,12 +706,8 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 		// If the rollback happened to go beyond our birthday stamp,
 		// we'll need to find a new one by syncing with the chain again
 		// until finding one.
-		if rollbackStamp.Height <= birthdayStamp.Height &&
-			rollbackStamp.Hash != birthdayStamp.Hash {
-
-			err := w.ManagerAbe.SetBirthdayBlock(
-				addrmgrNs, rollbackStamp, true,
-			)
+		if rollbackStamp.Height <= birthdayStamp.Height && !bytes.Equal(rollbackStamp.Hash[:], birthdayStamp.Hash[:]) {
+			err := w.ManagerAbe.SetBirthdayBlock(addrmgrNs, rollbackStamp, true)
 			if err != nil {
 				return err
 			}
@@ -721,7 +717,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 		// stale state. `Rollback` unconfirms transactions at and beyond
 		// the passed height, so add one to the new synced-to height to
 		// prevent unconfirming transactions in the synced-to block.
-		return w.TxStore.RollbackAbe(txmgrNs, rollbackStamp.Height+1)
+		return w.TxStore.RollbackAbe(txmgrNs, rollbackStamp.Height)
 	})
 	if err != nil {
 		return err
