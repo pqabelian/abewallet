@@ -1200,7 +1200,10 @@ func valueBlockAbeInput(blockInputs *RingHashSerialNumbers) []byte {
 		addedSNs := blockInputs.serialNumbers[k]
 		uSize := v.SerializeSize()
 		// totoal size||utxo ring size || serialized utxo ring || added serialNumber numbers || [serialNumber...]
-		size := 2 + 2 + uSize + 1 + len(addedSNs)*32 // TODO(osy):the usize is redundancy
+		size := 2 + 2 + uSize + 1 + len(addedSNs)
+		for i := 0; i < len(addedSNs); i++ {
+			size += 1 + len(addedSNs[i])
+		}
 		tmp := make([]byte, size)
 		offset := 0
 		byteOrder.PutUint16(tmp[offset:offset+2], uint16(size))
@@ -1212,8 +1215,10 @@ func valueBlockAbeInput(blockInputs *RingHashSerialNumbers) []byte {
 		tmp[offset] = uint8(len(addedSNs))
 		offset += 1
 		for j := 0; j < len(addedSNs); j++ {
-			copy(tmp[offset:offset+32], addedSNs[j][:])
-			offset += 32
+			tmp[offset] = byte(len(addedSNs[j]))
+			offset += 1
+			copy(tmp[offset:offset+len(addedSNs[j])], addedSNs[j][:])
+			offset += len(addedSNs[j])
 		}
 		totalSize += offset
 		res = append(res, tmp...)
@@ -1269,7 +1274,10 @@ func fetchBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) ([]*UTXORingAbe, 
 		serialNs[i] = make([][]byte, addedSNs)
 		offset += 1
 		for j := 0; j < addedSNs; j++ {
-			copy(serialNs[i][j][:], v[offset:offset+32])
+			snLen := int(v[offset])
+			offset += 1
+			serialNs[i][j] = make([]byte, snLen)
+			copy(serialNs[i][j][:], v[offset:offset+snLen])
 			offset += 32
 		}
 	}
@@ -1562,7 +1570,7 @@ func deleteUnspentTXO(ns walletdb.ReadWriteBucket, k []byte) error {
 // height, from coinbase,amount,generation time, rinhash,serialNumber，spentBy, spentTime,
 func valueSpentButUnminedTXO(version uint32, height int, fromCoinBase bool, amount int64, index uint8, generationTime time.Time,
 	ringHash chainhash.Hash, ringSize uint8, spentBy chainhash.Hash, spentTime time.Time) []byte {
-	size := 4 + 4 + 1 + 8 +1+ 8 + 32 + 1 + 32 + 8
+	size := 4 + 4 + 1 + 8 + 1 + 8 + 32 + 1 + 32 + 8
 	v := make([]byte, size)
 	offset := 0
 	byteOrder.PutUint32(v[offset:offset+4], version)
@@ -1659,7 +1667,7 @@ func deleteSpentButUnminedTXO(ns walletdb.ReadWriteBucket, k []byte) error {
 // its value is relevant information : height,From coinbase,amount,generation time, rinhash,serialNumber，spentTime,confirmedTime
 func valueSpentConfirmedTXO(version uint32, height int, fromCoinBase bool, amount int64, index uint8, generationTime time.Time,
 	ringHash chainhash.Hash, ringSize uint8, spentBy chainhash.Hash, spentTime time.Time, confirmTime time.Time) []byte {
-	size := 4 + 4 + 1 + 8 +1+ 8 + 32 + 1 + 32 + 8 + 8
+	size := 4 + 4 + 1 + 8 + 1 + 8 + 32 + 1 + 32 + 8 + 8
 	v := make([]byte, size)
 	offset := 0
 	byteOrder.PutUint32(v[offset:offset+4], version)
@@ -1732,7 +1740,7 @@ func fetchSpentConfirmedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, in
 	offset += 8
 	copy(sct.RingHash[:], v[offset:offset+32])
 	offset += 32
-	sct.RingSize= v[offset]
+	sct.RingSize = v[offset]
 	offset += 1
 	copy(sct.SpentByHash[:], v[offset:offset+32])
 	offset += 32

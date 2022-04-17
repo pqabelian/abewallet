@@ -714,8 +714,8 @@ func (u *UTXORingAbe) AddGotSerialNumber(serialNumber []byte) error {
 	// update
 	for i := 0; i < len(u.IsMy); i++ {
 		if u.IsMy[i] && !u.Spent[i] {
-			hash, ok := u.OriginSerialNumberes[uint8(i)]
-			if ok && bytes.Equal(hash, serialNumber) {
+			sn, ok := u.OriginSerialNumberes[uint8(i)]
+			if ok && bytes.Equal(sn, serialNumber) {
 				u.Spent[i] = true
 				break
 			}
@@ -981,8 +981,8 @@ func (s *Store) InsertTxAbe(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecordAbe,
 		//find the index
 		index := -1
 		// We expected that when spent this utxo, the utxo ring will be update when add the script
-		for k, v := range u.OriginSerialNumberes {
-			if bytes.Equal(v, rec.MsgTx.TxIns[i].SerialNumber) {
+		for k, sn := range u.OriginSerialNumberes {
+			if bytes.Equal(sn, rec.MsgTx.TxIns[i].SerialNumber) {
 				index = int(k)
 				break
 			}
