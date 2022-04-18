@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bufio"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abewallet/internal/cfgutil"
@@ -9,6 +12,7 @@ import (
 	"github.com/abesuite/abewallet/wallet"
 	"github.com/abesuite/abewallet/wordlists"
 	"github.com/jessevdk/go-flags"
+	"io"
 	"net"
 	"os"
 	"os/user"
@@ -27,6 +31,7 @@ const (
 	defaultLogFilename      = "abewallet.log"
 	defaultRPCMaxClients    = 10
 	defaultRPCMaxWebsockets = 25
+	sampleConfigFilename    = "sample-abewallet.conf"
 
 	walletDbName = "wallet.db"
 )
@@ -326,6 +331,17 @@ func loadConfig() (*config, []string, error) {
 			configFilePath = filepath.Join(appDataDir, defaultConfigFilename)
 		}
 	}
+
+	// create default config file if not exists
+	if _, err := os.Stat(configFilePath); os.IsNotExist(err) {
+		err := createDefaultConfigFile(configFilePath)
+		fmt.Printf("Creating configuration file at %v\n", configFilePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating a "+
+				"default config file: %v\n", err)
+		}
+	}
+
 	err = flags.NewIniParser(parser).ParseFile(configFilePath)
 	if err != nil {
 		if _, ok := err.(*os.PathError); !ok {
@@ -697,4 +713,71 @@ func loadConfig() (*config, []string, error) {
 	}
 
 	return &cfg, remainingArgs, nil
+}
+
+// createDefaultConfig copies the file sample-abewallet.conf to the given destination path,
+// and populates it with some randomly generated RPC username and password.
+func createDefaultConfigFile(destinationPath string) error {
+	// Create the destination directory if it does not exists
+	err := os.MkdirAll(filepath.Dir(destinationPath), 0700)
+	if err != nil {
+		return err
+	}
+
+	// We assume sample config file path is same as binary
+	path, err := filepath.Abs(filepath.Dir(os.Args[0]))
+	if err != nil {
+		return err
+	}
+	sampleConfigPath := filepath.Join(path, sampleConfigFilename)
+
+	// We generate a random user and password
+	randomBytes := make([]byte, 20)
+	_, err = rand.Read(randomBytes)
+	if err != nil {
+		return err
+	}
+	generatedRPCUser := base64.StdEncoding.EncodeToString(randomBytes)
+
+	_, err = rand.Read(randomBytes)
+	if err != nil {
+		return err
+	}
+	generatedRPCPass := base64.StdEncoding.EncodeToString(randomBytes)
+
+	src, err := os.Open(sampleConfigPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	dest, err := os.OpenFile(destinationPath,
+		os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	defer dest.Close()
+
+	// We copy every line from the sample config file to the destination,
+	// only replacing the two lines for username and password
+	reader := bufio.NewReader(src)
+	for err != io.EOF {
+		var line string
+		line, err = reader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return err
+		}
+
+		if strings.Contains(line, "; username=") {
+			line = "username=" + generatedRPCUser + "\n"
+		} else if strings.Contains(line, "; password=") {
+			line = "password=" + generatedRPCPass + "\n"
+		}
+
+		if _, err := dest.WriteString(line); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
