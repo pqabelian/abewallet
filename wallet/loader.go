@@ -258,7 +258,7 @@ func (l *Loader) createNewWalletAbe(pubPassphrase, privPassphrase,
 			}
 		}
 
-		genesisBlockRecords, err := wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(chaincfg.MainNetParams.GenesisBlock)
+		genesisBlockRecords, err := wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(l.chainParams.GenesisBlock)
 		if err != nil {
 			return err
 		}

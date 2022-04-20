@@ -310,7 +310,7 @@ func Seed(reader *bufio.Reader) ([]byte, uint64, error) {
 		tmp := make([]byte, 4, 4+32)
 		binary.BigEndian.PutUint32(tmp[0:4], uint32(abecryptoparam.CryptoSchemePQRingCT))
 		seed = append(tmp, seed[:]...)
-		return seed, 0, nil
+		return seed, 0xFFFF_FFFF_FFFF_FFFF, nil
 	}
 
 	for {
