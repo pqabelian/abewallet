@@ -1671,7 +1671,7 @@ func sendToPayees(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	// Recreate address/amount pairs, using abeutil.Amount.
 	pairs := make(map[string]abeutil.Amount, len(cmd.Amounts))
 	for k, v := range cmd.Amounts {
-		amt, err := abeutil.NewAmountAbe(float64(v))
+		amt, err := abeutil.NewAmountAbe(v)
 		if err != nil {
 			return nil, err
 		}
@@ -1680,8 +1680,8 @@ func sendToPayees(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 
 	//	todo: the fee policy
 	feeSatPerKb := txrules.DefaultRelayFeePerKb // todo: AliceBobScorpio, should use the feeSatPerKb received from abec
-	scaleToFeeSatPerKb := float64(*cmd.ScaleToFeeSatPerKb)
-	feeSpecified, err := abeutil.NewAmountAbe(float64(*cmd.FeeSpecified))
+	scaleToFeeSatPerKb := *cmd.ScaleToFeeSatPerKb
+	feeSpecified, err := abeutil.NewAmountAbe(*cmd.FeeSpecified)
 	if err != nil {
 		return nil, err
 	}

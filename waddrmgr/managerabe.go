@@ -3,7 +3,6 @@ package waddrmgr
 import (
 	"crypto/rand"
 	"crypto/sha512"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abecrypto"
@@ -1179,7 +1178,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 		}
 
 		// restore the previous address
-		for i := uint64(0); i < end; i++ {
+		for i := uint64(0); i <= end; i++ {
 			// generate an address and information for spending
 			serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, err := generateAddressSk(usedSeed, 2*seedLength, i)
 			if err != nil {
@@ -1215,80 +1214,12 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 		}
 
 		startSeedStatus := end
-		// generate an address and information for spending
-		serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, err := generateAddressSk(usedSeed, 2*seedLength, startSeedStatus)
-		if err != nil {
-			return fmt.Errorf("failed to generate address and key")
-		}
-		b := make([]byte, len(serializedCryptoAddress)+1)
-		b[0] = chainParams.PQRingCTID
-		copy(b[1:], serializedCryptoAddress)
-		// generate the hash of (abecrypto.CryptoSchemePQRINGCT || serialized address)
-		hash := chainhash.DoubleHashB(b)
-		b = append(b, hash...)
-		fmt.Println(`Please remember the initial address:`)
-		fmt.Println(hex.EncodeToString(b))
-		// Next, for each registers default manager scope, we'll
-		// create the hardened cointype key for it, as well as the
-		// first default account.
-		//	todo(ABE): ABE does not support key scope
-		//for _, defaultScope := range DefaultKeyScopes {
-		//	err := createManagerKeyScope(
-		//		ns, defaultScope, rootKey, cryptoKeyPub, cryptoKeyPriv,
-		//	)
-		//	if err != nil {
-		//		return maybeConvertDbError(err)
-		//	}
-		//}
-
-		addKey := chainhash.DoubleHashB(serializedCryptoAddress[4 : 4+abecryptoparam.PQRingCTPP.AddressPublicKeySerializeSize()])
-		// Before we proceed, we'll also store the root master private
-		// key within the database in an encrypted format. This is
-		// required as in the future, we may need to create additional
-		// scoped key managers.
-		//masterHDPrivKeyEnc, err :=
-		//	cryptoKeyPriv.Encrypt([]byte(rootKey.String()))
-		//if err != nil {
-		//	return maybeConvertDbError(err)
-		//}
-		//masterHDPubKeyEnc, err :=
-		//	cryptoKeyPub.Encrypt([]byte(rootPubKey.String()))
-		//if err != nil {
-		//	return maybeConvertDbError(err)
-		//}
 
 		err = putSeedAbe(ns, seedEnc)
 		if err != nil {
 			return maybeConvertDbError(err)
 		}
 		err = putSeedStatusAbe(ns, startSeedStatus)
-		if err != nil {
-			return maybeConvertDbError(err)
-		}
-
-		addressSecretKeySpEnc, err :=
-			cryptoKeyPriv.Encrypt(serializedASksp)
-		if err != nil {
-			return maybeConvertDbError(err)
-		}
-		addressSecretKeySnEnc, err :=
-			cryptoKeyPub.Encrypt(serializedASksn)
-		if err != nil {
-			return maybeConvertDbError(err)
-		}
-		addressKeyEnc, err :=
-			cryptoKeyPub.Encrypt(serializedCryptoAddress)
-		if err != nil {
-			return maybeConvertDbError(err)
-		}
-		valueSecretKeyEnc, err :=
-			cryptoKeyPub.Encrypt(serializedVSk)
-		if err != nil {
-			return maybeConvertDbError(err)
-		}
-
-		err = putAddressKeysEncAbe(ns, addKey, valueSecretKeyEnc,
-			addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
 		if err != nil {
 			return maybeConvertDbError(err)
 		}

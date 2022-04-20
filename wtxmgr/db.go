@@ -1773,10 +1773,7 @@ func ConfirmSpentTXO(ns walletdb.ReadWriteBucket, txHash chainhash.Hash, index u
 	if v != nil { //from the MaturedOutput
 		//otherwise it has been moved to spentButUnmined bucket
 		// update the balances
-		amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[9:17])))
-		if err != nil {
-			return err
-		}
+		amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
 		balance -= amt
 		spendableBal -= amt
 		v = append(v, sn[:]...)
@@ -1791,10 +1788,7 @@ func ConfirmSpentTXO(ns walletdb.ReadWriteBucket, txHash chainhash.Hash, index u
 	} else { //from the spentButUnmined bucket
 		v = existsRawSpentButUnminedTXO(ns, k)
 		if v != nil { //otherwise it has been moved to spentButUnmined bucket
-			amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[5:13])))
-			if err != nil {
-				return err
-			}
+			amt := abeutil.Amount(byteOrder.Uint64(v[5:13]))
 			balance -= amt
 			// freezedBal -= amt
 			v = append(v, sn[:]...)
