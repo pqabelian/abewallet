@@ -1003,10 +1003,7 @@ func (s *Store) InsertTxAbe(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecordAbe,
 		}
 		// update the spendable balance
 		spendableBal, err := fetchSpenableBalance(wtxmgrNs)
-		amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[9:17])))
-		if err != nil {
-			return err
-		}
+		amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
 		spendableBal -= amt
 		err = putSpenableBalance(wtxmgrNs, spendableBal)
 		if err != nil {
@@ -1163,11 +1160,8 @@ func (s *Store) InsertGenesisBlockAbeNew(ns walletdb.ReadWriteBucket, block *Blo
 			return err
 		}
 		if valid && v != 0 {
-			amt, err := abeutil.NewAmountAbe(float64(v))
-			if err != nil {
-				return err
-			}
-			log.Infof("(Coinbase) Find my txo at block height %d with value %v", block.Height, amt.ToABE())
+			amt := abeutil.Amount(v)
+			log.Infof("(Coinbase) Find my txo at block height %d (hash %s) with value %v", block.Height, block.Hash, amt.ToABE())
 			freezedBal += amt
 			balance += amt
 			k := wire.OutPointAbe{
@@ -1799,7 +1793,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 		}
 		if valid {
 			amt := abeutil.Amount(v)
-			log.Infof("(Coinbase) Find my txo at block height %d with value %v", block.Height, amt.ToABE())
+			log.Infof("(Coinbase) Find my txo at block height %d (hash %s) with value %v", block.Height, block.Hash, amt.ToABE())
 			freezedBal += amt
 			balance += amt
 			// TODO: the transaction hash and index cannot be a unique key
@@ -1889,10 +1883,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 					if v != nil {
 						//otherwise it has been moved to spentButUnmined bucket
 						// update the balances
-						amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[9:17])))
-						if err != nil {
-							return err
-						}
+						amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
 						balance -= amt
 						spendableBal -= amt
 						v = append(v, serialNumber[:]...)
@@ -1907,10 +1898,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 					} else {
 						v = existsRawSpentButUnminedTXO(txMgrNs, k)
 						if v != nil { //otherwise it has been moved to spentButUnmined bucket
-							amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[9:17])))
-							if err != nil {
-								return err
-							}
+							amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
 							balance -= amt
 							// freezedBal -= amt
 							v = append(v, serialNumber[:]...)
@@ -1977,11 +1965,8 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 				return err
 			}
 			if valid && v != 0 {
-				amt, err := abeutil.NewAmountAbe(float64(v))
-				if err != nil {
-					return err
-				}
-				log.Infof("(Transfer) Find my txo at block height %d with value %v", block.Height, amt.ToABE())
+				amt := abeutil.Amount(v)
+				log.Infof("(Transfer) Find my txo at block height %d (hash %s) with value %v", block.Height, block.Hash, amt.ToABE())
 				freezedBal += amt
 				balance += amt
 				k := wire.OutPointAbe{
@@ -2029,7 +2014,8 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 	}
 
 	// move matured coinbase outputs to maturedOutput bucket
-	if block.Height >= int32(s.chainParams.CoinbaseMaturity)+2 && block.Height%3 == 2 {
+	blockNum := int32(wire.GetBlockNumPerRingGroupByBlockHeight(block.Height))
+	if block.Height >= int32(s.chainParams.CoinbaseMaturity)+2 && block.Height%blockNum == blockNum-1 {
 		for i := 0; i < len(maturedBlockHashs); i++ {
 			utxos, err := fetchImmaturedCoinbaseOutput(txMgrNs, block.Height-int32(s.chainParams.CoinbaseMaturity)-int32(i), *maturedBlockHashs[i])
 			if err != nil {
@@ -2037,16 +2023,14 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 			}
 			for op, utxo := range utxos {
 				v := valueUnspentTXO(true, utxo.Version, block.Height-int32(s.chainParams.CoinbaseMaturity)-int32(i), utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
-				amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[9:17])))
-				if err != nil {
-					return err
-				}
+				amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
 				spendableBal += amt
 				freezedBal -= amt
 				err = putRawMaturedOutput(txMgrNs, canonicalOutPointAbe(op.TxHash, op.Index), v)
 				if err != nil {
 					return err
 				}
+				log.Infof("Coinbase txo at Height %d (Hash %s) , Value %v is matured!", utxo.Height, maturedBlockHashs[i], float64(utxo.Amount)/math.Pow10(7))
 			}
 		}
 	}
@@ -2054,7 +2038,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 	// fetch the outputs of recent three blocks and form rings
 	// move matured transfer outputs of previous two blocks to maturedOutput bucket
 	// TODO(abe): check the correctness of generating ring and modify the utxo in bucket unspentUtxo
-	if block.Height%3 == 2 {
+	if block.Height%blockNum == blockNum-1 {
 		var block1CoinbaseUTXO, block1TransferUTXO, block0CoinbaseUTXO, block0TransferUTXO map[wire.OutPointAbe]*UnspentUTXO
 		// if the height is match, it need to generate the utxo ring
 		// if the number of utxo in previous two block is not zero, take it
@@ -2308,13 +2292,10 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 		// transfer output -> mature
 		for op, utxo := range block1TransferUTXO {
 			v := valueUnspentTXO(false, utxo.Version, utxo.Height, utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
-			amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[9:17])))
-			if err != nil {
-				return err
-			}
+			amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
 			spendableBal += amt
 			freezedBal -= amt
-			log.Infof("Transfer txo at Height %d , Value %v is matured!", utxo.Height, float64(utxo.Amount)/math.Pow10(7))
+			log.Infof("Transfer txo at Height %d (Hash %s) , Value %v is matured!", utxo.Height, msgBlock1.BlockHash(), float64(utxo.Amount)/math.Pow10(7))
 			err = putRawMaturedOutput(txMgrNs, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
 				return err
@@ -2322,13 +2303,10 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 		}
 		for op, utxo := range block0TransferUTXO {
 			v := valueUnspentTXO(false, utxo.Version, utxo.Height, utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
-			amt, err := abeutil.NewAmountAbe(float64(byteOrder.Uint64(v[9:17])))
-			if err != nil {
-				return err
-			}
+			amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
 			spendableBal += amt
 			freezedBal -= amt
-			log.Infof("Transfer txo at Height %d , Value %v is matured!", utxo.Height, float64(utxo.Amount)/math.Pow10(7))
+			log.Infof("Transfer txo at Height %d (Hash %s) , Value %v is matured!", utxo.Height, msgBlock0.BlockHash(), float64(utxo.Amount)/math.Pow10(7))
 			err = putRawMaturedOutput(txMgrNs, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
 				return err
@@ -2345,13 +2323,13 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 	}
 
 	// move the matured transfer outputs to maturedOutput bucket
-	if block.Height%3 == 2 {
+	if block.Height%blockNum == blockNum-1 {
 		var newBal uint64 = 0
 		if err != nil {
 			return err
 		}
 		for op, utxo := range transferOutputs {
-			log.Infof("Transfer txo at Height %d , Value %v is matured!", utxo.Height, float64(utxo.Amount)/math.Pow10(7))
+			log.Infof("Transfer txo at Height %d (Hash %s) , Value %v is matured!", utxo.Height, block.Hash, float64(utxo.Amount)/math.Pow10(7))
 			v := valueUnspentTXO(false, utxo.Version, utxo.Height, utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 			err = putRawMaturedOutput(txMgrNs, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
@@ -2359,10 +2337,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 			}
 			newBal += utxo.Amount
 		}
-		amt, err := abeutil.NewAmountAbe(float64(newBal))
-		if err != nil {
-			return err
-		}
+		amt := abeutil.Amount(newBal)
 		spendableBal += amt
 		freezedBal -= amt
 	} else { // immatured
@@ -3028,6 +3003,11 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 	maxHeight := height
 	// because we do not know whether the blockAbeIterator works properly,
 	// we just use as following:
+	blockNum := int32(wire.GetBlockNumPerRingGroupByBlockHeight(height))
+	specialFlag := false
+	if height%blockNum == blockNum-1 {
+		specialFlag = true
+	}
 	err = ns.NestedReadBucket(bucketBlockOutputs).ForEach(func(k []byte, v []byte) error {
 		heightK := int32(byteOrder.Uint32(k[0:4]))
 		if heightK >= height {
@@ -3035,6 +3015,9 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 			if maxHeight < heightK {
 				maxHeight = heightK
 			}
+		}
+		if specialFlag && heightK > height-blockNum {
+			keysToRemove[heightK] = k
 		}
 		return nil
 	})
@@ -3046,7 +3029,7 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 	// TODO(abe):use the blockabeIterator to iterator reversely the blockabe bucket
 	for i := maxHeight; i > height; i-- {
 		willDeleteRingHash := make(map[chainhash.Hash]struct{})
-		// modify the ring hash of outputs in previous two blocks
+		// modify the ring hash of outputs in previous two blocks if the block is the special height
 		blockNumOfRing := int32(wire.GetBlockNumPerRingGroupByBlockHeight(i))
 		if i%blockNumOfRing == blockNumOfRing-1 {
 			// previous blocks' outputs
@@ -3060,73 +3043,99 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 				if err != nil {
 					return err
 				}
-				trOutput, err := fetchImmaturedOutput(ns, i-j, *blockHash)
+				for _, utxo := range cbOutput {
+					tmp, err := chainhash.NewHash(utxo.RingHash[:])
+					if err != nil {
+						return err
+					}
+					if _, ok := willDeleteRingHash[*tmp]; !ok {
+						willDeleteRingHash[*tmp] = struct{}{}
+					}
+					utxo.RingHash = chainhash.ZeroHash
+				}
+				err = putRawImmaturedCoinbaseOutput(ns, keysToRemove[i], valueImmaturedCoinbaseOutput(cbOutput))
 				if err != nil {
 					return err
 				}
-				if cbOutput != nil || trOutput != nil {
-					err = deleteImmaturedCoinbaseOutput(ns, keysToRemove[i-j])
-					if err != nil {
-						return err
-					}
-					err = deleteImmaturedOutput(ns, keysToRemove[i-j])
-					if err != nil {
-						return err
-					}
-				} else {
-					outpoint, err := fetchBlockAbeOutputWithHeight(ns, i-j)
-					if err != nil {
-						return err
-					}
-					// otherwise, find it in mature bucket or spent bucket
-					for k := 0; k < len(outpoint); k++ {
-						key := canonicalOutPointAbe(outpoint[k].TxHash, outpoint[k].Index)
 
-						txo, err := fetchMaturedOutput(ns, outpoint[k].TxHash, outpoint[k].Index)
-						if err == nil { // this output is in unspent txo bucket
-							if _, ok := willDeleteRingHash[txo.RingHash]; !ok {
-								willDeleteRingHash[txo.RingHash] = struct{}{}
+				outpoint, err := fetchBlockAbeOutputWithHeight(ns, i-j)
+				if err != nil {
+					return err
+				}
+				trOutputs := make(map[wire.OutPointAbe]*UnspentUTXO, len(outpoint))
+				// otherwise, find it in mature bucket or spent bucket
+				for k := 0; k < len(outpoint); k++ {
+					// the coinbase output is handled
+					if _, ok := cbOutput[*outpoint[k]]; ok {
+						continue
+					}
+					txo, err := fetchMaturedOutput(ns, outpoint[k].TxHash, outpoint[k].Index)
+					if err == nil { // this output is in unspent txo bucket
+						if _, ok := willDeleteRingHash[txo.RingHash]; !ok {
+							willDeleteRingHash[txo.RingHash] = struct{}{}
+						}
+						amt := abeutil.Amount(txo.Amount)
+						spendableBal -= amt
+						freezedBal += amt
+						txo.RingHash = chainhash.ZeroHash
+						txo.RingSize = 0
+						txo.Index = 255
+						trOutputs[wire.OutPointAbe{
+							TxHash: outpoint[k].TxHash,
+							Index:  outpoint[k].Index,
+						}] = txo
+					} else {
+						//this output is in spent but unmined bucket
+						unmined, err := fetchSpentButUnminedTXO(ns, outpoint[k].TxHash, outpoint[k].Index)
+						if err == nil {
+							if _, ok := willDeleteRingHash[unmined.RingHash]; !ok {
+								willDeleteRingHash[unmined.RingHash] = struct{}{}
 							}
-							amt := abeutil.Amount(txo.Amount)
-							spendableBal -= amt
+							amt := abeutil.Amount(unmined.Amount)
 							freezedBal += amt
-							newV := valueUnspentTXO(txo.FromCoinBase, txo.Version, txo.Height, txo.Amount, txo.Index, txo.GenerationTime, chainhash.ZeroHash, 0)
-							err := putRawMaturedOutput(ns, key, newV)
-							if err != nil {
-								return fmt.Errorf("putRawUnspentTXO error in rollbackAbe : %v", err)
+							balance += amt
+							unmined.RingHash = chainhash.ZeroHash
+							unmined.RingSize = 0
+							trOutputs[wire.OutPointAbe{
+								TxHash: outpoint[k].TxHash,
+								Index:  outpoint[k].Index,
+							}] = &UnspentUTXO{
+								Version:        unmined.Version,
+								Height:         unmined.Height,
+								TxOutput:       unmined.TxOutput,
+								FromCoinBase:   unmined.FromCoinBase,
+								Amount:         unmined.Amount,
+								Index:          255,
+								GenerationTime: unmined.GenerationTime,
+								RingHash:       chainhash.ZeroHash,
+								RingSize:       0,
 							}
 						} else {
-							//this output is in spent but unmined bucket
-							unmined, err := fetchSpentButUnminedTXO(ns, outpoint[k].TxHash, outpoint[k].Index)
-							if err == nil {
-								if _, ok := willDeleteRingHash[txo.RingHash]; !ok {
-									willDeleteRingHash[txo.RingHash] = struct{}{}
-								}
-								amt := abeutil.Amount(unmined.Amount)
-								freezedBal += amt
-								balance += amt
-								newV := valueUnspentTXO(unmined.FromCoinBase, unmined.Version, unmined.Height, unmined.Amount, unmined.Index, unmined.GenerationTime, chainhash.ZeroHash, 0)
-								err = putRawMaturedOutput(ns, key, newV) // move to unspent txo bucket
-								if err != nil {
-									return fmt.Errorf("putRawUnspentTXO error in rollbackAbe : %v", err)
-								}
-
-							} else {
-								confirmed, err := fetchSpentButUnminedTXO(ns, outpoint[k].TxHash, outpoint[k].Index)
-								if err != nil {
-									return err // means error
-								}
-								if _, ok := willDeleteRingHash[txo.RingHash]; !ok {
-									willDeleteRingHash[txo.RingHash] = struct{}{}
-								}
-								amt := abeutil.Amount(confirmed.Amount)
-								freezedBal += amt
-								balance += amt
-								newV := valueUnspentTXO(confirmed.FromCoinBase, confirmed.Version, confirmed.Height, confirmed.Amount, confirmed.Index, confirmed.GenerationTime, chainhash.ZeroHash, 0)
-								err = putRawMaturedOutput(ns, key, newV) // move to unspent txo bucket
-								if err != nil {
-									return fmt.Errorf("putRawUnspentTXO error in rollbackAbe : %v", err)
-								}
+							confirmed, err := fetchSpentConfirmedTXO(ns, outpoint[k].TxHash, outpoint[k].Index)
+							if err != nil {
+								return err // means error
+							}
+							if _, ok := willDeleteRingHash[confirmed.RingHash]; !ok {
+								willDeleteRingHash[confirmed.RingHash] = struct{}{}
+							}
+							amt := abeutil.Amount(confirmed.Amount)
+							freezedBal += amt
+							balance += amt
+							confirmed.RingHash = chainhash.ZeroHash
+							confirmed.RingSize = 0
+							trOutputs[wire.OutPointAbe{
+								TxHash: outpoint[k].TxHash,
+								Index:  outpoint[k].Index,
+							}] = &UnspentUTXO{
+								Version:        confirmed.Version,
+								Height:         confirmed.Height,
+								TxOutput:       confirmed.TxOutput,
+								FromCoinBase:   confirmed.FromCoinBase,
+								Amount:         confirmed.Amount,
+								Index:          255,
+								GenerationTime: confirmed.GenerationTime,
+								RingHash:       chainhash.ZeroHash,
+								RingSize:       0,
 							}
 						}
 					}
@@ -3174,6 +3183,58 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 			if err != nil {
 				return fmt.Errorf("error in deleteImmaturedOutput in rollback")
 			}
+		} else {
+			outpoint, err := fetchBlockAbeOutputWithHeight(ns, i)
+			if err != nil {
+				return err
+			}
+			// otherwise, find it in mature bucket or spent bucket
+			for k := 0; k < len(outpoint); k++ {
+				// the coinbase output is handled
+				if _, ok := coinbaseOutputs[*outpoint[k]]; ok {
+					continue
+				}
+				txo, err := fetchMaturedOutput(ns, outpoint[k].TxHash, outpoint[k].Index)
+				if err == nil { // this output is in unspent txo bucket
+					if _, ok := willDeleteRingHash[txo.RingHash]; !ok {
+						willDeleteRingHash[txo.RingHash] = struct{}{}
+					}
+					amt := abeutil.Amount(txo.Amount)
+					spendableBal -= amt
+					balance -= amt
+					err = deleteMaturedOutput(ns, canonicalOutPointAbe(txo.TxOutput.TxHash, txo.TxOutput.Index))
+					if err != nil {
+						return err
+					}
+				} else {
+					//this output is in spent but unmined bucket
+					unmined, err := fetchSpentButUnminedTXO(ns, outpoint[k].TxHash, outpoint[k].Index)
+					if err == nil {
+						if _, ok := willDeleteRingHash[unmined.RingHash]; !ok {
+							willDeleteRingHash[unmined.RingHash] = struct{}{}
+						}
+						amt := abeutil.Amount(unmined.Amount)
+						freezedBal -= amt
+						balance -= amt
+						err = deleteSpentButUnminedTXO(ns, canonicalOutPointAbe(unmined.TxOutput.TxHash, unmined.TxOutput.Index))
+						if err != nil {
+							return err
+						}
+					} else {
+						confirmed, err := fetchSpentConfirmedTXO(ns, outpoint[k].TxHash, outpoint[k].Index)
+						if err != nil {
+							return err // means error
+						}
+						if _, ok := willDeleteRingHash[confirmed.RingHash]; !ok {
+							willDeleteRingHash[confirmed.RingHash] = struct{}{}
+						}
+						err = deleteSpentConfirmedTXO(ns, canonicalOutPointAbe(confirmed.TxOutput.TxHash, confirmed.TxOutput.Index))
+						if err != nil {
+							return err
+						}
+					}
+				}
+			}
 		}
 
 		relevantTx := make(map[chainhash.Hash]struct{})
@@ -3182,22 +3243,6 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 			for _, output := range outpoints {
 				if _, ok := relevantTx[output.TxHash]; !ok {
 					relevantTx[output.TxHash] = struct{}{}
-				}
-				k := canonicalOutPointAbe(output.TxHash, output.Index)
-				// should fetch from Matured or ImmaturedCoinbaseOutput and delete
-				txo, err := fetchMaturedOutput(ns, output.TxHash, output.Index)
-				if err != nil {
-					continue
-				}
-				if _, ok := willDeleteRingHash[txo.RingHash]; !ok {
-					willDeleteRingHash[txo.RingHash] = struct{}{}
-				}
-				amt := abeutil.Amount(txo.Amount)
-				balance -= amt
-				spendableBal -= amt
-				err = deleteMaturedOutput(ns, k)
-				if err != nil {
-					return fmt.Errorf("error in deleteUnspentTXO in rollback")
 				}
 			}
 
@@ -3263,21 +3308,11 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 			}
 		}
 		//delete the block
-		block, err := deleteRawBlockAbeWithBlockHeight(ns, i)
+		_, err = deleteRawBlockAbeWithBlockHeight(ns, i)
 		if err != nil {
 			return fmt.Errorf("deleteRawBlockAbeWithBlockHeight in rollbackAbe with err:%v", err)
 		}
-		// move the relevant transaction into unmined transaction
-		for i := 0; i < len(block.TxRecordAbes); i++ {
-			if _, ok := relevantTx[block.TxRecordAbes[i].Hash]; ok {
-				rec := block.TxRecordAbes[i]
-				v, err := valueTxRecordAbe(rec)
-				if err != nil {
-					return err
-				}
-				err = putRawUnminedAbe(ns.NestedReadWriteBucket(bucketUnminedAbe), rec.Hash[:], v)
-			}
-		}
+		// discard all transaction in the block
 	}
 	// update the balances
 	// return handle
@@ -3706,10 +3741,7 @@ func (s *Store) BalanceAbe(ns walletdb.ReadBucket, minConf int32, syncHeight int
 			if err != nil { // have been spent
 				continue
 			} else {
-				amt, err := abeutil.NewAmountAbe(float64(txo.Amount))
-				if err != nil {
-					return err
-				}
+				amt := abeutil.Amount(txo.Amount)
 				bal -= amt
 			}
 		}
@@ -3763,10 +3795,7 @@ func (s *Store) BalanceAbe(ns walletdb.ReadBucket, minConf int32, syncHeight int
 			if err != nil { // have been spent
 				continue
 			} else if txo.FromCoinBase {
-				amt, err := abeutil.NewAmountAbe(float64(txo.Amount))
-				if err != nil {
-					return err
-				}
+				amt := abeutil.Amount(txo.Amount)
 				bal -= amt
 			}
 		}
