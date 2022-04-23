@@ -3345,9 +3345,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 	if err != nil {
 		return err
 	}
-	// flag:=0 //delete the ring and utxoting if height%3==2,and delete next height
-	//TODO(Abe): what influence about previous two block when we delete a height-2 block?
-	// TODO(abe):use the blockabeIterator to iterator reversely the blockabe bucket
+	// for all block whose height is more than height
 	for i := maxHeight; i > height; i-- {
 		willDeleteRingHash := make(map[chainhash.Hash]struct{})
 
@@ -3356,6 +3354,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 		if i%blockNumOfRing == blockNumOfRing-1 {
 			// previous blocks' outputs
 			for j := int32(0); j < blockNumOfRing; j++ {
+
 				blockHash, err := chainhash.NewHash(keysToRemove[i-j][4:])
 				if err != nil {
 					return err
@@ -3370,7 +3369,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 				}
 				trOutput := make(map[wire.OutPointAbe]*UnspentUTXO, len(outpoints))
 				for _, outpoint := range outpoints {
-					// check in immature coinbase output
+					// check in immature coinbase output -> immature coinbase output
 					if utxo, ok := cbOutput[*outpoint]; ok {
 						tmp, err := chainhash.NewHash(utxo.RingHash[:])
 						if err != nil {
@@ -3383,6 +3382,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 						utxo.Index = 0xFF
 						continue
 					}
+					// mature/spendbutunmined/spentandconfirmed output -> immature output
 					// check in mature output
 					if output, err := fetchMaturedOutput(ns, outpoint.TxHash, outpoint.Index); err == nil {
 						amt := abeutil.Amount(output.Amount)
@@ -3411,7 +3411,6 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 					if output, err := fetchSpentButUnminedTXO(ns, outpoint.TxHash, outpoint.Index); err == nil {
 						amt := abeutil.Amount(output.Amount)
 						freezedBal += amt
-						balance += amt
 
 						tmp, err := chainhash.NewHash(output.RingHash[:])
 						if err != nil {
@@ -3473,7 +3472,9 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 							RingHash:       output.RingHash,
 							RingSize:       output.RingSize,
 						}
-						continue
+					} else {
+						// something error in database
+						log.Errorf("rollback wrong in height %d with outpoint %s:%d", i, outpoint.TxHash, outpoint.Index)
 					}
 				}
 				err = putRawImmaturedCoinbaseOutput(ns, keysToRemove[i-j], valueImmaturedCoinbaseOutput(cbOutput))
@@ -3539,9 +3540,13 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 				// restore the outputs deleted when attaching this block
 				for k := 0; k < len(utxoRings[j].IsMy); k++ {
 					if utxoRings[j].IsMy[k] && !utxoRings[j].Spent[k] { // is my but not spend
-						k := canonicalOutPointAbe(utxoRings[j].TxHashes[k], utxoRings[j].OutputIndexes[k])
-						v := ns.NestedReadBucket(bucketSpentConfirmed).Get(k)
-						err = putRawSpentButUnminedTXO(ns, k, v[:len(v)-8])
+						key := canonicalOutPointAbe(utxoRings[j].TxHashes[k], utxoRings[j].OutputIndexes[k])
+						scoutput, err := fetchSpentConfirmedTXO(ns, utxoRings[j].TxHashes[k], utxoRings[j].OutputIndexes[k])
+						err = putRawMaturedOutput(ns, key, valueMaturedOutput(scoutput.FromCoinBase, scoutput.Height, int64(scoutput.Amount), scoutput.GenerationTime, scoutput.RingHash))
+						if err != nil {
+							return err
+						}
+						err = deleteSpentConfirmedTXO(ns, key)
 						if err != nil {
 							return err
 						}
@@ -3556,9 +3561,13 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 				for k := 0; k < len(ss[j]); k++ {
 					for m, sn := range utxoRings[j].OriginSerialNumberes {
 						if bytes.Equal(sn, ss[j][k]) && utxoRings[j].IsMy[m] && !utxoRings[j].Spent[m] {
-							k := canonicalOutPointAbe(utxoRings[j].TxHashes[m], utxoRings[j].OutputIndexes[m])
-							v := ns.NestedReadBucket(bucketSpentConfirmed).Get(k)
-							err = putRawSpentButUnminedTXO(ns, k, v[:len(v)-8])
+							key := canonicalOutPointAbe(utxoRings[j].TxHashes[m], utxoRings[j].OutputIndexes[m])
+							scoutput, err := fetchSpentConfirmedTXO(ns, utxoRings[j].TxHashes[k], utxoRings[j].OutputIndexes[k])
+							err = putRawMaturedOutput(ns, key, valueMaturedOutput(scoutput.FromCoinBase, scoutput.Height, int64(scoutput.Amount), scoutput.GenerationTime, scoutput.RingHash))
+							if err != nil {
+								return err
+							}
+							err = deleteSpentConfirmedTXO(ns, key)
 							if err != nil {
 								return err
 							}
