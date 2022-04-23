@@ -1099,7 +1099,7 @@ func putBlockAbeOutput(ns walletdb.ReadWriteBucket, k, v []byte) error {
 }
 
 //TODO(abe):integrated function
-func fetchBlockAbeOutputWithHeight(ns walletdb.ReadBucket, height int32) ([]*wire.OutPointAbe, error) {
+func fetchBlockAbeOutputWithHeight(ns walletdb.ReadBucket, height int32) ([]byte, []*wire.OutPointAbe, error) {
 	k := make([]byte, 36)
 	var v []byte
 	err := ns.NestedReadBucket(bucketBlockOutputs).ForEach(func(key, value []byte) error {
@@ -1112,15 +1112,15 @@ func fetchBlockAbeOutputWithHeight(ns walletdb.ReadBucket, height int32) ([]*wir
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if v == nil { // it means that there is zero outputs controlled by wallet in this block
-		return nil, nil
+		return nil, nil, nil
 	}
 	n := byteOrder.Uint32(v[:4])
 	if len(v) < int(n*33+4) {
 		str := "wrong value in block output bucket"
-		return nil, fmt.Errorf(str)
+		return nil, nil, fmt.Errorf(str)
 	}
 	var res []*wire.OutPointAbe
 	offset := 4
@@ -1132,7 +1132,7 @@ func fetchBlockAbeOutputWithHeight(ns walletdb.ReadBucket, height int32) ([]*wir
 		offset += 1
 		res = append(res, tmp)
 	}
-	return res, nil
+	return k, res, nil
 }
 func fetchBlockAbeOutput(ns walletdb.ReadBucket, blockHeight int32, blockHash chainhash.Hash) ([]*wire.OutPointAbe, error) {
 	k := canonicalBlockAbe(blockHeight, blockHash)
@@ -1194,13 +1194,18 @@ func deleteBlockAbeOutput(ns walletdb.ReadWriteBucket, k []byte) error {
 func valueBlockAbeInput(blockInputs *RingHashSerialNumbers) []byte {
 	res := make([]byte, 6)
 	totalSize := 6
+	// total size(4 bytes) + utxo ring number(2 bytes)
 	byteOrder.PutUint16(res[4:6], uint16(len(blockInputs.utxoRings)))
 	// total size of block inputs
 	for k, v := range blockInputs.utxoRings {
 		addedSNs := blockInputs.serialNumbers[k]
 		uSize := v.SerializeSize()
-		// totoal size||utxo ring size || serialized utxo ring || added serialNumber numbers || [serialNumber...]
-		size := 2 + 2 + uSize + 1 + len(addedSNs)
+		// totoal size (2 bytes)
+		// utxo ring size (2 bytes)
+		// serialized utxo ring (uSize)
+		// added serialNumber numbers (1 byte)
+		// [serialNumber...]
+		size := 2 + 2 + uSize + 1
 		for i := 0; i < len(addedSNs); i++ {
 			size += 1 + len(addedSNs[i])
 		}
@@ -1255,11 +1260,12 @@ func fetchBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) ([]*UTXORingAbe, 
 	for i := 0; i < utxoRingN; i++ {
 		utxoRings[i] = new(UTXORingAbe)
 		size := int(byteOrder.Uint16(v[offset : offset+2])) //total size
+		offset += 2
 		// detect length
 		if offset+size > int(totolSize) {
 			return nil, nil, fmt.Errorf("the serialized byte slice has wrongly format")
 		}
-		offset += 2
+
 		uSize := int(byteOrder.Uint16(v[offset : offset+2]))
 		offset += 2
 		//t:=make([]byte,len(k)+int(size))
@@ -1278,7 +1284,7 @@ func fetchBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) ([]*UTXORingAbe, 
 			offset += 1
 			serialNs[i][j] = make([]byte, snLen)
 			copy(serialNs[i][j][:], v[offset:offset+snLen])
-			offset += 32
+			offset += snLen
 		}
 	}
 	return utxoRings, serialNs, nil

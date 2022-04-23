@@ -3004,20 +3004,13 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 	// because we do not know whether the blockAbeIterator works properly,
 	// we just use as following:
 	blockNum := int32(wire.GetBlockNumPerRingGroupByBlockHeight(height))
-	specialFlag := false
-	if height%blockNum == blockNum-1 {
-		specialFlag = true
-	}
 	err = ns.NestedReadBucket(bucketBlockOutputs).ForEach(func(k []byte, v []byte) error {
 		heightK := int32(byteOrder.Uint32(k[0:4]))
-		if heightK >= height {
+		if heightK >= height-blockNum {
 			keysToRemove[heightK] = k
 			if maxHeight < heightK {
 				maxHeight = heightK
 			}
-		}
-		if specialFlag && heightK > height-blockNum {
-			keysToRemove[heightK] = k
 		}
 		return nil
 	})
@@ -3058,7 +3051,7 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 					return err
 				}
 
-				outpoint, err := fetchBlockAbeOutputWithHeight(ns, i-j)
+				_, outpoint, err := fetchBlockAbeOutputWithHeight(ns, i-j)
 				if err != nil {
 					return err
 				}
@@ -3157,9 +3150,6 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 		coinbaseOutputs, err := fetchImmaturedCoinbaseOutput(ns, i, *blockHash)
 		if err == nil && coinbaseOutputs != nil {
 			for _, unspentUTXO := range coinbaseOutputs {
-				if _, ok := willDeleteRingHash[unspentUTXO.RingHash]; !ok {
-					willDeleteRingHash[unspentUTXO.RingHash] = struct{}{}
-				}
 				amt := abeutil.Amount(unspentUTXO.Amount)
 				freezedBal -= amt
 				balance -= amt
@@ -3172,9 +3162,6 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 		transferOutputs, err := fetchImmaturedOutput(ns, i, *blockHash)
 		if err == nil && transferOutputs != nil {
 			for _, unspentUTXO := range transferOutputs {
-				if _, ok := willDeleteRingHash[unspentUTXO.RingHash]; !ok {
-					willDeleteRingHash[unspentUTXO.RingHash] = struct{}{}
-				}
 				amt := abeutil.Amount(unspentUTXO.Amount)
 				freezedBal -= amt
 				balance -= amt
@@ -3184,7 +3171,7 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 				return fmt.Errorf("error in deleteImmaturedOutput in rollback")
 			}
 		} else {
-			outpoint, err := fetchBlockAbeOutputWithHeight(ns, i)
+			_, outpoint, err := fetchBlockAbeOutputWithHeight(ns, i)
 			if err != nil {
 				return err
 			}
@@ -3316,6 +3303,365 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 	}
 	// update the balances
 	// return handle
+	err = putSpenableBalance(ns, spendableBal)
+	if err != nil {
+		return err
+	}
+	err = putFreezedBalance(ns, freezedBal)
+	if err != nil {
+		return err
+	}
+	return putMinedBalance(ns, balance)
+}
+
+func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error {
+	balance, err := fetchMinedBalance(ns)
+	if err != nil {
+		return err
+	}
+	spendableBal, err := fetchSpenableBalance(ns)
+	if err != nil {
+		return err
+	}
+	freezedBal, err := fetchFreezedBalance(ns)
+	if err != nil {
+		return err
+	}
+	keysToRemove := make(map[int32][]byte)
+	maxHeight := height
+	// because we do not know whether the blockAbeIterator works properly,
+	// we just use as following:
+	blockNum := int32(wire.GetBlockNumPerRingGroupByBlockHeight(height))
+	err = ns.NestedReadBucket(bucketBlockOutputs).ForEach(func(k []byte, v []byte) error {
+		heightK := int32(byteOrder.Uint32(k[0:4]))
+		if heightK >= height-blockNum {
+			keysToRemove[heightK] = k
+			if maxHeight < heightK {
+				maxHeight = heightK
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	// flag:=0 //delete the ring and utxoting if height%3==2,and delete next height
+	//TODO(Abe): what influence about previous two block when we delete a height-2 block?
+	// TODO(abe):use the blockabeIterator to iterator reversely the blockabe bucket
+	for i := maxHeight; i > height; i-- {
+		willDeleteRingHash := make(map[chainhash.Hash]struct{})
+
+		// modify the ring hash of outputs in previous two blocks if the block is the special height
+		blockNumOfRing := int32(wire.GetBlockNumPerRingGroupByBlockHeight(i))
+		if i%blockNumOfRing == blockNumOfRing-1 {
+			// previous blocks' outputs
+			for j := int32(0); j < blockNumOfRing; j++ {
+				blockHash, err := chainhash.NewHash(keysToRemove[i-j][4:])
+				if err != nil {
+					return err
+				}
+				outpoints, err := fetchBlockAbeOutput(ns, i-j, *blockHash)
+				if err != nil {
+					return err
+				}
+				cbOutput, err := fetchImmaturedCoinbaseOutput(ns, i-j, *blockHash)
+				if err != nil {
+					return err
+				}
+				trOutput := make(map[wire.OutPointAbe]*UnspentUTXO, len(outpoints))
+				for _, outpoint := range outpoints {
+					// check in immature coinbase output
+					if utxo, ok := cbOutput[*outpoint]; ok {
+						tmp, err := chainhash.NewHash(utxo.RingHash[:])
+						if err != nil {
+							return err
+						}
+						if _, ok := willDeleteRingHash[*tmp]; !ok {
+							willDeleteRingHash[*tmp] = struct{}{}
+						}
+						utxo.RingHash = chainhash.ZeroHash
+						utxo.Index = 0xFF
+						continue
+					}
+					// check in mature output
+					if output, err := fetchMaturedOutput(ns, outpoint.TxHash, outpoint.Index); err == nil {
+						amt := abeutil.Amount(output.Amount)
+						spendableBal -= amt
+						freezedBal += amt
+
+						tmp, err := chainhash.NewHash(output.RingHash[:])
+						if err != nil {
+							return err
+						}
+						if _, ok := willDeleteRingHash[*tmp]; !ok {
+							willDeleteRingHash[*tmp] = struct{}{}
+						}
+
+						output.RingHash = chainhash.ZeroHash
+						output.Index = 0xFF
+						output.RingSize = 0
+						err = deleteMaturedOutput(ns, canonicalOutPointAbe(outpoint.TxHash, outpoint.Index))
+						if err != nil {
+							return err
+						}
+						trOutput[*outpoint] = output
+						continue
+					}
+					// check in spend but unmined output
+					if output, err := fetchSpentButUnminedTXO(ns, outpoint.TxHash, outpoint.Index); err == nil {
+						amt := abeutil.Amount(output.Amount)
+						freezedBal += amt
+						balance += amt
+
+						tmp, err := chainhash.NewHash(output.RingHash[:])
+						if err != nil {
+							return err
+						}
+						if _, ok := willDeleteRingHash[*tmp]; !ok {
+							willDeleteRingHash[*tmp] = struct{}{}
+						}
+
+						output.RingHash = chainhash.ZeroHash
+						output.Index = 0xFF
+						output.RingSize = 0
+						err = deleteSpentButUnminedTXO(ns, canonicalOutPointAbe(outpoint.TxHash, outpoint.Index))
+						if err != nil {
+							return err
+						}
+						trOutput[*outpoint] = &UnspentUTXO{
+							Version:        output.Version,
+							Height:         output.Height,
+							TxOutput:       output.TxOutput,
+							FromCoinBase:   output.FromCoinBase,
+							Amount:         output.Amount,
+							Index:          output.Index,
+							GenerationTime: output.GenerationTime,
+							RingHash:       output.RingHash,
+							RingSize:       output.RingSize,
+						}
+						continue
+					}
+					// check in spent and mined output
+					if output, err := fetchSpentConfirmedTXO(ns, outpoint.TxHash, outpoint.Index); err == nil {
+						amt := abeutil.Amount(output.Amount)
+						freezedBal += amt
+						balance += amt
+
+						tmp, err := chainhash.NewHash(output.RingHash[:])
+						if err != nil {
+							return err
+						}
+						if _, ok := willDeleteRingHash[*tmp]; !ok {
+							willDeleteRingHash[*tmp] = struct{}{}
+						}
+
+						output.RingHash = chainhash.ZeroHash
+						output.Index = 0xFF
+						output.RingSize = 0
+						err = deleteSpentConfirmedTXO(ns, canonicalOutPointAbe(outpoint.TxHash, outpoint.Index))
+						if err != nil {
+							return err
+						}
+						trOutput[*outpoint] = &UnspentUTXO{
+							Version:        output.Version,
+							Height:         output.Height,
+							TxOutput:       output.TxOutput,
+							FromCoinBase:   output.FromCoinBase,
+							Amount:         output.Amount,
+							Index:          output.Index,
+							GenerationTime: output.GenerationTime,
+							RingHash:       output.RingHash,
+							RingSize:       output.RingSize,
+						}
+						continue
+					}
+				}
+				err = putRawImmaturedCoinbaseOutput(ns, keysToRemove[i-j], valueImmaturedCoinbaseOutput(cbOutput))
+				if err != nil {
+					return err
+				}
+				err = putRawImmaturedOutput(ns, keysToRemove[i-j], valueImmaturedCoinbaseOutput(trOutput))
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		//delete the utxoring and the ring
+		for hash, _ := range willDeleteRingHash {
+			err := deleteUTXORing(ns, hash[:])
+			if err != nil {
+				return fmt.Errorf("error in deleteUTXORing in rollbackAbe: %v", err)
+			}
+			err = deleteRingDetails(ns, hash[:]) //delete the ring detail when delete the utxo ring in rollback
+			if err != nil {
+				return fmt.Errorf("error in deleteRingDetail in rollbackAbe: %v", err)
+			}
+		}
+
+		//fetch all output in current block, and delete it
+		// When the block height hit the condition, the output would be in Immature Bucket base on above operation
+		blockHash, err := chainhash.NewHash(keysToRemove[i][4:36])
+		if err != nil {
+			return fmt.Errorf("chainhash.Hash in rollback is error:%v", err)
+		}
+		coinbaseOutputs, err := fetchImmaturedCoinbaseOutput(ns, i, *blockHash)
+		if err == nil && coinbaseOutputs != nil {
+			for _, unspentUTXO := range coinbaseOutputs {
+				amt := abeutil.Amount(unspentUTXO.Amount)
+				freezedBal -= amt
+				balance -= amt
+			}
+			err = deleteImmaturedCoinbaseOutput(ns, keysToRemove[i])
+			if err != nil {
+				return fmt.Errorf("error in deleteImmaturedCoinbaseOutput in rollback")
+			}
+		}
+		transferOutputs, err := fetchImmaturedOutput(ns, i, *blockHash)
+		if err == nil && transferOutputs != nil {
+			for _, unspentUTXO := range transferOutputs {
+				amt := abeutil.Amount(unspentUTXO.Amount)
+				freezedBal -= amt
+				balance -= amt
+			}
+			err = deleteImmaturedOutput(ns, keysToRemove[i])
+			if err != nil {
+				return fmt.Errorf("error in deleteImmaturedOutput in rollback")
+			}
+		}
+
+		// restore the input in block
+		utxoRings, ss, err := fetchBlockAbeInput(ns, keysToRemove[i]) //there should be fetch the byte not the utxoRing
+		for j := 0; j < len(utxoRings); j++ {
+			u, err := fetchUTXORing(ns, utxoRings[j].RingHash[:])
+			if err != nil {
+				// if the utxo ring do not exist in utxoring bucket, it means that the utxoring is delete when processing this block
+				// restore the outputs deleted when attaching this block
+				for k := 0; k < len(utxoRings[j].IsMy); k++ {
+					if utxoRings[j].IsMy[k] && !utxoRings[j].Spent[k] { // is my but not spend
+						k := canonicalOutPointAbe(utxoRings[j].TxHashes[k], utxoRings[j].OutputIndexes[k])
+						v := ns.NestedReadBucket(bucketSpentConfirmed).Get(k)
+						err = putRawSpentButUnminedTXO(ns, k, v[:len(v)-8])
+						if err != nil {
+							return err
+						}
+					}
+				}
+				err := putRawUTXORing(ns, utxoRings[j].RingHash[:], utxoRings[j].Serialize()[:])
+				if err != nil {
+					return err
+				}
+			} else {
+				// compare the delta and update the utxo ring entry
+				for k := 0; k < len(ss[j]); k++ {
+					for m, sn := range utxoRings[j].OriginSerialNumberes {
+						if bytes.Equal(sn, ss[j][k]) && utxoRings[j].IsMy[m] && !utxoRings[j].Spent[m] {
+							k := canonicalOutPointAbe(utxoRings[j].TxHashes[m], utxoRings[j].OutputIndexes[m])
+							v := ns.NestedReadBucket(bucketSpentConfirmed).Get(k)
+							err = putRawSpentButUnminedTXO(ns, k, v[:len(v)-8])
+							if err != nil {
+								return err
+							}
+							break
+						}
+					}
+					// update the origin serialNumber
+					for index, sn := range u.OriginSerialNumberes {
+						if _, ok := utxoRings[j].OriginSerialNumberes[index]; !ok {
+							utxoRings[j].OriginSerialNumberes[index] = sn
+						}
+					}
+				}
+				err = putRawUTXORing(ns, utxoRings[j].RingHash[:], utxoRings[j].Serialize()[:])
+				if err != nil {
+					return err
+				}
+			}
+		}
+		//delete the block
+		_, err = deleteRawBlockAbeWithBlockHeight(ns, i)
+		if err != nil {
+			return fmt.Errorf("deleteRawBlockAbeWithBlockHeight in rollbackAbe with err:%v", err)
+		}
+	}
+
+	// immature coinbase outputs of a block if exist
+	if height >= int32(s.chainParams.CoinbaseMaturity)+blockNum && height%blockNum == blockNum-1 {
+		for i := int32(0); i < blockNum; i++ {
+			key, outpoints, err := fetchBlockAbeOutputWithHeight(ns, height-int32(s.chainParams.CoinbaseMaturity)-i)
+			if err != nil {
+				return err
+			}
+			cbOutput := make(map[wire.OutPointAbe]*UnspentUTXO, len(outpoints))
+			for _, outpoint := range outpoints {
+				// check in mature output
+				if output, err := fetchMaturedOutput(ns, outpoint.TxHash, outpoint.Index); err == nil {
+					amt := abeutil.Amount(output.Amount)
+					spendableBal -= amt
+					freezedBal += amt
+
+					err = deleteMaturedOutput(ns, canonicalOutPointAbe(outpoint.TxHash, outpoint.Index))
+					if err != nil {
+						return err
+					}
+					cbOutput[*outpoint] = output
+					continue
+				}
+				// check in spend but unmined output
+				if output, err := fetchSpentButUnminedTXO(ns, outpoint.TxHash, outpoint.Index); err == nil {
+					amt := abeutil.Amount(output.Amount)
+					freezedBal += amt
+					balance += amt
+
+					err = deleteSpentButUnminedTXO(ns, canonicalOutPointAbe(outpoint.TxHash, outpoint.Index))
+					if err != nil {
+						return err
+					}
+					cbOutput[*outpoint] = &UnspentUTXO{
+						Version:        output.Version,
+						Height:         output.Height,
+						TxOutput:       output.TxOutput,
+						FromCoinBase:   output.FromCoinBase,
+						Amount:         output.Amount,
+						Index:          output.Index,
+						GenerationTime: output.GenerationTime,
+						RingHash:       output.RingHash,
+						RingSize:       output.RingSize,
+					}
+					continue
+				}
+				// check in spent and mined output
+				if output, err := fetchSpentConfirmedTXO(ns, outpoint.TxHash, outpoint.Index); err == nil {
+					amt := abeutil.Amount(output.Amount)
+					freezedBal += amt
+					balance += amt
+
+					err = deleteSpentConfirmedTXO(ns, canonicalOutPointAbe(outpoint.TxHash, outpoint.Index))
+					if err != nil {
+						return err
+					}
+					cbOutput[*outpoint] = &UnspentUTXO{
+						Version:        output.Version,
+						Height:         output.Height,
+						TxOutput:       output.TxOutput,
+						FromCoinBase:   output.FromCoinBase,
+						Amount:         output.Amount,
+						Index:          output.Index,
+						GenerationTime: output.GenerationTime,
+						RingHash:       output.RingHash,
+						RingSize:       output.RingSize,
+					}
+					continue
+				}
+			}
+			err = putRawImmaturedCoinbaseOutput(ns, key, valueImmaturedCoinbaseOutput(cbOutput))
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	// update the balances
 	err = putSpenableBalance(ns, spendableBal)
 	if err != nil {
 		return err
