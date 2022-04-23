@@ -328,6 +328,7 @@ func createWalletAbe(cfg *config) error {
 			tmp := make([]byte, 4, 4+32)
 			binary.BigEndian.PutUint32(tmp[0:4], uint32(abecryptoparam.CryptoSchemePQRingCT))
 			seed = append(tmp, seed[:]...)
+			cfg.MyRestoreNumber = 0xFFFF_FFFF_FFFF_FFFF
 		} else {
 			versionStr := strings.TrimSpace(strings.ToLower(cfg.MyVersion))
 			version, err := strconv.Atoi(versionStr)

@@ -235,8 +235,8 @@ func (l *Loader) createNewWalletAbe(pubPassphrase, privPassphrase,
 
 		addrToVSK := map[string][]byte{}
 		coinAddrToInstanceAddr := map[string][]byte{}
-		for i := 0; i < len(chaincfg.MainNetParams.GenesisBlock.Transactions); i++ {
-			transaction := chaincfg.MainNetParams.GenesisBlock.Transactions[i]
+		for i := 0; i < len(l.chainParams.GenesisBlock.Transactions); i++ {
+			transaction := l.chainParams.GenesisBlock.Transactions[i]
 			for k := 0; k < len(transaction.TxOuts); k++ {
 				coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(transaction.TxOuts[k].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
 				if err != nil {
