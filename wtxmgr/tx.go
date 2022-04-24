@@ -2015,14 +2015,16 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, block *Block
 
 	// move matured coinbase outputs to maturedOutput bucket
 	blockNum := int32(wire.GetBlockNumPerRingGroupByBlockHeight(block.Height))
-	if block.Height >= int32(s.chainParams.CoinbaseMaturity)+2 && block.Height%blockNum == blockNum-1 {
+	maturity := int32(s.chainParams.CoinbaseMaturity)
+	if block.Height > maturity && (block.Height+1)%blockNum == 0 {
 		for i := 0; i < len(maturedBlockHashs); i++ {
-			utxos, err := fetchImmaturedCoinbaseOutput(txMgrNs, block.Height-int32(s.chainParams.CoinbaseMaturity)-int32(i), *maturedBlockHashs[i])
+			utxoHeight := block.Height - maturity - blockNum + int32(i)
+			utxos, err := fetchImmaturedCoinbaseOutput(txMgrNs, utxoHeight, *maturedBlockHashs[i])
 			if err != nil {
 				return err
 			}
 			for op, utxo := range utxos {
-				v := valueUnspentTXO(true, utxo.Version, block.Height-int32(s.chainParams.CoinbaseMaturity)-int32(i), utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
+				v := valueUnspentTXO(true, utxo.Version, utxoHeight, utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 				amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
 				spendableBal += amt
 				freezedBal -= amt

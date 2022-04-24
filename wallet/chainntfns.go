@@ -32,7 +32,7 @@ func (w *Wallet) handleChainNotifications() {
 		return
 	}
 
-	catchUpHashes := func(w *Wallet, client chain.Interface, height int32) error {
+	catchUpHashes := func(w *Wallet, client chain.Interface, endHeight int32) error {
 		// TODO(aakselrod): There's a race conditon here, which
 		// happens when a reorg occurs between the
 		// rescanProgress notification and the last GetBlockHash
@@ -44,54 +44,31 @@ func (w *Wallet) handleChainNotifications() {
 		// the notification, to roll back and restart the
 		// rescan.
 		log.Infof("Catching up block hashes to height %d, this"+
-			" might take a while", height)
+			" might take a while", endHeight)
 		err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 			addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 			txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-			//addressEnc, _, _, valueSecretKeyEnc, err := w.ManagerAbe.FetchAddressKeyEncAbe(addrmgrNs)
-			//if err != nil {
-			//	return err
-			//}
-			//addressBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, addressEnc)
-			//if err != nil {
-			//	return err
-			//}
-			//valueSkBytes, err := w.ManagerAbe.Decrypt(waddrmgr.CKTPublic, valueSecretKeyEnc)
-			//if err != nil {
-			//	return err
-			//}
 
-			//msvk, err := abesalrs.DeseralizeMasterSecretViewKey(msvkBytes)
-			//if err != nil {
-			//	return err
-			//}
-			//mpk, err := abesalrs.DeseralizeMasterPubKey(mpkBytes)
-			//if err != nil {
-			//	return err
-			//}
-			//startBlock := w.Manager.SyncedTo()
-			startBlock := w.ManagerAbe.SyncedTo()
+			syncedHeight := w.ManagerAbe.SyncedTo().Height
 
-			for i := startBlock.Height + 1; i <= height; i++ {
+			for i := syncedHeight + 1; i <= endHeight; i++ {
 				hash, err := client.GetBlockHash(int64(i)) //Why use client not chainclient? It uses a interface to adapt to different client.
 				if err != nil {
 					return err
 				}
-				maturedBlockHashs := make([]*chainhash.Hash, 3)
-				if i >= int32(w.chainParams.CoinbaseMaturity)+2 && i%3 == 2 {
-					maturedBlockHashs[0], err = client.GetBlockHash(int64(i - int32(w.chainParams.CoinbaseMaturity)))
-					if err != nil {
-						return err
-					}
-					maturedBlockHashs[1], err = client.GetBlockHash(int64(i - int32(w.chainParams.CoinbaseMaturity) - 1))
-					if err != nil {
-						return err
-					}
-					maturedBlockHashs[2], err = client.GetBlockHash(int64(i - int32(w.chainParams.CoinbaseMaturity) - 2))
-					if err != nil {
-						return err
+
+				blockNum := int32(wire.GetBlockNumPerRingGroupByBlockHeight(i))
+				maturedBlockHashs := make([]*chainhash.Hash, blockNum)
+				maturity := int32(w.chainParams.CoinbaseMaturity)
+				if i > maturity && (i+1)%blockNum == 0 {
+					for j := int32(0); j < blockNum; j++ {
+						maturedBlockHashs[j], err = client.GetBlockHash(int64(i - maturity - blockNum + j))
+						if err != nil {
+							return err
+						}
 					}
 				}
+
 				b, err := chainClient.GetBlockAbe(hash)
 				if err != nil {
 					return err
@@ -148,7 +125,7 @@ func (w *Wallet) handleChainNotifications() {
 		})
 		if err != nil {
 			log.Errorf("Failed to update address manager "+
-				"sync state for height %d: %v", height, err)
+				"sync state for height %d: %v", endHeight, err)
 		}
 
 		log.Info("Done catching up block hashes")
@@ -383,19 +360,15 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 	// relevant.  This assumption will not hold true when SPV support is
 	// added, but until then, simply insert the transaction because there
 	// should either be one or more relevant inputs or outputs.
-	maturedBlockHashs := make([]*chainhash.Hash, 3)
-	if br.Height >= int32(w.chainParams.CoinbaseMaturity)+2 && br.Height%3 == 2 {
-		maturedBlockHashs[0], err = w.chainClient.GetBlockHash(int64(br.Height - int32(w.chainParams.CoinbaseMaturity)))
-		if err != nil {
-			return err
-		}
-		maturedBlockHashs[1], err = w.chainClient.GetBlockHash(int64(br.Height - int32(w.chainParams.CoinbaseMaturity) - 1))
-		if err != nil {
-			return err
-		}
-		maturedBlockHashs[2], err = w.chainClient.GetBlockHash(int64(br.Height - int32(w.chainParams.CoinbaseMaturity) - 2))
-		if err != nil {
-			return err
+	blockNum := int32(wire.GetBlockNumPerRingGroupByBlockHeight(b.Height))
+	maturedBlockHashs := make([]*chainhash.Hash, blockNum)
+	maturity := int32(w.chainParams.CoinbaseMaturity)
+	if b.Height > maturity && (b.Height+1)%blockNum == 0 {
+		for j := int32(0); j < blockNum; j++ {
+			maturedBlockHashs[j], err = w.ChainClient().GetBlockHash(int64(b.Height - maturity - blockNum + j))
+			if err != nil {
+				return err
+			}
 		}
 	}
 	//err = w.TxStore.InsertBlockAbe(txmgrNs, br,*maturedBlockHash, mpk, msvk)

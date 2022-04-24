@@ -367,23 +367,16 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 					continue
 				}
 
-				maturedBlockHashs := make([]*chainhash.Hash, 0)
-				if i >= int32(w.chainParams.CoinbaseMaturity)+2 && i%3 == 2 && i-int32(w.chainParams.CoinbaseMaturity)-2 >= w.SyncFrom {
-					hash1, err := client.GetBlockHash(int64(i - int32(w.chainParams.CoinbaseMaturity)))
-					if err != nil {
-						return err
+				blockNum := int32(wire.GetBlockNumPerRingGroupByBlockHeight(i))
+				maturedBlockHashs := make([]*chainhash.Hash, blockNum)
+				maturity := int32(w.chainParams.CoinbaseMaturity)
+				if i > maturity && (i+1)%blockNum == 0 {
+					for j := int32(0); j < blockNum; j++ {
+						maturedBlockHashs[j], err = client.GetBlockHash(int64(i - maturity - blockNum + j))
+						if err != nil {
+							return err
+						}
 					}
-					maturedBlockHashs = append(maturedBlockHashs, hash1)
-					hash2, err := client.GetBlockHash(int64(i - int32(w.chainParams.CoinbaseMaturity) - 1))
-					if err != nil {
-						return err
-					}
-					maturedBlockHashs = append(maturedBlockHashs, hash2)
-					hash3, err := client.GetBlockHash(int64(i - int32(w.chainParams.CoinbaseMaturity) - 2))
-					if err != nil {
-						return err
-					}
-					maturedBlockHashs = append(maturedBlockHashs, hash3)
 				}
 				var b *wire.MsgBlockAbe
 				b, err = client.GetBlockAbe(hash)

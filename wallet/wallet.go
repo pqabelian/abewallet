@@ -631,14 +631,6 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 
 		err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 			ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
-			//err := w.ManagerAbe.SetSyncedTo(ns, &waddrmgr.BlockStamp{
-			//	Hash:      *startHash,
-			//	Height:    startHeight,
-			//	Timestamp: startHeader.Timestamp,
-			//})
-			//if err != nil {
-			//	return err
-			//}
 			return w.ManagerAbe.SetBirthdayBlock(ns, *birthdayStamp, true)
 		})
 		if err != nil {
