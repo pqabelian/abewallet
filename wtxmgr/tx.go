@@ -3624,9 +3624,10 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 		}
 
 		// immature coinbase outputs if exist
-		if i > int32(s.chainParams.CoinbaseMaturity) && (i+1)%blockNum == 0 {
+		maturity := int32(s.chainParams.CoinbaseMaturity)
+		if i >= maturity && (i-maturity+1)%blockNum == 0 {
 			for ii := int32(0); ii < blockNum; ii++ {
-				key, outpoints, err := fetchBlockAbeOutputWithHeight(ns, i-int32(s.chainParams.CoinbaseMaturity)-blockNum+ii)
+				key, outpoints, err := fetchBlockAbeOutputWithHeight(ns, i-maturity-ii)
 				if err != nil {
 					return err
 				}
