@@ -1566,11 +1566,7 @@ out:
 	for {
 		select {
 		case req := <-w.refreshRequests:
-			heldUnlock, err := w.holdUnlock()
-			if err != nil {
-				req.resp <- refreshResponse{false, err}
-				continue
-			}
+			var err error
 			err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 				waddrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
 				wtxmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
@@ -1659,7 +1655,6 @@ out:
 			} else {
 				req.resp <- refreshResponse{true, nil}
 			}
-			heldUnlock.release()
 
 		case <-quit:
 			break out
@@ -2010,22 +2005,17 @@ func (w *Wallet) CalculateBalance(confirms int32) (abeutil.Amount, error) {
 	})
 	return balance, err
 }
-func (w *Wallet) CalculateBalanceAbe(confirms int32) ([]abeutil.Amount, int, error) {
+func (w *Wallet) CalculateBalanceAbe(confirms int32) ([]abeutil.Amount, error) {
 	var balances []abeutil.Amount
-	var needUpdateNum int
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		var err error
 		blk := w.ManagerAbe.SyncedTo()
 		//balances, err = w.TxStore.BalanceAbe(txmgrNs, confirms, blk.Height)
 		balances, err = w.TxStore.BalanceAbeNew(txmgrNs, confirms, blk.Height)
-		if err != nil {
-			return err
-		}
-		needUpdateNum, err = w.TxStore.NeedUpdateNum(txmgrNs)
 		return err
 	})
-	return balances, needUpdateNum, err
+	return balances, err
 }
 
 func (w *Wallet) FetchDetailedUtxos(confirms int32) (string, error) {
@@ -5254,7 +5244,7 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 		if err != nil {
 			return err
 		}
-		txMgr, err = wtxmgr.Open(txMgrBucket, params)
+		txMgr, err = wtxmgr.Open(addrMgrAbe, txMgrBucket, params)
 		if err != nil {
 			return err
 		}

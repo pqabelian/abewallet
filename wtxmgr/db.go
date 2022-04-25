@@ -79,7 +79,7 @@ var (
 	bucketSpentButUnmined         = []byte("spentbutumined")
 	bucketSpentConfirmed          = []byte("spentconfirmed")
 
-	bucketNeedUpdateUTXORing = []byte("needupdateutxoring")
+	bucketNeedUpdateUTXORing = []byte("needupdateutxoring") // would be delete
 	bucketUTXORing           = []byte("utxoring")
 	bucketRingDetails        = []byte("utxoringdetails") //TODO(abe):we should add a block height in database, meaning that the txo in ring had consumed completely .
 
@@ -1251,7 +1251,7 @@ func fetchBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) ([]*UTXORingAbe, 
 		return nil, nil, fmt.Errorf("this entry is empty")
 	}
 	offset := 0
-	totolSize := byteOrder.Uint32(v[offset : offset+4])
+	_ = byteOrder.Uint32(v[offset : offset+4])
 	offset += 4
 	utxoRingN := int(byteOrder.Uint16(v[offset : offset+2]))
 	utxoRings := make([]*UTXORingAbe, utxoRingN)
@@ -1259,13 +1259,8 @@ func fetchBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) ([]*UTXORingAbe, 
 	offset += 2
 	for i := 0; i < utxoRingN; i++ {
 		utxoRings[i] = new(UTXORingAbe)
-		size := int(byteOrder.Uint16(v[offset : offset+2])) //total size
+		_ = int(byteOrder.Uint16(v[offset : offset+2])) //total size
 		offset += 2
-		// detect length
-		if offset+size > int(totolSize) {
-			return nil, nil, fmt.Errorf("the serialized byte slice has wrongly format")
-		}
-
 		uSize := int(byteOrder.Uint16(v[offset : offset+2]))
 		offset += 2
 		//t:=make([]byte,len(k)+int(size))
@@ -1619,10 +1614,6 @@ func fetchSpentButUnminedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, i
 	if v == nil {
 		return nil, fmt.Errorf("empty entry")
 	}
-	if len(v) < 98 {
-		str := "wrong value in spent but unmined output bucket"
-		return nil, fmt.Errorf(str)
-	}
 	sbu := new(SpentButUnminedTXO)
 	sbu.TxOutput.TxHash = hash
 	sbu.TxOutput.Index = index
@@ -1717,11 +1708,6 @@ func fetchSpentConfirmedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, in
 	v := ns.NestedReadBucket(bucketSpentConfirmed).Get(k)
 	if v == nil {
 		return nil, fmt.Errorf("empty entry")
-	}
-	//if len(v) != 69 { // todo: AliceBob should not use hardcode
-	if len(v) != 74 { // todo: AliceBob should not use hardcode
-		str := "wrong value in spent and confirmed output bucket"
-		return nil, fmt.Errorf(str)
 	}
 	sct := new(SpentConfirmedTXO)
 	sct.TxOutput.TxHash = hash

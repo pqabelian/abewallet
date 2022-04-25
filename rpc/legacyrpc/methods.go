@@ -484,13 +484,13 @@ func getBalanceAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.GetBalancesAbeCmd)
 
 	var balances []abeutil.Amount
-	var needUpdateNum int
+	//var needUpdateNum int
 	var err error
-	balances, needUpdateNum, err = w.CalculateBalanceAbe(int32(*cmd.Minconf))
+	balances, err = w.CalculateBalanceAbe(int32(*cmd.Minconf))
 	if err != nil {
 		return nil, err
 	}
-	return []float64{balances[0].ToABE(), balances[1].ToABE(), balances[2].ToABE(), balances[3].ToABE(), float64(needUpdateNum)}, nil
+	return []float64{balances[0].ToABE(), balances[1].ToABE(), balances[2].ToABE(), balances[3].ToABE()}, nil
 }
 
 // getDetailedUtxos is a temporary command for convenience of test.
@@ -548,7 +548,7 @@ func getInfo(icmd interface{}, w *wallet.Wallet, chainClient *chain.RPCClient) (
 	}
 	// TODO(abe):need add the update number into result struct
 	//bal, err := w.CalculateBalance(1)  // switch to calculateBalanceAbe
-	bal, _, err := w.CalculateBalanceAbe(1)
+	bal, err := w.CalculateBalanceAbe(1)
 	if err != nil {
 		return nil, err
 	}
