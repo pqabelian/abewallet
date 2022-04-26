@@ -3631,6 +3631,9 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 				if err != nil {
 					return err
 				}
+				if key == nil || outpoints == nil {
+					continue
+				}
 				cbOutput := make(map[wire.OutPointAbe]*UnspentUTXO, len(outpoints))
 				for _, outpoint := range outpoints {
 					// check in mature output
