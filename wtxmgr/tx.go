@@ -3384,7 +3384,6 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 		if i%blockNumOfRing == blockNumOfRing-1 {
 			// previous blocks' outputs
 			for j := int32(0); j < blockNumOfRing; j++ {
-
 				blockHash, err := chainhash.NewHash(keysToRemove[i-j][4:])
 				if err != nil {
 					return err
@@ -3400,17 +3399,19 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 				trOutput := make(map[wire.OutPointAbe]*UnspentUTXO, len(outpoints))
 				for _, outpoint := range outpoints {
 					// check in immature coinbase output -> immature coinbase output
-					if utxo, ok := cbOutput[*outpoint]; ok {
-						tmp, err := chainhash.NewHash(utxo.RingHash[:])
-						if err != nil {
-							return err
+					if cbOutput != nil {
+						if utxo, ok := cbOutput[*outpoint]; ok {
+							tmp, err := chainhash.NewHash(utxo.RingHash[:])
+							if err != nil {
+								return err
+							}
+							if _, ok := willDeleteRingHash[*tmp]; !ok {
+								willDeleteRingHash[*tmp] = struct{}{}
+							}
+							utxo.RingHash = chainhash.ZeroHash
+							utxo.Index = 0xFF
+							continue
 						}
-						if _, ok := willDeleteRingHash[*tmp]; !ok {
-							willDeleteRingHash[*tmp] = struct{}{}
-						}
-						utxo.RingHash = chainhash.ZeroHash
-						utxo.Index = 0xFF
-						continue
 					}
 					// mature/spendbutunmined/spentandconfirmed output -> immature output
 					// check in mature output
@@ -3653,7 +3654,6 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 					if output, err := fetchSpentButUnminedTXO(ns, outpoint.TxHash, outpoint.Index); err == nil {
 						amt := abeutil.Amount(output.Amount)
 						freezedBal += amt
-						balance += amt
 
 						err = deleteSpentButUnminedTXO(ns, canonicalOutPointAbe(outpoint.TxHash, outpoint.Index))
 						if err != nil {
