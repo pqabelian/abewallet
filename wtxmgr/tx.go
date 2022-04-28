@@ -3362,7 +3362,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 	// because we do not know whether the blockAbeIterator works properly,
 	// we just use as following:
 	blockNum := int32(wire.GetBlockNumPerRingGroupByBlockHeight(height))
-	err = ns.NestedReadBucket(bucketBlockOutputs).ForEach(func(k []byte, v []byte) error {
+	err = ns.NestedReadBucket(bucketBlockAbes).ForEach(func(k []byte, v []byte) error {
 		heightK := int32(byteOrder.Uint32(k[0:4]))
 		if heightK >= height-blockNum {
 			keysToRemove[heightK] = k
@@ -3638,7 +3638,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 				cbOutput := make(map[wire.OutPointAbe]*UnspentUTXO, len(outpoints))
 				for _, outpoint := range outpoints {
 					// check in mature output
-					if output, err := fetchMaturedOutput(ns, outpoint.TxHash, outpoint.Index); err == nil {
+					if output, err := fetchMaturedOutput(ns, outpoint.TxHash, outpoint.Index); err == nil && output.FromCoinBase {
 						amt := abeutil.Amount(output.Amount)
 						spendableBal -= amt
 						freezedBal += amt
@@ -3651,7 +3651,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 						continue
 					}
 					// check in spend but unmined output
-					if output, err := fetchSpentButUnminedTXO(ns, outpoint.TxHash, outpoint.Index); err == nil {
+					if output, err := fetchSpentButUnminedTXO(ns, outpoint.TxHash, outpoint.Index); err == nil && output.FromCoinBase {
 						amt := abeutil.Amount(output.Amount)
 						freezedBal += amt
 
@@ -3673,7 +3673,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 						continue
 					}
 					// check in spent and mined output
-					if output, err := fetchSpentConfirmedTXO(ns, outpoint.TxHash, outpoint.Index); err == nil {
+					if output, err := fetchSpentConfirmedTXO(ns, outpoint.TxHash, outpoint.Index); err == nil && output.FromCoinBase {
 						amt := abeutil.Amount(output.Amount)
 						freezedBal += amt
 						balance += amt
