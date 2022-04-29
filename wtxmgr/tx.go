@@ -1774,7 +1774,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, addrMgrNs wa
 
 	coinbaseTx := block.TxRecordAbes[0].MsgTx
 	coinbaseOutput := make(map[wire.OutPointAbe]*UnspentUTXO)
-	blockOutputs := make(map[Block][]wire.OutPointAbe) // if the block height meet the requirement, it also store previous two block outputs belong the wallet
+	blockOutputs := make(map[Block][]wire.OutPointAbe)
 
 	// store all outputs of coinbaseTx which belong to us into a map : coinbaseOutput
 	for i := 0; i < len(coinbaseTx.TxOuts); i++ {
@@ -1782,15 +1782,20 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, addrMgrNs wa
 		if err != nil {
 			return err
 		}
-		key := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
-		var vskBytes []byte
-		var ok bool
-		if vskBytes, ok = addrToVskMap[key]; !ok {
+		addressEnc, _, _, valueSecretKeyEnc, err := s.manager.FetchAddressKeyEncAbe(addrMgrNs, coinAddr)
+		if err != nil {
+			return err
+		}
+		addressBytes, _, _, vskBytes, err := s.manager.DecryptAddressKey(addressEnc, nil, nil, valueSecretKeyEnc)
+		if err != nil {
+			return err
+		}
+		if vskBytes == nil {
 			continue
 		}
 		copyedVskBytes := make([]byte, len(vskBytes))
 		copy(copyedVskBytes, vskBytes)
-		valid, v, err := abecrypto.TxoCoinReceive(coinbaseTx.TxOuts[i], coinAddrToInstanceAddr[key], copyedVskBytes)
+		valid, v, err := abecrypto.TxoCoinReceive(coinbaseTx.TxOuts[i], addressBytes, copyedVskBytes)
 		if err != nil {
 			return err
 		}
@@ -1954,19 +1959,24 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, addrMgrNs wa
 			if err != nil {
 				return err
 			}
-			key := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
-			var vskBytes []byte
-			var ok bool
-			if vskBytes, ok = addrToVskMap[key]; !ok {
+			addressEnc, _, _, valueSecretKeyEnc, err := s.manager.FetchAddressKeyEncAbe(addrMgrNs, coinAddr)
+			if err != nil {
+				return err
+			}
+			addressBytes, _, _, vskBytes, err := s.manager.DecryptAddressKey(addressEnc, nil, nil, valueSecretKeyEnc)
+			if err != nil {
+				return err
+			}
+			if vskBytes == nil {
 				continue
 			}
 			copyedVskBytes := make([]byte, len(vskBytes))
 			copy(copyedVskBytes, vskBytes)
-			valid, v, err := abecrypto.TxoCoinReceive(txi.TxOuts[j], coinAddrToInstanceAddr[key], copyedVskBytes)
+			valid, v, err := abecrypto.TxoCoinReceive(txi.TxOuts[j], addressBytes, copyedVskBytes)
 			if err != nil {
 				return err
 			}
-			if valid && v != 0 {
+			if valid {
 				amt := abeutil.Amount(v)
 				log.Infof("(Transfer) Find my txo at block height %d (hash %s) with value %v", block.Height, block.Hash, amt.ToABE())
 				freezedBal += amt
@@ -3357,7 +3367,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 	if err != nil {
 		return err
 	}
-	keysToRemove := make(map[int32][]byte)
+	keysWithHeight := make(map[int32][]byte)
 	maxHeight := height
 	// because we do not know whether the blockAbeIterator works properly,
 	// we just use as following:
@@ -3365,7 +3375,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 	err = ns.NestedReadBucket(bucketBlockAbes).ForEach(func(k []byte, v []byte) error {
 		heightK := int32(byteOrder.Uint32(k[0:4]))
 		if heightK >= height-blockNum {
-			keysToRemove[heightK] = k
+			keysWithHeight[heightK] = k
 			if maxHeight < heightK {
 				maxHeight = heightK
 			}
@@ -3384,13 +3394,13 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 		if i%blockNumOfRing == blockNumOfRing-1 {
 			// previous blocks' outputs
 			for j := int32(0); j < blockNumOfRing; j++ {
-				blockHash, err := chainhash.NewHash(keysToRemove[i-j][4:])
+				blockHash, err := chainhash.NewHash(keysWithHeight[i-j][4:])
 				if err != nil {
 					return err
 				}
 				outpoints, err := fetchBlockAbeOutput(ns, i-j, *blockHash)
-				if err != nil {
-					return err
+				if outpoints == nil {
+					continue
 				}
 				cbOutput, err := fetchImmaturedCoinbaseOutput(ns, i-j, *blockHash)
 				if err != nil {
@@ -3508,11 +3518,11 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 						log.Errorf("rollback wrong in height %d with outpoint %s:%d", i, outpoint.TxHash, outpoint.Index)
 					}
 				}
-				err = putRawImmaturedCoinbaseOutput(ns, keysToRemove[i-j], valueImmaturedCoinbaseOutput(cbOutput))
+				err = putRawImmaturedCoinbaseOutput(ns, keysWithHeight[i-j], valueImmaturedCoinbaseOutput(cbOutput))
 				if err != nil {
 					return err
 				}
-				err = putRawImmaturedOutput(ns, keysToRemove[i-j], valueImmaturedCoinbaseOutput(trOutput))
+				err = putRawImmaturedOutput(ns, keysWithHeight[i-j], valueImmaturedCoinbaseOutput(trOutput))
 				if err != nil {
 					return err
 				}
@@ -3533,7 +3543,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 
 		//fetch all output in current block, and delete it
 		// When the block height hit the condition, the output would be in Immature Bucket base on above operation
-		blockHash, err := chainhash.NewHash(keysToRemove[i][4:36])
+		blockHash, err := chainhash.NewHash(keysWithHeight[i][4:36])
 		if err != nil {
 			return fmt.Errorf("chainhash.Hash in rollback is error:%v", err)
 		}
@@ -3544,7 +3554,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 				freezedBal -= amt
 				balance -= amt
 			}
-			err = deleteImmaturedCoinbaseOutput(ns, keysToRemove[i])
+			err = deleteImmaturedCoinbaseOutput(ns, keysWithHeight[i])
 			if err != nil {
 				return fmt.Errorf("error in deleteImmaturedCoinbaseOutput in rollback")
 			}
@@ -3556,14 +3566,14 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 				freezedBal -= amt
 				balance -= amt
 			}
-			err = deleteImmaturedOutput(ns, keysToRemove[i])
+			err = deleteImmaturedOutput(ns, keysWithHeight[i])
 			if err != nil {
 				return fmt.Errorf("error in deleteImmaturedOutput in rollback")
 			}
 		}
 
 		// restore the input in block
-		utxoRings, ss, err := fetchBlockAbeInput(ns, keysToRemove[i]) //there should be fetch the byte not the utxoRing
+		utxoRings, ss, err := fetchBlockAbeInput(ns, keysWithHeight[i]) //there should be fetch the byte not the utxoRing
 		for j := 0; j < len(utxoRings); j++ {
 			u, err := fetchUTXORing(ns, utxoRings[j].RingHash[:])
 			if err != nil {
@@ -3585,10 +3595,6 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 							return err
 						}
 					}
-				}
-				err := putRawUTXORing(ns, utxoRings[j].RingHash[:], utxoRings[j].Serialize()[:])
-				if err != nil {
-					return err
 				}
 			} else {
 				// compare the delta and update the utxo ring entry
@@ -3612,10 +3618,10 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 						}
 					}
 				}
-				err = putRawUTXORing(ns, utxoRings[j].RingHash[:], utxoRings[j].Serialize()[:])
-				if err != nil {
-					return err
-				}
+			}
+			err = putRawUTXORing(ns, utxoRings[j].RingHash[:], utxoRings[j].Serialize()[:])
+			if err != nil {
+				return err
 			}
 		}
 		//delete the block
