@@ -458,6 +458,8 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 		if err != nil {
 			return err
 		}
+		// If the hash in that height if matched between database and input
+		// Then
 		if bytes.Equal(hash[:], b.Hash[:]) {
 			bs := waddrmgr.BlockStamp{
 				Height: b.Height - 1,
@@ -480,7 +482,7 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 				return err
 			}
 
-			err = w.TxStore.RollbackAbe(txmgrNs, b.Height)
+			err = w.TxStore.RollbackAbe(txmgrNs, bs.Height)
 			if err != nil {
 				return err
 			}

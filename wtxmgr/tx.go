@@ -3429,6 +3429,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 						amt := abeutil.Amount(output.Amount)
 						spendableBal -= amt
 						freezedBal += amt
+						log.Infof("(Rollback) Transfer txo in %d (hash %s) with value %v: spendable -> freezed", i-j, blockHash, amt.ToABE())
 
 						tmp, err := chainhash.NewHash(output.RingHash[:])
 						if err != nil {
@@ -3452,6 +3453,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 					if output, err := fetchSpentButUnminedTXO(ns, outpoint.TxHash, outpoint.Index); err == nil {
 						amt := abeutil.Amount(output.Amount)
 						freezedBal += amt
+						log.Infof("(Rollback) Transfer txo in %d (hash %s) with value %v: spent but unmined -> freezed", i-j, blockHash, amt.ToABE())
 
 						tmp, err := chainhash.NewHash(output.RingHash[:])
 						if err != nil {
@@ -3486,6 +3488,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 						amt := abeutil.Amount(output.Amount)
 						freezedBal += amt
 						balance += amt
+						log.Infof("(Rollback) Transfer txo in %d (hash %s) with value %v: spent and minded -> freezed", i-j, blockHash, amt.ToABE())
 
 						tmp, err := chainhash.NewHash(output.RingHash[:])
 						if err != nil {
@@ -3553,6 +3556,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 				amt := abeutil.Amount(unspentUTXO.Amount)
 				freezedBal -= amt
 				balance -= amt
+				log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: freezed -> null", i, blockHash, amt.ToABE())
 			}
 			err = deleteImmaturedCoinbaseOutput(ns, keysWithHeight[i])
 			if err != nil {
@@ -3565,6 +3569,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 				amt := abeutil.Amount(unspentUTXO.Amount)
 				freezedBal -= amt
 				balance -= amt
+				log.Infof("(Rollback) Transfer txo in %d (hash %s) with value %v: freezed -> null", i, blockHash, amt.ToABE())
 			}
 			err = deleteImmaturedOutput(ns, keysWithHeight[i])
 			if err != nil {
@@ -3590,6 +3595,11 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 						amt := abeutil.Amount(scoutput.Amount)
 						spendableBal += amt
 						balance += amt
+						if scoutput.FromCoinBase {
+							log.Infof("(Rollback) Spent coinbase txo in %d (hash %s) with value %v: -> spendable", i, blockHash, amt.ToABE())
+						} else {
+							log.Infof("(Rollback) Spent transfer txo in %d (hash %s) with value %v: -> spendable", i, blockHash, amt.ToABE())
+						}
 						err = deleteSpentConfirmedTXO(ns, key)
 						if err != nil {
 							return err
@@ -3610,6 +3620,11 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 							amt := abeutil.Amount(scoutput.Amount)
 							spendableBal += amt
 							balance += amt
+							if scoutput.FromCoinBase {
+								log.Infof("(Rollback) Coinbase txo spent in %d (hash %s) with value %v: -> spendable", i, blockHash, amt.ToABE())
+							} else {
+								log.Infof("(Rollback) Transfer txo spent in %d (hash %s) with value %v: -> spendable", i, blockHash, amt.ToABE())
+							}
 							err = deleteSpentConfirmedTXO(ns, key)
 							if err != nil {
 								return err
@@ -3641,6 +3656,10 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 				if key == nil || outpoints == nil {
 					continue
 				}
+				currentBlockHash, err := chainhash.NewHash(key[4:32])
+				if err != nil {
+					return err
+				}
 				cbOutput := make(map[wire.OutPointAbe]*UnspentUTXO, len(outpoints))
 				for _, outpoint := range outpoints {
 					// check in mature output
@@ -3648,6 +3667,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 						amt := abeutil.Amount(output.Amount)
 						spendableBal -= amt
 						freezedBal += amt
+						log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: spendable -> freezed", i-maturity-ii, currentBlockHash, amt.ToABE())
 
 						err = deleteMaturedOutput(ns, canonicalOutPointAbe(outpoint.TxHash, outpoint.Index))
 						if err != nil {
@@ -3660,6 +3680,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 					if output, err := fetchSpentButUnminedTXO(ns, outpoint.TxHash, outpoint.Index); err == nil && output.FromCoinBase {
 						amt := abeutil.Amount(output.Amount)
 						freezedBal += amt
+						log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: spent but unmined -> freezed", i-maturity-ii, currentBlockHash, amt.ToABE())
 
 						err = deleteSpentButUnminedTXO(ns, canonicalOutPointAbe(outpoint.TxHash, outpoint.Index))
 						if err != nil {
@@ -3683,6 +3704,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 						amt := abeutil.Amount(output.Amount)
 						freezedBal += amt
 						balance += amt
+						log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: spent -> freezed", i-maturity-ii, currentBlockHash, amt.ToABE())
 
 						err = deleteSpentConfirmedTXO(ns, canonicalOutPointAbe(outpoint.TxHash, outpoint.Index))
 						if err != nil {
