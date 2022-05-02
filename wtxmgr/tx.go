@@ -3656,7 +3656,7 @@ func (s *Store) rollbackAbeNew(ns walletdb.ReadWriteBucket, height int32) error 
 				if key == nil || outpoints == nil {
 					continue
 				}
-				currentBlockHash, err := chainhash.NewHash(key[4:32])
+				currentBlockHash, err := chainhash.NewHash(key[4:36])
 				if err != nil {
 					return err
 				}
