@@ -447,9 +447,9 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
 
-	if !w.ChainSynced() { // if the wallet is syncing with backend, wait for it...
-		return nil
-	}
+	//if !w.ChainSynced() { // if the wallet is syncing with backend, wait for it...
+	//	return nil
+	//}
 
 	// Disconnect the removed block and all blocks after it if we know about
 	// the disconnected block. Otherwise, the block is in the future.
