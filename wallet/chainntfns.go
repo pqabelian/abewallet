@@ -414,7 +414,7 @@ func (w *Wallet) disconnectBlock(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 			if err != nil {
 				return err
 			}
-			b.Hash = *hash
+			bs.Hash = *hash
 
 			client := w.ChainClient()
 			header, err := client.GetBlockHeader(hash)
@@ -423,12 +423,14 @@ func (w *Wallet) disconnectBlock(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 			}
 
 			bs.Timestamp = header.Timestamp
+			// roll back the synced status of database
 			err = w.Manager.SetSyncedTo(addrmgrNs, &bs)
 			if err != nil {
 				return err
 			}
 
-			err = w.TxStore.Rollback(txmgrNs, b.Height)
+			// rollback to the assigned height
+			err = w.TxStore.Rollback(txmgrNs, bs.Height)
 			if err != nil {
 				return err
 			}
@@ -464,11 +466,12 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 			bs := waddrmgr.BlockStamp{
 				Height: b.Height - 1,
 			}
+			// fetch the block hash from the database with height
 			hash, err = w.ManagerAbe.BlockHash(addrmgrNs, bs.Height)
 			if err != nil {
 				return err
 			}
-			b.Hash = *hash
+			bs.Hash = *hash
 
 			client := w.ChainClient()
 			header, err := client.GetBlockHeader(hash)
@@ -477,11 +480,13 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 			}
 
 			bs.Timestamp = header.Timestamp //if fail to detach, it will be not commited
+			// roll back the synced status of database
 			err = w.ManagerAbe.SetSyncedTo(addrmgrNs, &bs)
 			if err != nil {
 				return err
 			}
 
+			// rollback to the assigned height
 			err = w.TxStore.RollbackAbe(txmgrNs, bs.Height)
 			if err != nil {
 				return err
