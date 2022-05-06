@@ -694,6 +694,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 		if err != nil {
 			return err
 		}
+		log.Infof("Rollbacking to block with height %d, hash %s", rollbackStamp.Height, rollbackStamp.Hash)
 
 		// If the rollback happened to go beyond our birthday stamp,
 		// we'll need to find a new one by syncing with the chain again

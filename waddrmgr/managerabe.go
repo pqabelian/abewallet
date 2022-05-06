@@ -291,6 +291,8 @@ func (m *ManagerAbe) GenerateAddressKeysAbe(ns walletdb.ReadWriteBucket, seed []
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("failed to generate address and key")
 	}
+	log.Infof("The address with No. %d is created.", cnt+1)
+	log.Infof("Wallet status: current max No. of address is %v.", cnt+1)
 
 	return serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, nil
 }
@@ -1259,6 +1261,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 					return maybeConvertDbError(err)
 				}
 			}
+			log.Infof("The addresses with No. in [0, %d] have been restored.", end)
 		}
 
 		startSeedStatus := end
@@ -1347,6 +1350,5 @@ func generateAddressSk(seed []byte, length int, cnt uint64) ([]byte, []byte, []b
 	tmp[seedHalfLength+9] = byte(cnt >> 7)
 	t = sha3.Sum512(tmp)
 	copy(usedSeed[halfLength:], t[:])
-
 	return abecrypto.CryptoAddressKeyGen(usedSeed, abecryptoparam.CryptoSchemePQRingCT)
 }

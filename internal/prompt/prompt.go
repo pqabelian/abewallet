@@ -342,7 +342,7 @@ func Seed(reader *bufio.Reader) ([]byte, uint64, error) {
 			continue
 		}
 
-		fmt.Print("Enter the restore number of address :")
+		fmt.Print("Please input the max No. of address to recover :")
 		numStr, err := reader.ReadString('\n')
 		numStr = strings.TrimSpace(numStr)
 		num, err := strconv.ParseUint(numStr, 10, 0)

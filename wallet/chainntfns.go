@@ -485,6 +485,7 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 			if err != nil {
 				return err
 			}
+			log.Infof("Rollbacking to block with height %d, hash %s", bs.Height, bs.Hash)
 
 			// rollback to the assigned height
 			err = w.TxStore.RollbackAbe(txmgrNs, bs.Height)
