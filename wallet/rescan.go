@@ -413,8 +413,29 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 
 					}
 				}
+				extraBlockAbeDetails := make(map[uint32]*wtxmgr.BlockAbeRecord, 2)
+				if blockAbeDetail.Height%blockNum == blockNum-1 {
+					b1, err := w.chainClient.GetBlockAbe(&blockAbeDetail.MsgBlockAbe.Header.PrevBlock)
+					if err != nil {
+						return err
+					}
+					extraBlockAbeDetails[uint32(blockAbeDetail.Height-1)], err = wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(b1)
+					if err != nil {
+						return err
+					}
+
+					b2, err := w.chainClient.GetBlockAbe(&extraBlockAbeDetails[uint32(blockAbeDetail.Height-1)].MsgBlockAbe.Header.PrevBlock)
+					if err != nil {
+						return err
+					}
+					extraBlockAbeDetails[uint32(blockAbeDetail.Height-2)], err = wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(b2)
+					if err != nil {
+						return err
+					}
+				}
+
 				//err = w.TxStore.InsertBlockAbe(txmgrNs,blockAbeDetail,*maturedBlockHashs, mpk,msvk)
-				err = w.TxStore.InsertBlockAbeNew(txmgrNs, addrmgrNs, blockAbeDetail, maturedBlockHashs, coinAddrToSnSk, coinAddrToVSK, coinAddrToInstanceAddr)
+				err = w.TxStore.InsertBlockAbeNew(txmgrNs, addrmgrNs, blockAbeDetail, extraBlockAbeDetails, maturedBlockHashs, coinAddrToSnSk, coinAddrToVSK, coinAddrToInstanceAddr)
 				if err != nil {
 					return err
 				}

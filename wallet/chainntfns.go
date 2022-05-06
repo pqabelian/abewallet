@@ -106,9 +106,29 @@ func (w *Wallet) handleChainNotifications() {
 						}
 					}
 				}
+				extraBlockAbeDetails := make(map[uint32]*wtxmgr.BlockAbeRecord, 2)
+				if blockAbeDetail.Height%blockNum == blockNum-1 {
+					b1, err := chainClient.GetBlockAbe(&blockAbeDetail.MsgBlockAbe.Header.PrevBlock)
+					if err != nil {
+						return err
+					}
+					extraBlockAbeDetails[uint32(blockAbeDetail.Height-1)], err = wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(b1)
+					if err != nil {
+						return err
+					}
+
+					b2, err := chainClient.GetBlockAbe(&extraBlockAbeDetails[uint32(blockAbeDetail.Height-1)].MsgBlockAbe.Header.PrevBlock)
+					if err != nil {
+						return err
+					}
+					extraBlockAbeDetails[uint32(blockAbeDetail.Height-2)], err = wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(b2)
+					if err != nil {
+						return err
+					}
+				}
 
 				//err = w.TxStore.InsertBlockAbe(txmgrNs, blockAbeDetail,*maturedBlockHash, mpk, msvk)
-				err = w.TxStore.InsertBlockAbeNew(txmgrNs, addrmgrNs, blockAbeDetail, maturedBlockHashs, coinAddrToSnSK, coinAddrToVSK, coinAddrToInstanceAddr)
+				err = w.TxStore.InsertBlockAbeNew(txmgrNs, addrmgrNs, blockAbeDetail, extraBlockAbeDetails, maturedBlockHashs, coinAddrToSnSK, coinAddrToVSK, coinAddrToInstanceAddr)
 				if err != nil {
 					return err
 				}
@@ -375,8 +395,29 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 			}
 		}
 	}
+	extraBlockAbeDetails := make(map[uint32]*wtxmgr.BlockAbeRecord, 2)
+	if br.Height%blockNum == blockNum-1 {
+		b1, err := w.chainClient.GetBlockAbe(&br.MsgBlockAbe.Header.PrevBlock)
+		if err != nil {
+			return err
+		}
+		extraBlockAbeDetails[uint32(br.Height-1)], err = wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(b1)
+		if err != nil {
+			return err
+		}
+
+		b2, err := w.chainClient.GetBlockAbe(&extraBlockAbeDetails[uint32(br.Height-1)].MsgBlockAbe.Header.PrevBlock)
+		if err != nil {
+			return err
+		}
+		extraBlockAbeDetails[uint32(br.Height-2)], err = wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(b2)
+		if err != nil {
+			return err
+		}
+	}
+
 	//err = w.TxStore.InsertBlockAbe(txmgrNs, br,*maturedBlockHash, mpk, msvk)
-	err = w.TxStore.InsertBlockAbeNew(txmgrNs, addrmgrNs, br, maturedBlockHashs, coinAddrToSnSk, coinAddrToVSK, coinAddrToInstanceAddr)
+	err = w.TxStore.InsertBlockAbeNew(txmgrNs, addrmgrNs, br, extraBlockAbeDetails, maturedBlockHashs, coinAddrToSnSk, coinAddrToVSK, coinAddrToInstanceAddr)
 	if err != nil {
 		return err
 	}
