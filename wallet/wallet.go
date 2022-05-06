@@ -710,7 +710,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 		// stale state. `Rollback` unconfirms transactions at and beyond
 		// the passed height, so add one to the new synced-to height to
 		// prevent unconfirming transactions in the synced-to block.
-		return w.TxStore.RollbackAbe(txmgrNs, rollbackStamp.Height)
+		return w.TxStore.RollbackAbe(w.ManagerAbe, addrmgrNs, txmgrNs, rollbackStamp.Height)
 	})
 	if err != nil {
 		return err
