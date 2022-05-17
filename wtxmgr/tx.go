@@ -243,8 +243,8 @@ func NewTxRecordFromMsgTx(msgTx *wire.MsgTx, received time.Time) (*TxRecord, err
 	return rec, nil
 }
 func NewTxRecordAbeFromMsgTxAbe(msgTx *wire.MsgTxAbe, received time.Time) (*TxRecordAbe, error) {
-	buf := bytes.NewBuffer(make([]byte, 0, msgTx.SerializeSize()))
-	err := msgTx.Serialize(buf)
+	buf := bytes.NewBuffer(make([]byte, 0, msgTx.SerializeSizeFull()))
+	err := msgTx.SerializeFull(buf)
 	if err != nil {
 		str := "failed to serialize transaction"
 		return nil, storeError(ErrInput, str, err)
