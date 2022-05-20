@@ -1,7 +1,7 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/abesuite/abec v0.9.7-0.20220513142227-c67f0a794edc h1:u3DavuMjZ/L+0bskg+xQhB3bcM5BUECnU75gYWUI1X0=
-github.com/abesuite/abec v0.9.7-0.20220513142227-c67f0a794edc/go.mod h1:28M/EctjnP+qSD4iqvSWlRtKc1gnSFh3oDLYPMtTY1c=
+github.com/abesuite/abec v0.9.7-0.20220520043123-9ecf96fff640 h1:FRsflC7zXPahA1vnGE3S7Q4YduGOuYnjUDGS041X/XE=
+github.com/abesuite/abec v0.9.7-0.20220520043123-9ecf96fff640/go.mod h1:28M/EctjnP+qSD4iqvSWlRtKc1gnSFh3oDLYPMtTY1c=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd h1:BNI2MkhhtofxM0sTP8WmdcT4chaAKZOsyhspB58DSrM=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd/go.mod h1:eo8+6JwPaqdnrzzGmGXEH3nOYknOkk8GtuXw7Bo+f08=
 github.com/abesuite/go-spew v1.1.1 h1:8v1IQu/pRuElOpgwrBLmtxsSTEEK+fCBBOw4VYE9fx8=
@@ -93,8 +93,9 @@ golang.org/x/sys v0.0.0-20180909124046-d0be0721c37e/go.mod h1:STP8DvDyc/dI5b8T5h
 golang.org/x/sys v0.0.0-20190215142949-d0b11bdaac8a/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
 golang.org/x/sys v0.0.0-20190412213103-97732733099d/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
 golang.org/x/sys v0.0.0-20200202164722-d101bd2416d5/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
-golang.org/x/sys v0.0.0-20201119102817-f84b799fce68 h1:nxC68pudNYkKU6jWhgrqdreuFiOQWj1Fs7T3VrH4Pjw=
 golang.org/x/sys v0.0.0-20201119102817-f84b799fce68/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+golang.org/x/sys v0.0.0-20220517195934-5e4e11fc645e h1:w36l2Uw3dRan1K3TyXriXvY+6T56GNmlKGcqiQUJDfM=
+golang.org/x/sys v0.0.0-20220517195934-5e4e11fc645e/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
 golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1 h1:v+OssWQX+hTHEmOBgwxdZxK4zHq3yOs8F9J7mk0PY8E=
 golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1/go.mod h1:bj7SfCRtBDWHUb9snDiAeCFNEtKQo2Wmx5Cou7ajbmo=
 golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=

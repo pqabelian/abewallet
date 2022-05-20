@@ -2018,7 +2018,42 @@ func (w *Wallet) CalculateBalanceAbe(confirms int32) ([]abeutil.Amount, error) {
 	})
 	return balances, err
 }
-
+func (w *Wallet) FetchUnspentUTXOSet() ([]wtxmgr.UnspentUTXO, error) {
+	var utxos []wtxmgr.UnspentUTXO
+	var err error
+	bs := w.ManagerAbe.SyncedTo()
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
+		utxos, err = w.findEligibleTxosAbe(txmgrNs, 1, &bs)
+		return err
+	})
+	return utxos, err
+}
+func (w *Wallet) FetchSpentButUnminedTXOSet() ([]wtxmgr.SpentButUnminedTXO, error) {
+	var utxos []wtxmgr.SpentButUnminedTXO
+	var err error
+	//bs := w.ManagerAbe.SyncedTo()
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
+		utxos, err = w.TxStore.SpentButUnminedOutputsAbe(txmgrNs)
+		return err
+	})
+	return utxos, err
+}
+func (w *Wallet) FetchSpentAndConfirmedTXOSet() ([]wtxmgr.SpentConfirmedTXO, error) {
+	var utxos []wtxmgr.SpentConfirmedTXO
+	var err error
+	//bs := w.ManagerAbe.SyncedTo()
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
+		utxos, err = w.TxStore.SpentAndMinedOutputsAbe(txmgrNs)
+		return err
+	})
+	return utxos, err
+}
 func (w *Wallet) FetchDetailedUtxos(confirms int32) (string, error) {
 	var details []string
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
@@ -3303,144 +3338,6 @@ func (w *Wallet) ListUnspent(minconf, maxconf int32,
 		return nil
 	})
 	return results, err
-}
-
-// TODO(abe): not finished
-func (w *Wallet) ListUnspentAbe(minconf, maxconf int32,
-	addresses map[string]struct{}) ([]*abejson.ListUnspentResult, error) {
-	return nil, nil
-	//var results []*abejson.ListUnspentResult
-	//err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-	//	addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-	//	txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
-	//
-	//	syncBlock := w.ManagerAbe.SyncedTo()
-	//
-	//	filter := len(addresses) != 0
-	//	unspent, err := w.TxStore.UnspentOutputsAbe(txmgrNs)
-	//	if err != nil {
-	//		return err
-	//	}
-	//	sort.Sort(sort.Reverse(unspentUTXOSlice(unspent)))
-	//
-	//	defaultAccountName := "default"
-	//
-	//	results = make([]*abejson.ListUnspentResult, 0, len(unspent))
-	//	for i := range unspent {
-	//		output := unspent[i]
-	//
-	//		// Outputs with fewer confirmations than the minimum or more
-	//		// confs than the maximum are excluded.
-	//		confs := confirms(output.Height, syncBlock.Height)
-	//		if confs < minconf || confs > maxconf {
-	//			continue
-	//		}
-	//
-	//		// Only mature coinbase outputs are included.
-	//		if output.FromCoinBase {
-	//			target := int32(w.ChainParams().CoinbaseMaturity)
-	//			if !confirmed(target, output.Height, syncBlock.Height) {
-	//				continue
-	//			}
-	//		}
-	//
-	//		// Exclude locked outputs from the result set.
-	//		//TODO(abe):we do not support lock output an moment
-	//		//if w.LockedOutpoint(output.TxOutput) {
-	//		//	continue
-	//		//}
-	//
-	//		// Lookup the associated account for the output.  Use the
-	//		// default account name in case there is no associated account
-	//		// for some reason, although this should never happen.
-	//		//
-	//		// This will be unnecessary once transactions and outputs are
-	//		// grouped under the associated account in the db.
-	//		acctName := defaultAccountName
-	//		sc, addrs, _, err := txscript.ExtractPkScriptAddrs(
-	//			output.PkScript, w.chainParams)
-	//		if err != nil {
-	//			continue
-	//		}
-	//		if len(addrs) > 0 {
-	//			smgr, acct, err := w.Manager.AddrAccount(addrmgrNs, addrs[0])
-	//			if err == nil {
-	//				s, err := smgr.AccountName(addrmgrNs, acct)
-	//				if err == nil {
-	//					acctName = s
-	//				}
-	//			}
-	//		}
-	//
-	//		if filter {
-	//			for _, addr := range addrs {
-	//				_, ok := addresses[addr.EncodeAddress()]
-	//				if ok {
-	//					goto include
-	//				}
-	//			}
-	//			continue
-	//		}
-	//
-	//	include:
-	//		// At the moment watch-only addresses are not supported, so all
-	//		// recorded outputs that are not multisig are "spendable".
-	//		// Multisig outputs are only "spendable" if all keys are
-	//		// controlled by this wallet.
-	//		//
-	//		// TODO: Each case will need updates when watch-only addrs
-	//		// is added.  For P2PK, P2PKH, and P2SH, the address must be
-	//		// looked up and not be watching-only.  For multisig, all
-	//		// pubkeys must belong to the manager with the associated
-	//		// private key (currently it only checks whether the pubkey
-	//		// exists, since the private key is required at the moment).
-	//		var spendable bool
-	//	scSwitch:
-	//		switch sc {
-	//		case txscript.PubKeyHashTy:
-	//			spendable = true
-	//		case txscript.PubKeyTy:
-	//			spendable = true
-	//		case txscript.WitnessV0ScriptHashTy:
-	//			spendable = true
-	//		case txscript.WitnessV0PubKeyHashTy:
-	//			spendable = true
-	//		case txscript.MultiSigTy:
-	//			for _, a := range addrs {
-	//				_, err := w.Manager.Address(addrmgrNs, a)
-	//				if err == nil {
-	//					continue
-	//				}
-	//				if waddrmgr.IsError(err, waddrmgr.ErrAddressNotFound) {
-	//					break scSwitch
-	//				}
-	//				return err
-	//			}
-	//			spendable = true
-	//		}
-	//
-	//		result := &abejson.ListUnspentResult{
-	//			TxID:          output.OutPoint.Hash.String(),
-	//			Vout:          output.OutPoint.Index,
-	//			Account:       acctName,
-	//			ScriptPubKey:  hex.EncodeToString(output.PkScript),
-	//			Amount:        output.Amount.ToABE(),
-	//			Confirmations: int64(confs),
-	//			Spendable:     spendable,
-	//		}
-	//
-	//		// BUG: this should be a JSON array so that all
-	//		// addresses can be included, or removed (and the
-	//		// caller extracts addresses from the pkScript).
-	//		if len(addrs) > 0 {
-	//			result.Address = addrs[0].EncodeAddress()
-	//		}
-	//
-	//		results = append(results, result)
-	//	}
-	//	return nil
-	//})
-	//return results, err
 }
 
 // DumpPrivKeys returns the WIF-encoded private keys for all addresses with

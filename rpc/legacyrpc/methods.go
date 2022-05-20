@@ -12,6 +12,7 @@ import (
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abewallet/wallet/txrules"
 	"github.com/abesuite/abewallet/wtxmgr"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -99,7 +100,9 @@ var rpcHandlers = map[string]struct {
 	"listsinceblock":         {handlerWithChain: listSinceBlock},
 	"listtransactions":       {handler: listTransactions},
 	"listunspent":            {handler: listUnspent},
-	"listunspentabe":         {handler: listUnspent},
+	"listunspentabe":         {handler: listUnspentAbe},
+	"listspentbutunminedabe": {handler: listSpentButUnminedAbe},
+	"listspentandminedabe":   {handler: listSpentAndMinedAbe},
 	"lockunspent":            {handler: lockUnspent},
 	"sendfrom":               {handlerWithChain: sendFrom},
 	"sendmany":               {handler: sendMany},
@@ -483,6 +486,8 @@ func getBalance(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 func getBalanceAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.GetBalancesAbeCmd)
 
+	currentTime := time.Now().String()
+	bs := w.ManagerAbe.SyncedTo()
 	var balances []abeutil.Amount
 	//var needUpdateNum int
 	var err error
@@ -490,7 +495,29 @@ func getBalanceAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []float64{balances[0].ToABE(), balances[1].ToABE(), balances[2].ToABE(), balances[3].ToABE()}, nil
+	type tt struct {
+		CurrentTime      string  `json:"current_time,omitempty"`
+		CurrentHeight    int32   `json:"current_height,omitempty"`
+		CurrentBlockHash string  `json:"current_block_hash,omitempty"`
+		TotalBalance     float64 `json:"total_balance,omitempty"`
+		SpendableBalance float64 `json:"spendable_balance,omitempty"`
+		FreezeBalance    float64 `json:"freeze_balance,omitempty"`
+		LockedBalance    float64 `json:"locked_balance,omitempty"`
+	}
+	res := &tt{
+		CurrentTime:      currentTime,
+		CurrentHeight:    bs.Height,
+		CurrentBlockHash: bs.Hash.String(),
+		TotalBalance:     balances[0].ToABE(),
+		SpendableBalance: balances[1].ToABE(),
+		FreezeBalance:    balances[2].ToABE(),
+		LockedBalance:    balances[3].ToABE(),
+	}
+	marshal, err := json.Marshal(res)
+	if err != nil {
+		return nil, err
+	}
+	return string(marshal), nil
 }
 
 // getDetailedUtxos is a temporary command for convenience of test.
@@ -1377,23 +1404,88 @@ func listUnspent(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 
 	return w.ListUnspent(int32(*cmd.MinConf), int32(*cmd.MaxConf), addresses)
 }
+
+// For test
+type utxo struct {
+	RingHash string
+	TxHash   string
+	Index    uint8
+	Amount   uint64
+	Height   int32
+}
+type utxoset []utxo
+
+func (u *utxoset) Len() int {
+	return len(*u)
+}
+
+func (u *utxoset) Less(i, j int) bool {
+	return (*u)[i].Height < (*u)[j].Height
+}
+
+func (u *utxoset) Swap(i, j int) {
+	(*u)[i], (*u)[j] = (*u)[j], (*u)[i]
+}
+
 func listUnspentAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.ListUnspentCmd)
-
-	var addresses map[string]struct{}
-	if cmd.Addresses != nil {
-		addresses = make(map[string]struct{})
-		// confirm that all of them are good:
-		for _, as := range *cmd.Addresses {
-			a, err := decodeAddress(as, w.ChainParams())
-			if err != nil {
-				return nil, err
-			}
-			addresses[a.EncodeAddress()] = struct{}{}
-		}
+	_ = icmd.(*abejson.ListUnspentAbeCmd)
+	utxos, err := w.FetchUnspentUTXOSet()
+	if err != nil {
+		return nil, err
 	}
-
-	return w.ListUnspentAbe(int32(*cmd.MinConf), int32(*cmd.MaxConf), addresses)
+	res := make([]utxo, 0, len(utxos))
+	for i := 0; i < len(utxos); i++ {
+		res = append(res, utxo{
+			RingHash: utxos[i].RingHash.String(),
+			TxHash:   utxos[i].TxOutput.TxHash.String(),
+			Index:    utxos[i].TxOutput.Index,
+			Amount:   utxos[i].Amount,
+			Height:   utxos[i].Height,
+		})
+	}
+	t := utxoset(res)
+	sort.Sort(&t)
+	return res, nil
+}
+func listSpentButUnminedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	_ = icmd.(*abejson.ListSpentButUnminedAbeCmd)
+	sbutxos, err := w.FetchSpentButUnminedTXOSet()
+	if err != nil {
+		return nil, err
+	}
+	res := make([]utxo, 0, len(sbutxos))
+	for i := 0; i < len(sbutxos); i++ {
+		res = append(res, utxo{
+			RingHash: sbutxos[i].RingHash.String(),
+			TxHash:   sbutxos[i].TxOutput.TxHash.String(),
+			Index:    sbutxos[i].TxOutput.Index,
+			Amount:   sbutxos[i].Amount,
+			Height:   sbutxos[i].Height,
+		})
+	}
+	t := utxoset(res)
+	sort.Sort(&t)
+	return res, nil
+}
+func listSpentAndMinedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	_ = icmd.(*abejson.ListSpentAndMinedAbeCmd)
+	sctxos, err := w.FetchSpentAndConfirmedTXOSet()
+	if err != nil {
+		return nil, err
+	}
+	res := make([]utxo, 0, len(sctxos))
+	for i := 0; i < len(sctxos); i++ {
+		res = append(res, utxo{
+			RingHash: sctxos[i].RingHash.String(),
+			TxHash:   sctxos[i].TxOutput.TxHash.String(),
+			Index:    sctxos[i].TxOutput.Index,
+			Amount:   sctxos[i].Amount,
+			Height:   sctxos[i].Height,
+		})
+	}
+	t := utxoset(res)
+	sort.Sort(&t)
+	return res, nil
 }
 
 // lockUnspent handles the lockunspent command.

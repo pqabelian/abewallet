@@ -3925,7 +3925,122 @@ func (s *Store) UnspentOutputs(ns walletdb.ReadBucket) ([]Credit, error) {
 
 	return unspent, nil
 }
+func (s *Store) SpentAndMinedOutputsAbe(ns walletdb.ReadBucket) ([]SpentConfirmedTXO, error) {
+	samtxos := make([]SpentConfirmedTXO, 0)
 
+	var op wire.OutPointAbe
+	//var block BlockAbe
+	err := ns.NestedReadBucket(bucketSpentConfirmed).ForEach(func(k, v []byte) error {
+		err := readCanonicalOutPointAbe(k, &op)
+		if err != nil {
+			return err
+		}
+		sct := new(SpentConfirmedTXO)
+		hash, err := chainhash.NewHash(k[:32])
+		if err != nil {
+			return err
+		}
+		sct.TxOutput.TxHash = *hash
+		sct.TxOutput.Index = k[32]
+		offset := 0
+		sct.Version = byteOrder.Uint32(v[offset : offset+4])
+		offset += 4
+		sct.Height = int32(byteOrder.Uint32(v[offset : offset+4]))
+		offset += 4
+		t := v[offset]
+		offset += 1
+		if t == 0 {
+			sct.FromCoinBase = false
+		} else {
+			sct.FromCoinBase = true
+		}
+		sct.Amount = uint64(byteOrder.Uint64(v[offset : offset+8]))
+		offset += 8
+		sct.Index = v[offset]
+		offset += 1
+		sct.GenerationTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
+		offset += 8
+		copy(sct.RingHash[:], v[offset:offset+32])
+		offset += 32
+		sct.RingSize = v[offset]
+		offset += 1
+		copy(sct.SpentByHash[:], v[offset:offset+32])
+		offset += 32
+		sct.SpentTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
+		offset += 8
+		sct.ConfirmTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
+		offset += 8
+		samtxos = append(samtxos, *sct)
+		return nil
+	})
+	if err != nil {
+		if _, ok := err.(Error); ok {
+			return nil, err
+		}
+		str := "failed iterating unspent bucket"
+		return nil, storeError(ErrDatabase, str, err)
+	}
+
+	//	todo(ABE): For ABE, only the Txos confirmed by blocks and contained in some ring are spentable.
+	return samtxos, nil
+}
+func (s *Store) SpentButUnminedOutputsAbe(ns walletdb.ReadBucket) ([]SpentButUnminedTXO, error) {
+	sbutxos := make([]SpentButUnminedTXO, 0)
+
+	var op wire.OutPointAbe
+	//var block BlockAbe
+	err := ns.NestedReadBucket(bucketSpentButUnmined).ForEach(func(k, v []byte) error {
+		err := readCanonicalOutPointAbe(k, &op)
+		if err != nil {
+			return err
+		}
+		sbu := new(SpentButUnminedTXO)
+		hash, err := chainhash.NewHash(k[:32])
+		if err != nil {
+			return err
+		}
+		sbu.TxOutput.TxHash = *hash
+		sbu.TxOutput.Index = k[32]
+		offset := 0
+		sbu.Version = byteOrder.Uint32(v[offset : offset+4])
+		offset += 4
+		sbu.Height = int32(byteOrder.Uint32(v[offset : offset+4]))
+		offset += 4
+		t := v[offset]
+		offset += 1
+		if t == 0 {
+			sbu.FromCoinBase = false
+		} else {
+			sbu.FromCoinBase = true
+		}
+		sbu.Amount = byteOrder.Uint64(v[offset : offset+8])
+		offset += 8
+		sbu.Index = v[offset]
+		offset += 1
+		sbu.GenerationTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
+		offset += 8
+		copy(sbu.RingHash[:], v[offset:offset+32])
+		offset += 32
+		sbu.RingSize = v[offset]
+		offset += 1
+		copy(sbu.SpentByHash[:], v[offset:offset+32])
+		offset += 32
+		sbu.SpentTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
+		offset += 8
+		sbutxos = append(sbutxos, *sbu)
+		return nil
+	})
+	if err != nil {
+		if _, ok := err.(Error); ok {
+			return nil, err
+		}
+		str := "failed iterating unspent bucket"
+		return nil, storeError(ErrDatabase, str, err)
+	}
+
+	//	todo(ABE): For ABE, only the Txos confirmed by blocks and contained in some ring are spentable.
+	return sbutxos, nil
+}
 func (s *Store) UnspentOutputsAbe(ns walletdb.ReadBucket) ([]UnspentUTXO, error) {
 	unspent := make([]UnspentUTXO, 0)
 
