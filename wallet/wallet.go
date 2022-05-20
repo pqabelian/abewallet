@@ -2018,6 +2018,18 @@ func (w *Wallet) CalculateBalanceAbe(confirms int32) ([]abeutil.Amount, error) {
 	})
 	return balances, err
 }
+func (w *Wallet) FetchUnmatruedUTXOSet() ([]wtxmgr.UnspentUTXO, error) {
+	var utxos []wtxmgr.UnspentUTXO
+	var err error
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
+		utxos, err = w.TxStore.UnmaturedOutputsAbe(txmgrNs)
+		return err
+	})
+	return utxos, err
+}
+
 func (w *Wallet) FetchUnspentUTXOSet() ([]wtxmgr.UnspentUTXO, error) {
 	var utxos []wtxmgr.UnspentUTXO
 	var err error

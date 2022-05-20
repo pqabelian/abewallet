@@ -100,6 +100,8 @@ var rpcHandlers = map[string]struct {
 	"listsinceblock":         {handlerWithChain: listSinceBlock},
 	"listtransactions":       {handler: listTransactions},
 	"listunspent":            {handler: listUnspent},
+	"listallutxoabe":         {handler: listAllUTXOAbe},
+	"listunmaturedabe":       {handler: listUnmaturedUTXOAbe},
 	"listunspentabe":         {handler: listUnspentAbe},
 	"listspentbutunminedabe": {handler: listSpentButUnminedAbe},
 	"listspentandminedabe":   {handler: listSpentAndMinedAbe},
@@ -1407,11 +1409,12 @@ func listUnspent(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 
 // For test
 type utxo struct {
-	RingHash string
-	TxHash   string
-	Index    uint8
-	Amount   uint64
-	Height   int32
+	RingHash     string
+	TxHash       string
+	Index        uint8
+	FromCoinbase bool
+	Amount       uint64
+	Height       int32
 }
 type utxoset []utxo
 
@@ -1426,6 +1429,62 @@ func (u *utxoset) Less(i, j int) bool {
 func (u *utxoset) Swap(i, j int) {
 	(*u)[i], (*u)[j] = (*u)[j], (*u)[i]
 }
+func listAllUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	_ = icmd.(*abejson.ListAllUnspentAbeCmd)
+	utxos, err := w.FetchUnspentUTXOSet()
+	if err != nil {
+		return nil, err
+	}
+	unmatureds, err := w.FetchUnmatruedUTXOSet()
+	if err != nil {
+		return nil, err
+	}
+	res := make([]utxo, 0, len(utxos)+len(unmatureds))
+	for i := 0; i < len(utxos); i++ {
+		res = append(res, utxo{
+			RingHash:     utxos[i].RingHash.String(),
+			TxHash:       utxos[i].TxOutput.TxHash.String(),
+			Index:        utxos[i].TxOutput.Index,
+			FromCoinbase: utxos[i].FromCoinBase,
+			Amount:       utxos[i].Amount,
+			Height:       utxos[i].Height,
+		})
+	}
+	for i := 0; i < len(unmatureds); i++ {
+		res = append(res, utxo{
+			RingHash:     unmatureds[i].RingHash.String(),
+			TxHash:       unmatureds[i].TxOutput.TxHash.String(),
+			Index:        unmatureds[i].TxOutput.Index,
+			FromCoinbase: unmatureds[i].FromCoinBase,
+			Amount:       unmatureds[i].Amount,
+			Height:       unmatureds[i].Height,
+		})
+	}
+	t := utxoset(res)
+	sort.Sort(&t)
+	return res, nil
+}
+func listUnmaturedUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	_ = icmd.(*abejson.ListUnmaturedAbeCmd)
+	unmatureds, err := w.FetchUnmatruedUTXOSet()
+	if err != nil {
+		return nil, err
+	}
+	res := make([]utxo, 0, len(unmatureds))
+	for i := 0; i < len(unmatureds); i++ {
+		res = append(res, utxo{
+			RingHash:     unmatureds[i].RingHash.String(),
+			TxHash:       unmatureds[i].TxOutput.TxHash.String(),
+			Index:        unmatureds[i].TxOutput.Index,
+			FromCoinbase: unmatureds[i].FromCoinBase,
+			Amount:       unmatureds[i].Amount,
+			Height:       unmatureds[i].Height,
+		})
+	}
+	t := utxoset(res)
+	sort.Sort(&t)
+	return res, nil
+}
 
 func listUnspentAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	_ = icmd.(*abejson.ListUnspentAbeCmd)
@@ -1436,11 +1495,12 @@ func listUnspentAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	res := make([]utxo, 0, len(utxos))
 	for i := 0; i < len(utxos); i++ {
 		res = append(res, utxo{
-			RingHash: utxos[i].RingHash.String(),
-			TxHash:   utxos[i].TxOutput.TxHash.String(),
-			Index:    utxos[i].TxOutput.Index,
-			Amount:   utxos[i].Amount,
-			Height:   utxos[i].Height,
+			RingHash:     utxos[i].RingHash.String(),
+			TxHash:       utxos[i].TxOutput.TxHash.String(),
+			Index:        utxos[i].TxOutput.Index,
+			FromCoinbase: utxos[i].FromCoinBase,
+			Amount:       utxos[i].Amount,
+			Height:       utxos[i].Height,
 		})
 	}
 	t := utxoset(res)
@@ -1456,11 +1516,12 @@ func listSpentButUnminedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, er
 	res := make([]utxo, 0, len(sbutxos))
 	for i := 0; i < len(sbutxos); i++ {
 		res = append(res, utxo{
-			RingHash: sbutxos[i].RingHash.String(),
-			TxHash:   sbutxos[i].TxOutput.TxHash.String(),
-			Index:    sbutxos[i].TxOutput.Index,
-			Amount:   sbutxos[i].Amount,
-			Height:   sbutxos[i].Height,
+			RingHash:     sbutxos[i].RingHash.String(),
+			TxHash:       sbutxos[i].TxOutput.TxHash.String(),
+			Index:        sbutxos[i].TxOutput.Index,
+			FromCoinbase: sbutxos[i].FromCoinBase,
+			Amount:       sbutxos[i].Amount,
+			Height:       sbutxos[i].Height,
 		})
 	}
 	t := utxoset(res)
@@ -1476,11 +1537,12 @@ func listSpentAndMinedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, erro
 	res := make([]utxo, 0, len(sctxos))
 	for i := 0; i < len(sctxos); i++ {
 		res = append(res, utxo{
-			RingHash: sctxos[i].RingHash.String(),
-			TxHash:   sctxos[i].TxOutput.TxHash.String(),
-			Index:    sctxos[i].TxOutput.Index,
-			Amount:   sctxos[i].Amount,
-			Height:   sctxos[i].Height,
+			RingHash:     sctxos[i].RingHash.String(),
+			TxHash:       sctxos[i].TxOutput.TxHash.String(),
+			Index:        sctxos[i].TxOutput.Index,
+			FromCoinbase: sctxos[i].FromCoinBase,
+			Amount:       sctxos[i].Amount,
+			Height:       sctxos[i].Height,
 		})
 	}
 	t := utxoset(res)

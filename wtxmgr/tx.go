@@ -1926,10 +1926,13 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, addrMgrNs wa
 						}
 					}
 					// move to spent and confirm bucket
-					err := putRawSpentConfirmedTXO(txMgrNs, k, v)
-					if err != nil {
-						return err
+					if v != nil {
+						err := putRawSpentConfirmedTXO(txMgrNs, k, v)
+						if err != nil {
+							return err
+						}
 					}
+
 				}
 			}
 
@@ -2046,7 +2049,12 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, addrMgrNs wa
 				}
 				log.Infof("Coinbase txo at Height %d (Hash %s) , Value %v is matured!", utxo.Height, maturedBlockHashs[i], float64(utxo.Amount)/math.Pow10(7))
 			}
+			err = deleteImmaturedCoinbaseOutput(txMgrNs, canonicalBlockAbe(utxoHeight, *maturedBlockHashs[i]))
+			if err != nil {
+				return err
+			}
 		}
+
 	}
 
 	// fetch the outputs of recent three blocks and form rings
@@ -2368,6 +2376,11 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, addrMgrNs wa
 				return err
 			}
 		}
+		err = deleteImmaturedOutput(txMgrNs, canonicalBlockAbe(block.Height-1, msgBlock2.Header.PrevBlock))
+		if err != nil {
+			return err
+		}
+
 		for op, utxo := range block0TransferUTXO {
 			v := valueUnspentTXO(false, utxo.Version, utxo.Height, utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 			amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
@@ -2378,6 +2391,10 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, addrMgrNs wa
 			if err != nil {
 				return err
 			}
+		}
+		err = deleteImmaturedOutput(txMgrNs, canonicalBlockAbe(block.Height-2, msgBlock1.Header.PrevBlock))
+		if err != nil {
+			return err
 		}
 	}
 
@@ -3924,6 +3941,92 @@ func (s *Store) UnspentOutputs(ns walletdb.ReadBucket) ([]Credit, error) {
 	}
 
 	return unspent, nil
+}
+func (s *Store) UnmaturedOutputsAbe(ns walletdb.ReadBucket) ([]UnspentUTXO, error) {
+	unmatureds := make([]UnspentUTXO, 0)
+
+	// block height block hash -> []Unspent
+	err := ns.NestedReadBucket(bucketImmaturedCoinbaseOutput).ForEach(func(_, v []byte) error {
+		op := make(map[wire.OutPointAbe]*UnspentUTXO)
+		offset := 0
+		for i := 0; i < len(v)/(4+4+32+1+8+1+8+32+1); i++ { // todo: should not use hardcodes
+			tmp := new(UnspentUTXO)
+			tmp.Version = byteOrder.Uint32(v[offset : offset+4])
+			offset += 4
+			tmp.Height = int32(byteOrder.Uint32(v[offset : offset+4]))
+			offset += 4
+			copy(tmp.TxOutput.TxHash[:], v[offset:offset+32])
+			offset += 32
+			tmp.TxOutput.Index = v[offset]
+			offset += 1
+			tmp.FromCoinBase = true
+			tmp.Amount = byteOrder.Uint64(v[offset : offset+8])
+			offset += 8
+			tmp.Index = v[offset]
+			offset += 1
+			tmp.GenerationTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
+			offset += 8
+			copy(tmp.RingHash[:], v[offset:offset+32])
+			offset += 32
+
+			tmp.RingSize = v[offset]
+
+			op[tmp.TxOutput] = tmp
+		}
+		for _, ust := range op {
+			unmatureds = append(unmatureds, *ust)
+		}
+		return nil
+	})
+	if err != nil {
+		if _, ok := err.(Error); ok {
+			return nil, err
+		}
+		str := "failed iterating unspent bucket"
+		return nil, storeError(ErrDatabase, str, err)
+	}
+	err = ns.NestedReadBucket(bucketImmaturedOutput).ForEach(func(k, v []byte) error {
+		op := make(map[wire.OutPointAbe]*UnspentUTXO)
+		offset := 0
+		for i := 0; i < len(v)/(4+4+32+1+8+1+8+32+1); i++ { // todo: should not use hard code, should use getXXXSize
+			tmp := new(UnspentUTXO)
+			tmp.Version = byteOrder.Uint32(v[offset : offset+4])
+			offset += 4
+			tmp.Height = int32(byteOrder.Uint32(v[offset : offset+4]))
+			offset += 4
+			copy(tmp.TxOutput.TxHash[:], v[offset:offset+32])
+			offset += 32
+			tmp.TxOutput.Index = v[offset]
+			offset += 1
+			tmp.FromCoinBase = false
+			tmp.Amount = byteOrder.Uint64(v[offset : offset+8])
+			offset += 8
+			tmp.Index = v[offset]
+			offset += 1
+			tmp.GenerationTime = time.Unix(int64(byteOrder.Uint64(v[offset:offset+8])), 0)
+			offset += 8
+			copy(tmp.RingHash[:], v[offset:offset+32])
+			offset += 32
+
+			tmp.RingSize = v[offset]
+
+			op[tmp.TxOutput] = tmp
+		}
+		for _, ust := range op {
+			unmatureds = append(unmatureds, *ust)
+		}
+		return nil
+	})
+	if err != nil {
+		if _, ok := err.(Error); ok {
+			return nil, err
+		}
+		str := "failed iterating unspent bucket"
+		return nil, storeError(ErrDatabase, str, err)
+	}
+
+	//	todo(ABE): For ABE, only the Txos confirmed by blocks and contained in some ring are spentable.
+	return unmatureds, nil
 }
 func (s *Store) SpentAndMinedOutputsAbe(ns walletdb.ReadBucket) ([]SpentConfirmedTXO, error) {
 	samtxos := make([]SpentConfirmedTXO, 0)
