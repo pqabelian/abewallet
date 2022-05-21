@@ -3665,7 +3665,7 @@ func (s *Store) rollbackAbeNew(manager *waddrmgr.ManagerAbe, waddrmgrNs walletdb
 					if utxoRings[j].IsMy[k] && !utxoRings[j].Spent[k] { // is my but not spend
 						key := canonicalOutPointAbe(utxoRings[j].TxHashes[k], utxoRings[j].OutputIndexes[k])
 						scoutput, err := fetchSpentConfirmedTXO(wtxmgrNs, utxoRings[j].TxHashes[k], utxoRings[j].OutputIndexes[k])
-						err = putRawMaturedOutput(wtxmgrNs, key, valueMaturedOutput(scoutput.FromCoinBase, scoutput.Height, int64(scoutput.Amount), scoutput.GenerationTime, scoutput.RingHash))
+						err = putRawMaturedOutput(wtxmgrNs, key, valueUnspentTXO(scoutput.FromCoinBase, scoutput.Version, scoutput.Height, scoutput.Amount, scoutput.Index, scoutput.GenerationTime, scoutput.RingHash, scoutput.RingSize))
 						if err != nil {
 							return err
 						}
@@ -3689,8 +3689,8 @@ func (s *Store) rollbackAbeNew(manager *waddrmgr.ManagerAbe, waddrmgrNs walletdb
 					for m, sn := range u.OriginSerialNumberes {
 						if bytes.Equal(sn, ss[j][k]) && utxoRings[j].IsMy[m] && !utxoRings[j].Spent[m] {
 							key := canonicalOutPointAbe(utxoRings[j].TxHashes[m], utxoRings[j].OutputIndexes[m])
-							scoutput, err := fetchSpentConfirmedTXO(wtxmgrNs, utxoRings[j].TxHashes[k], utxoRings[j].OutputIndexes[k])
-							err = putRawMaturedOutput(wtxmgrNs, key, valueMaturedOutput(scoutput.FromCoinBase, scoutput.Height, int64(scoutput.Amount), scoutput.GenerationTime, scoutput.RingHash))
+							scoutput, err := fetchSpentConfirmedTXO(wtxmgrNs, utxoRings[j].TxHashes[m], utxoRings[j].OutputIndexes[m])
+							err = putRawMaturedOutput(wtxmgrNs, key, valueUnspentTXO(scoutput.FromCoinBase, scoutput.Version, scoutput.Height, scoutput.Amount, scoutput.Index, scoutput.GenerationTime, scoutput.RingHash, scoutput.RingSize))
 							if err != nil {
 								return err
 							}
