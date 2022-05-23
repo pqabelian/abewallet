@@ -2227,6 +2227,25 @@ func deleteRawUnmined(ns walletdb.ReadWriteBucket, k []byte) error {
 	}
 	return nil
 }
+func DeleteRawUnminedAbe(ns walletdb.ReadWriteBucket, tx *wire.MsgTxAbe) error {
+	for _, input := range tx.TxIns {
+		ringHash := input.PreviousOutPointRing.Hash()
+
+		utxoRing, err := fetchUTXORing(ns, ringHash[:])
+		if err != nil {
+			continue
+		}
+		for idx, sn := range utxoRing.OriginSerialNumberes {
+			if bytes.Equal(sn, input.SerialNumber) {
+				k := canonicalOutPoint(&utxoRing.TxHashes[idx], uint32(utxoRing.OutputIndexes[idx]))
+				_ = deleteSpentButUnminedTXO(ns, k)
+				break
+			}
+		}
+	}
+	txHash := tx.TxHash()
+	return deleteRawUnminedAbe(ns, txHash[:])
+}
 
 // TODO(abe):when delete the entry in unminedAbe, it must explicit where the corresponding entry in spent but unmined into
 //  SpentAndConfirm or UnspentTXO bucket?

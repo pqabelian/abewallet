@@ -3645,6 +3645,15 @@ func (w *Wallet) resendUnminedTxAbes() {
 		if err != nil {
 			log.Debugf("Unable to rebroadcast transaction %v: %v",
 				tx.TxHash(), err)
+			err = walletdb.Update(w.db, func(dbtx walletdb.ReadWriteTx) error {
+				txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
+				return wtxmgr.DeleteRawUnminedAbe(txmgrNs, tx)
+			})
+			if err != nil {
+				log.Errorf("Unable to retrieve unconfirmed transactions to "+
+					"resend: %v", err)
+				return
+			}
 			continue
 		}
 

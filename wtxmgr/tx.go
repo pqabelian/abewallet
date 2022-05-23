@@ -1850,7 +1850,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, addrMgrNs wa
 				if oldU == nil || err != nil {
 					return err
 				}
-				// match the serialNumber
+				// match the serialNumber, just a check for database
 				for k := 0; k < len(oldU.GotSerialNumberes); k++ {
 					// check doubling serialNumber
 					if bytes.Equal(serialNumber, oldU.GotSerialNumberes[k][:]) {
@@ -1858,7 +1858,6 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, addrMgrNs wa
 						return fmt.Errorf("there has a same serialNumber in UTXORingAbe")
 					}
 				}
-
 				// save the previous utxoring for quick roll back
 				if blockInputs == nil {
 					blockInputs = new(RingHashSerialNumbers)
@@ -1869,10 +1868,10 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, addrMgrNs wa
 				if !ok { // the utxo ring has not cached,record it in block input
 					blockInputs.utxoRings[ringHash] = *oldU
 				}
-				blockInputs.serialNumbers[ringHash] = append(blockInputs.serialNumbers[ringHash], serialNumber)
 				u = oldU.Copy()
 			}
 
+			blockInputs.serialNumbers[ringHash] = append(blockInputs.serialNumbers[ringHash], serialNumber)
 			// copy a new utxoring and update the new utxoring variable
 			err := u.AddGotSerialNumber(serialNumber)
 			if err != nil {
