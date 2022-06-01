@@ -635,7 +635,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 	var txFee abeutil.Amount
 	//var addrBytes, vskBytes, aSkSpBytes []byte
 	//var addrBytes, aSkSpBytes []byte
-	flag := false //whether need to make a change
+	needChangeFlag := false //whether need to make a change
 	// TODO(abe):should use a db.View to spend, if successful, use db.Update
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
@@ -680,10 +680,10 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 						// the remain less than threshold so giving it to transaction fee
 						if currentTotal-targetValue-feeSpecified < ChangeThreshold {
 							txFee = currentTotal - targetValue
-							flag = false
+							needChangeFlag = false
 						} else {
 							txFee = feeSpecified
-							flag = true
+							needChangeFlag = true
 						}
 					}
 				} else {
@@ -711,10 +711,10 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 							// the remain less than threshold so giving it to transaction fee
 							if currentTotal-targetValue-feeSpecified < ChangeThreshold {
 								txFee = currentTotal - targetValue
-								flag = false
+								needChangeFlag = false
 							} else {
 								txFee = feeSpecified
-								flag = true
+								needChangeFlag = true
 							}
 						}
 						break
@@ -770,10 +770,10 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 						// the remain less than threshold so giving it to transaction fee
 						if currentTotal-targetValue-fee < ChangeThreshold {
 							txFee = currentTotal - targetValue
-							flag = false
+							needChangeFlag = false
 						} else {
 							txFee = fee
-							flag = true
+							needChangeFlag = true
 						}
 					}
 				} else {
@@ -791,7 +791,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 					}
 					if currentTotal >= targetValue+fee {
 						txFee = currentTotal - targetValue
-						flag = false
+						needChangeFlag = false
 					} else {
 						return errors.New("not Enough")
 					}
@@ -836,10 +836,10 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 						if targetValue+fee < currentTotal {
 							if currentTotal-targetValue-fee < ChangeThreshold {
 								txFee = currentTotal - targetValue
-								flag = false
+								needChangeFlag = false
 							} else {
 								// need to make a change
-								flag = true
+								needChangeFlag = true
 								txConSize, err := wire.PrecomputeTrTxConSize(uint32(txVersion), inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)+1), abecryptoparam.MaxAllowedTxMemoSize)
 								if err != nil {
 									return err
@@ -855,10 +855,10 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 								if targetValue+fee < currentTotal {
 									if currentTotal-targetValue < ChangeThreshold {
 										txFee = currentTotal - targetValue
-										flag = false
+										needChangeFlag = false
 									} else {
 										txFee = fee
-										flag = true
+										needChangeFlag = true
 									}
 								} else {
 									continue
@@ -976,10 +976,9 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 			selectedTxos[i].Amount))
 	}
 
-	if flag {
-		// TODO check the amount to uint64???
+	if needChangeFlag {
 		// fetch a change address for the change
-		addrBytes, err := w.NewAddressKeyAbe()
+		_, addrBytes, err := w.NewAddressKeyAbe()
 		if err != nil {
 			return nil, err
 		}
@@ -993,7 +992,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 		txOutDescs[len(txOutDescs)-1], txOutDescs[index] = txOutDescs[index], txOutDescs[len(txOutDescs)-1]
 	}
 
-	//PrintNewUTXOs(txOutDescs, flag, txFee)
+	//PrintNewUTXOs(txOutDescs, needChangeFlag, txFee)
 
 	//TODO(abe) 20210627: to sure the txmemo?
 	transferTxTemplate, err := createTransferTxAbeMsgTemplate(txIns, len(txOutDescs), []byte{}, uint64(txFee))

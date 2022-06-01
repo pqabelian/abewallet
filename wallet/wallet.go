@@ -3768,7 +3768,8 @@ func (w *Wallet) NewChangeAddress(account uint32,
 	return addr, nil
 }
 
-func (w *Wallet) NewAddressKeyAbe() ([]byte, error) {
+func (w *Wallet) NewAddressKeyAbe() (uint64, []byte, error) {
+	var numberOrder uint64
 	var addr []byte
 	err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 		addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
@@ -3782,7 +3783,7 @@ func (w *Wallet) NewAddressKeyAbe() ([]byte, error) {
 			return err
 		}
 		var serializedASksp, serializedASksn, serializedVSk []byte
-		addr, serializedASksp, serializedASksn, serializedVSk, err = w.ManagerAbe.GenerateAddressKeysAbe(addrmgrNs, seed)
+		numberOrder, addr, serializedASksp, serializedASksn, serializedVSk, err = w.ManagerAbe.GenerateAddressKeysAbe(addrmgrNs, seed)
 		if err != nil {
 			return err
 		}
@@ -3818,9 +3819,9 @@ func (w *Wallet) NewAddressKeyAbe() ([]byte, error) {
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
-	return addr, nil
+	return numberOrder, addr, nil
 }
 
 // newChangeAddress returns a new change address for the wallet.

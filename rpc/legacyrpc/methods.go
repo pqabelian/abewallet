@@ -1957,8 +1957,9 @@ func generateAddressAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 	_ = icmd.(*abejson.GenerateAddressCmd)
 
 	var err error
+	var numberOrder uint64
 	var address []byte
-	address, err = w.NewAddressKeyAbe()
+	numberOrder, address, err = w.NewAddressKeyAbe()
 	if err != nil {
 		return nil, err
 	}
@@ -1969,7 +1970,14 @@ func generateAddressAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 	// generate the hash of (abecrypto.CryptoSchemePQRINGCT || serialized address)
 	hash := chainhash.DoubleHashB(b)
 	b = append(b, hash...)
-	return hex.EncodeToString(b), nil
+	type tt struct {
+		No_  uint64 `json:"No,omitempty"`
+		Addr string `json:"addr,omitempty"`
+	}
+	return &tt{
+		No_:  numberOrder,
+		Addr: hex.EncodeToString(b),
+	}, nil
 }
 func freshen(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	_ = icmd.(*abejson.FreshenCmd)

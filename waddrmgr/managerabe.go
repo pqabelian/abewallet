@@ -274,27 +274,27 @@ func (m *ManagerAbe) PutAddressKeysEncAbe(ns walletdb.ReadWriteBucket, addrKey [
 	return putAddressKeysEncAbe(ns, addrKey, valueSecretKeyEnc, addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
 
 }
-func (m *ManagerAbe) GenerateAddressKeysAbe(ns walletdb.ReadWriteBucket, seed []byte) ([]byte, []byte, []byte, []byte, error) {
+func (m *ManagerAbe) GenerateAddressKeysAbe(ns walletdb.ReadWriteBucket, seed []byte) (uint64, []byte, []byte, []byte, []byte, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	// fetch the seed status
 	cnt, err := fetchSeedStatusAbe(ns)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return 0, nil, nil, nil, nil, err
 	}
 	// update the seedStatus
 	err = putSeedStatusAbe(ns, cnt+1)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return 0, nil, nil, nil, nil, err
 	}
 	serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, err := generateAddressSk(seed, len(seed), cnt+1)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("failed to generate address and key")
+		return 0, nil, nil, nil, nil, fmt.Errorf("failed to generate address and key")
 	}
 	log.Infof("The address with No. %d is created.", cnt+1)
 	log.Infof("Wallet status: current max No. of address is %v.", cnt+1)
 
-	return serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, nil
+	return cnt + 1, serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, nil
 }
 
 // TODO(osy) 20200608 use txoReceive "replace" the IsMyAddress OR discard this function
