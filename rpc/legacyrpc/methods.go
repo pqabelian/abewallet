@@ -1615,10 +1615,39 @@ func makeOutputsAbe(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainPara
 	}
 	return outputs, nil
 }
+
+// checkValidAddress checks whether the given address meets the requirement,
+// including netID and verification hash
+func checkValidAddress(addr []byte, chainParams *chaincfg.Params) error {
+	if len(addr) < 33 {
+		return errors.New("the length of address is incorrect")
+	}
+
+	// Check netID
+	netID := addr[0]
+	if netID != chainParams.PQRingCTID {
+		return errors.New("address verification fails: the netID of address does not match the active net")
+	}
+
+	// Check verification hash
+	verifyBytes := addr[:len(addr)-32]
+	dstHash0 := addr[len(addr)-32:]
+	dstHash, _ := chainhash.NewHash(dstHash0)
+	realHash := chainhash.DoubleHashH(verifyBytes)
+	if !dstHash.IsEqual(&realHash) {
+		return errors.New("address verification fails: verification hash does not match")
+	}
+	return nil
+}
+
 func makeOutputDescsForPairs(w *wallet.Wallet, pairs []abejson.Pair, chainParams *chaincfg.Params) ([]*abecrypto.AbeTxOutputDesc, error) {
 	outputDescs := make([]*abecrypto.AbeTxOutputDesc, 0, len(pairs))
 	for i := 0; i < len(pairs); i++ {
 		addr, err := hex.DecodeString(pairs[i].Address)
+		if err != nil {
+			return nil, err
+		}
+		err = checkValidAddress(addr, chainParams)
 		if err != nil {
 			return nil, err
 		}
@@ -1743,7 +1772,6 @@ func isHexString(s string) bool {
 func sendAddressAbe(w *wallet.Wallet, amounts []abejson.Pair,
 	minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string) (string, error) {
 
-	//outputs, err := makeOutputsAbe(w, amounts, w.ChainParams())
 	outputDescs, err := makeOutputDescsForPairs(w, amounts, w.ChainParams())
 	if err != nil {
 		return "", err
