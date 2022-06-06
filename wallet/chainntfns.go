@@ -198,7 +198,7 @@ func (w *Wallet) handleChainNotifications() {
 				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 					return w.connectBlockAbe(tx, wtxmgr.BlockMeta(n))
 				})
-				go w.resendUnminedTxAbes()
+				go w.resendUnminedTx()
 				notificationName = "block connected"
 			case chain.BlockAbeDisconnected:
 				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {

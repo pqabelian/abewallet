@@ -14,8 +14,8 @@ import (
 const isCurrentDelta = 2 * time.Hour
 
 // BackEnds returns a list of the available back ends.
-// TODO: Refactor each into a driver and use dynamic registration.
-//	todo(ABE.MUST): Remove
+// When there are more than one backend, it should transfer
+// into a driver and use dynamic registration.
 func BackEnds() []string {
 	return []string{
 		"abec",

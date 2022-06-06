@@ -2928,7 +2928,7 @@ func (w *Wallet) ReleaseOutput(id wtxmgr.LockID, op wire.OutPoint) error {
 // resendUnminedTxs iterates through all transactions that spend from wallet
 // credits that are not known to have been mined into a block, and attempts
 // to send each to the chain server for relay.
-func (w *Wallet) resendUnminedTxAbes() {
+func (w *Wallet) resendUnminedTx() {
 	var txs []*wire.MsgTxAbe
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
@@ -2946,7 +2946,7 @@ func (w *Wallet) resendUnminedTxAbes() {
 	}
 
 	for _, tx := range txs {
-		txHash, err := w.publishTransactionAbeNew(tx)
+		txHash, err := w.publishTransaction(tx)
 		if err != nil {
 			log.Debugf("Unable to rebroadcast transaction %v: %v",
 				tx.TxHash(), err)
@@ -3519,7 +3519,7 @@ func (w *Wallet) PublishTransaction(tx *wire.MsgTxAbe, label string) error {
 func (w *Wallet) reliablyPublishTransaction(tx *wire.MsgTxAbe,
 	label string) (*chainhash.Hash, error) {
 	// firstly, send the transaction to the backend
-	hash, err := w.publishTransactionAbeNew(tx)
+	hash, err := w.publishTransaction(tx)
 	// if failed, do nothing
 	// if successfully, add the transaction into unmined bucket
 	if err != nil {
@@ -3554,7 +3554,7 @@ func (w *Wallet) reliablyPublishTransaction(tx *wire.MsgTxAbe,
 // wallet's current backend. In the event that sending the transaction fails for
 // whatever reason, it will be removed from the wallet's unconfirmed transaction
 // store.
-func (w *Wallet) publishTransactionAbeNew(tx *wire.MsgTxAbe) (*chainhash.Hash, error) {
+func (w *Wallet) publishTransaction(tx *wire.MsgTxAbe) (*chainhash.Hash, error) {
 	chainClient, err := w.requireChainClient()
 	if err != nil {
 		return nil, err

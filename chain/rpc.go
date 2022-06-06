@@ -12,8 +12,8 @@ import (
 	"github.com/abesuite/abewallet/wtxmgr"
 )
 
-// RPCClient represents a persistent client connection to a bitcoin RPC server
-// for information regarding the current best block chain.
+// RPCClient represents a persistent client connection to an abelian RPC server
+// for information regarding the current best blockchain.
 type RPCClient struct {
 	*rpcclient.Client
 	connConfig        *rpcclient.ConnConfig // Work around unexported field
@@ -34,7 +34,7 @@ type RPCClient struct {
 // connect string.  If disableTLS is false, the remote RPC certificate must be
 // provided in the certs slice.  The connection is not established immediately,
 // but must be done using the Start method.  If the remote server does not
-// operate on the same bitcoin network as described by the passed chain
+// operate on the same abelian network as described by the passed chain
 // parameters, the connection will be disconnected.
 func NewRPCClient(chainParams *chaincfg.Params, connect, user, pass string, certs []byte,
 	disableTLS bool, reconnectAttempts int) (*RPCClient, error) {
@@ -77,8 +77,6 @@ func NewRPCClient(chainParams *chaincfg.Params, connect, user, pass string, cert
 
 // BackEnd returns the name of the driver.
 func (c *RPCClient) BackEnd() string {
-	//	todo(ABE.MUST)
-	//	return "btcd"
 	return "abec"
 }
 
@@ -167,7 +165,7 @@ func (c *RPCClient) WaitForShutdown() {
 }
 
 // Notifications returns a channel of parsed notifications sent by the remote
-// bitcoin RPC server.  This channel must be continually read or the process
+// abelian RPC server.  This channel must be continually read or the process
 // may abort for running out memory, as unread notifications are queued for
 // later reads.
 func (c *RPCClient) Notifications() <-chan interface{} {
@@ -192,10 +190,6 @@ func (c *RPCClient) BlockStamp() (*waddrmgr.BlockStamp, error) {
 // fetched and filtered. This method returns a FilterBlocksReponse for the first
 // block containing a matching address. If no matches are found in the range of
 // blocks requested, the returned response will be nil.
-
-// parseBlock parses a btcws definition of the block a tx is mined it to the
-// Block structure of the wtxmgr package, and the block index.  This is done
-// here since rpcclient doesn't parse this nicely for us.
 
 //	todo(ABE):
 func (c *RPCClient) onClientConnect() {

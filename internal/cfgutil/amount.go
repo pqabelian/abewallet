@@ -6,13 +6,13 @@ import (
 	"strings"
 )
 
-// AmountFlag embeds a btcutil.Amount and implements the flags.Marshaler and
+// AmountFlag embeds a abeutil.Amount and implements the flags.Marshaler and
 // Unmarshaler interfaces so it can be used as a config struct field.
 type AmountFlag struct {
 	abeutil.Amount
 }
 
-// NewAmountFlag creates an AmountFlag with a default btcutil.Amount.
+// NewAmountFlag creates an AmountFlag with a default abeutil.Amount.
 func NewAmountFlag(defaultValue abeutil.Amount) *AmountFlag {
 	return &AmountFlag{defaultValue}
 }
