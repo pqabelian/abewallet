@@ -19,9 +19,7 @@ const isCurrentDelta = 2 * time.Hour
 //	todo(ABE.MUST): Remove
 func BackEnds() []string {
 	return []string{
-		"bitcoind",
-		"btcd",
-		"neutrino",
+		"abec",
 	}
 }
 
@@ -32,23 +30,19 @@ type Interface interface {
 	Start() error
 	Stop()
 	WaitForShutdown()
-	GetBestBlock() (*chainhash.Hash, int32, error) // request the best block height and hash
-	GetBlock(*chainhash.Hash) (*wire.MsgBlock, error) // request the origin block by given hash
-	GetBlockAbe(hash *chainhash.Hash)(*wire.MsgBlockAbe,error)
-	GetBlockHash(int64) (*chainhash.Hash, error) //request the hash given height
-	GetBlockHeader(*chainhash.Hash) (*wire.BlockHeader, error) // request the block height given hash
+	GetBestBlock() (*chainhash.Hash, int32, error)               // request the best block height and hash
+	GetBlockAbe(hash *chainhash.Hash) (*wire.MsgBlockAbe, error) // request the origin block by given hash
+	GetBlockHash(int64) (*chainhash.Hash, error)                 //request the hash given height
+	GetBlockHeader(*chainhash.Hash) (*wire.BlockHeader, error)   // request the block height given hash
 	IsCurrent() bool
-	//	todo(ABE): ABE does not support filter.
-	FilterBlocks(*FilterBlocksRequest) (*FilterBlocksResponse, error)
 	BlockStamp() (*waddrmgr.BlockStamp, error)
-	SendRawTransaction(*wire.MsgTx, bool) (*chainhash.Hash, error)
 	SendRawTransactionAbe(*wire.MsgTxAbe, bool) (*chainhash.Hash, error)
 	Rescan(*chainhash.Hash, []abeutil.Address, map[wire.OutPoint]abeutil.Address) error
 	RescanAbe(*chainhash.Hash) error
 	//	todo(ABE): ABE does not support receiving notification.
 	NotifyReceived([]abeutil.Address) error
 	NotifyBlocks() error
-	Notifications() <-chan interface{}     // receive the notification from block chain
+	Notifications() <-chan interface{} // receive the notification from block chain
 	BackEnd() string
 }
 
@@ -63,7 +57,7 @@ type (
 
 	// BlockConnected is a notification for a newly-attached block to the
 	// best chain.
-	BlockConnected wtxmgr.BlockMeta
+	BlockConnected    wtxmgr.BlockMeta
 	BlockAbeConnected wtxmgr.BlockMeta
 
 	// FilteredBlockConnected is an alternate notification that contains
@@ -103,7 +97,7 @@ type (
 
 	// BlockDisconnected is a notifcation that the block described by the
 	// BlockStamp was reorganized out of the best chain.
-	BlockDisconnected wtxmgr.BlockMeta
+	BlockDisconnected    wtxmgr.BlockMeta
 	BlockAbeDisconnected wtxmgr.BlockMeta
 	// RelevantTx is a notification for a transaction which spends wallet
 	// inputs or pays to a watched address.

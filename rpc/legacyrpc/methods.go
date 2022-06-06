@@ -106,11 +106,11 @@ var rpcHandlers = map[string]struct {
 	"listspentbutunminedabe": {handler: listSpentButUnminedAbe},
 	"listspentandminedabe":   {handler: listSpentAndMinedAbe},
 	"lockunspent":            {handler: lockUnspent},
-	"sendfrom":               {handlerWithChain: sendFrom},
-	"sendmany":               {handler: sendMany},
-	"sendtoaddressesabe":     {handler: sendToAddressesAbe},
-	"generateaddressabe":     {handler: generateAddressAbe},
-	"sendtoaddress":          {handler: sendToAddress},
+	//"sendfrom":               {handlerWithChain: sendFrom},
+	//"sendmany":               {handler: sendMany},
+	"sendtoaddressesabe": {handler: sendToAddressesAbe},
+	"generateaddressabe": {handler: generateAddressAbe},
+	//"sendtoaddress":          {handler: sendToAddress},
 	"sendtopayee":            {handler: sendToPayees},
 	"settxfee":               {handler: setTxFee},
 	"signmessage":            {handler: signMessage},
@@ -1689,36 +1689,6 @@ func makeOutputDescs(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainPar
 // sendPairs creates and sends payment transactions.
 // It returns the transaction hash in string format upon success
 // All errors are returned in abejson.RPCError format
-func sendPairs(w *wallet.Wallet, amounts map[string]abeutil.Amount,
-	account uint32, minconf int32, feeSatPerKb abeutil.Amount) (string, error) {
-
-	outputs, err := makeOutputs(amounts, w.ChainParams())
-	if err != nil {
-		return "", err
-	}
-	tx, err := w.SendOutputs(outputs, account, minconf, feeSatPerKb, "")
-	if err != nil {
-		if err == txrules.ErrAmountNegative {
-			return "", ErrNeedPositiveAmount
-		}
-		if waddrmgr.IsError(err, waddrmgr.ErrLocked) {
-			return "", &ErrWalletUnlockNeeded
-		}
-		switch err.(type) {
-		case abejson.RPCError:
-			return "", err
-		}
-
-		return "", &abejson.RPCError{
-			Code:    abejson.ErrRPCInternal.Code,
-			Message: err.Error(),
-		}
-	}
-
-	txHashStr := tx.TxHash().String()
-	log.Infof("Successfully sent transaction %v", txHashStr)
-	return txHashStr, nil
-}
 
 func isNilOrEmpty(s *string) bool {
 	return s == nil || *s == ""
@@ -1901,86 +1871,13 @@ func sendToPayees(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 // address.  Leftover inputs not sent to the payment address or a fee for
 // the miner are sent back to a new address in the wallet.  Upon success,
 // the TxID for the created transaction is returned.
-func sendFrom(icmd interface{}, w *wallet.Wallet, chainClient *chain.RPCClient) (interface{}, error) {
-	cmd := icmd.(*abejson.SendFromCmd)
-
-	// Transaction comments are not yet supported.  Error instead of
-	// pretending to save them.
-	if !isNilOrEmpty(cmd.Comment) || !isNilOrEmpty(cmd.CommentTo) {
-		return nil, &abejson.RPCError{
-			Code:    abejson.ErrRPCUnimplemented,
-			Message: "Transaction comments are not yet supported",
-		}
-	}
-
-	account, err := w.AccountNumber(
-		waddrmgr.KeyScopeBIP0044, cmd.FromAccount,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check that signed integer parameters are positive.
-	if cmd.Amount < 0 {
-		return nil, ErrNeedPositiveAmount
-	}
-	minConf := int32(*cmd.MinConf)
-	if minConf < 0 {
-		return nil, ErrNeedPositiveMinconf
-	}
-	// Create map of address and amount pairs.
-	amt, err := abeutil.NewAmount(cmd.Amount)
-	if err != nil {
-		return nil, err
-	}
-	pairs := map[string]abeutil.Amount{
-		cmd.ToAddress: amt,
-	}
-
-	return sendPairs(w, pairs, account, minConf,
-		txrules.DefaultRelayFeePerKb)
-}
 
 // sendMany handles a sendmany RPC request by creating a new transaction
 // spending unspent transaction outputs for a wallet to any number of
 // payment addresses.  Leftover inputs not sent to the payment address
 // or a fee for the miner are sent back to a new address in the wallet.
 // Upon success, the TxID for the created transaction is returned.
-func sendMany(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.SendManyCmd)
 
-	// Transaction comments are not yet supported.  Error instead of
-	// pretending to save them.
-	if !isNilOrEmpty(cmd.Comment) {
-		return nil, &abejson.RPCError{
-			Code:    abejson.ErrRPCUnimplemented,
-			Message: "Transaction comments are not yet supported",
-		}
-	}
-
-	account, err := w.AccountNumber(waddrmgr.KeyScopeBIP0044, cmd.FromAccount)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check that minconf is positive.
-	minConf := int32(*cmd.MinConf)
-	if minConf < 0 {
-		return nil, ErrNeedPositiveMinconf
-	}
-
-	// Recreate address/amount pairs, using dcrutil.Amount.
-	pairs := make(map[string]abeutil.Amount, len(cmd.Amounts))
-	for k, v := range cmd.Amounts {
-		amt, err := abeutil.NewAmount(v)
-		if err != nil {
-			return nil, err
-		}
-		pairs[k] = amt
-	}
-
-	return sendPairs(w, pairs, account, minConf, txrules.DefaultRelayFeePerKb)
-}
 func generateAddressAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	_ = icmd.(*abejson.GenerateAddressCmd)
 
@@ -2071,37 +1968,6 @@ func sendToAddressesAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 // payment address.  Leftover inputs not sent to the payment address or a fee
 // for the miner are sent back to a new address in the wallet.  Upon success,
 // the TxID for the created transaction is returned.
-func sendToAddress(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.SendToAddressCmd)
-
-	// Transaction comments are not yet supported.  Error instead of
-	// pretending to save them.
-	if !isNilOrEmpty(cmd.Comment) || !isNilOrEmpty(cmd.CommentTo) {
-		return nil, &abejson.RPCError{
-			Code:    abejson.ErrRPCUnimplemented,
-			Message: "Transaction comments are not yet supported",
-		}
-	}
-
-	amt, err := abeutil.NewAmount(cmd.Amount)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check that signed integer parameters are positive.
-	if amt < 0 {
-		return nil, ErrNeedPositiveAmount
-	}
-
-	// Mock up map of address and amount pairs.
-	pairs := map[string]abeutil.Amount{
-		cmd.Address: amt,
-	}
-
-	// sendtoaddress always spends from the default account, this matches bitcoind
-	return sendPairs(w, pairs, waddrmgr.DefaultAccountNum, 1,
-		txrules.DefaultRelayFeePerKb)
-}
 
 // setTxFee sets the transaction fee per kilobyte added to transactions.
 func setTxFee(icmd interface{}, w *wallet.Wallet) (interface{}, error) {

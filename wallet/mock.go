@@ -27,9 +27,6 @@ func (m *mockChainClient) GetBestBlock() (*chainhash.Hash, int32, error) {
 	return nil, 0, nil
 }
 
-func (m *mockChainClient) GetBlock(*chainhash.Hash) (*wire.MsgBlock, error) {
-	return nil, nil
-}
 func (m *mockChainClient) GetBlockAbe(blockHash *chainhash.Hash) (*wire.MsgBlockAbe, error) {
 	return nil, nil
 }
@@ -60,11 +57,6 @@ func (m *mockChainClient) BlockStamp() (*waddrmgr.BlockStamp, error) {
 	}, nil
 }
 
-func (m *mockChainClient) SendRawTransaction(*wire.MsgTx, bool) (
-	*chainhash.Hash, error) {
-	return nil, nil
-}
-
 func (m *mockChainClient) SendRawTransactionAbe(*wire.MsgTxAbe, bool) (
 	*chainhash.Hash, error) {
 	return nil, nil
@@ -78,7 +70,6 @@ func (m *mockChainClient) Rescan(*chainhash.Hash, []abeutil.Address,
 func (m *mockChainClient) RescanAbe(hash *chainhash.Hash) error {
 	return nil
 }
-
 
 func (m *mockChainClient) NotifyReceived([]abeutil.Address) error {
 	return nil

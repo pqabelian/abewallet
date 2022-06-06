@@ -508,7 +508,7 @@ func (s *walletServer) SignTransaction(ctx context.Context, req *pb.SignTransact
 func (s *walletServer) PublishTransaction(ctx context.Context, req *pb.PublishTransactionRequest) (
 	*pb.PublishTransactionResponse, error) {
 
-	var msgTx wire.MsgTx
+	var msgTx wire.MsgTxAbe
 	err := msgTx.Deserialize(bytes.NewReader(req.SignedTransaction))
 	if err != nil {
 		return nil, grpc.Errorf(codes.InvalidArgument,
