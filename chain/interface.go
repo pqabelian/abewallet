@@ -77,30 +77,4 @@ type (
 	// BlockStamp was reorganized out of the best chain.
 
 	BlockAbeDisconnected wtxmgr.BlockMeta
-	// RelevantTx is a notification for a transaction which spends wallet
-	// inputs or pays to a watched address.
-	RelevantTx struct {
-		TxRecord *wtxmgr.TxRecord
-		Block    *wtxmgr.BlockMeta // nil if unmined
-	}
-	RelevantTxAbe struct {
-		TxRecord *wtxmgr.TxRecordAbe
-		Block    *wtxmgr.BlockAbeMeta // nil if unmined
-	}
-
-	// RescanProgress is a notification describing the current status
-	// of an in-progress rescan.
-	RescanProgress struct {
-		Hash   *chainhash.Hash
-		Height int32
-		Time   time.Time
-	}
-
-	// RescanFinished is a notification that a previous rescan request
-	// has finished.
-	RescanFinished struct {
-		Hash   *chainhash.Hash
-		Height int32
-		Time   time.Time
-	}
 )
