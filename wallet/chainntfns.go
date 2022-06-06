@@ -32,7 +32,8 @@ func (w *Wallet) handleChainNotifications() {
 		return
 	}
 
-	catchUpHashes := func(w *Wallet, client chain.Interface, endHeight int32) error {
+	// catchupHashes
+	_ = func(w *Wallet, client chain.Interface, endHeight int32) error {
 		// TODO(aakselrod): There's a race conditon here, which
 		// happens when a reorg occurs between the
 		// rescanProgress notification and the last GetBlockHash
@@ -193,78 +194,17 @@ func (w *Wallet) handleChainNotifications() {
 					panic(fmt.Errorf("Unable to synchronize "+
 						"wallet to chain: %v", err))
 				}
-			case chain.BlockConnected:
-				//	todo(ABE): Maybe here we do not call walletdb.Update(). Instead, we call w.connectBlock(), and in connectBlock() we call
-				//	walletdb.Update() at appropriate position.
-				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-					return w.connectBlock(tx, wtxmgr.BlockMeta(n))
-				})
-				notificationName = "block connected"
 			case chain.BlockAbeConnected:
 				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 					return w.connectBlockAbe(tx, wtxmgr.BlockMeta(n))
 				})
 				go w.resendUnminedTxAbes()
-				notificationName = "block abe connected"
-			case chain.BlockDisconnected:
-				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-					return w.disconnectBlock(tx, wtxmgr.BlockMeta(n))
-				})
-				notificationName = "block disconnected"
+				notificationName = "block connected"
 			case chain.BlockAbeDisconnected:
 				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 					return w.disconnectBlockAbe(tx, wtxmgr.BlockMeta(n))
 				})
-				notificationName = "block abe disconnected"
-				//	todo(ABE): ABE does not support OutPointSpent and addressReceive notifications.
-			//case chain.RelevantTx:
-			//	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-			//		return w.addRelevantTx(tx, n.TxRecord, n.Block)
-			//	})
-			//	notificationName = "relevant transaction"
-			//case chain.RelevantTxAbe: // TODO(abe): we do not support the relevantTx actually
-			//	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-			//		return w.addRelevantTxAbe(tx, n.TxRecord, n.Block)
-			//	})
-			//	notificationName = "relevant transaction"
-			//	todo(ABE): ABE does not support filter.
-			//case chain.FilteredBlockConnected:
-			//	// Atomically update for the whole block.
-			//	if len(n.RelevantTxs) > 0 {
-			//		err = walletdb.Update(w.db, func(
-			//			tx walletdb.ReadWriteTx) error {
-			//			var err error
-			//			for _, rec := range n.RelevantTxs {
-			//				err = w.addRelevantTx(tx, rec,
-			//					n.Block)
-			//				if err != nil {
-			//					return err
-			//				}
-			//			}
-			//			return nil
-			//		})
-			//	}
-			//	notificationName = "filtered block connected"
-
-			// The following require some database maintenance, but also
-			// need to be reported to the wallet's rescan goroutine.
-			case *chain.RescanProgress:
-				err = catchUpHashes(w, chainClient, n.Height)
-				notificationName = "rescan progress"
-				select {
-				case w.rescanNotifications <- n:
-				case <-w.quitChan():
-					return
-				}
-			case *chain.RescanFinished:
-				err = catchUpHashes(w, chainClient, n.Height)
-				notificationName = "rescan finished"
-				w.SetChainSynced(true)
-				select {
-				case w.rescanNotifications <- n:
-				case <-w.quitChan():
-					return
-				}
+				notificationName = "block disconnected"
 			}
 			if err != nil {
 				// If we received a block connected notification
@@ -278,7 +218,7 @@ func (w *Wallet) handleChainNotifications() {
 					log.Debugf("Received block connected "+
 						"notification for height %v "+
 						"while rescanning",
-						n.(chain.BlockConnected).Height)
+						n.(chain.BlockAbeConnected).Height)
 					continue
 				}
 

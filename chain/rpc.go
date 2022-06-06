@@ -5,12 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/abesuite/abec/abejson"
-	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/rpcclient"
-	"github.com/abesuite/abec/wire"
 	"github.com/abesuite/abewallet/waddrmgr"
 	"github.com/abesuite/abewallet/wtxmgr"
 )
@@ -66,16 +63,9 @@ func NewRPCClient(chainParams *chaincfg.Params, connect, user, pass string, cert
 	}
 	ntfnCallbacks := &rpcclient.NotificationHandlers{
 		//	todo(ABE): some are not supported, and should be removed.
-		OnClientConnected:   client.onClientConnect,
-		OnBlockAbeConnected: client.onBlockConnectedAbe,
+		OnClientConnected:      client.onClientConnect,
+		OnBlockAbeConnected:    client.onBlockConnectedAbe,
 		OnBlockAbeDisconnected: client.onBlockDisconnectedAbe,
-		OnBlockConnected:    client.onBlockConnected,
-		OnBlockDisconnected: client.onBlockDisconnected,
-		//	todo(ABE): ABE does not support OutPointSpent and addressReceive notifications.
-		//		OnRecvTx:            client.onRecvTx,
-		//		OnRedeemingTx:       client.onRedeemingTx,
-		OnRescanFinished: client.onRescanFinished,
-		OnRescanProgress: client.onRescanProgress,
 	}
 	rpcClient, err := rpcclient.New(client.connConfig, ntfnCallbacks)
 	if err != nil {
@@ -158,16 +148,7 @@ func (c *RPCClient) IsCurrent() bool {
 // allows us to map an oupoint to the address in the chain that it pays to.
 // This is useful when using BIP 158 filters as they include the prev pkScript
 // rather than the full outpoint.
-func (c *RPCClient) Rescan(startHash *chainhash.Hash, addrs []abeutil.Address,
-	outPoints map[wire.OutPoint]abeutil.Address) error {
 
-	flatOutpoints := make([]*wire.OutPoint, 0, len(outPoints))
-	for ops := range outPoints {
-		flatOutpoints = append(flatOutpoints, &ops)
-	}
-
-	return c.Client.Rescan(startHash, addrs, flatOutpoints)
-}
 func (c *RPCClient) RescanAbe(startHash *chainhash.Hash) error {
 
 	//flatOutpoints := make([]*wire.OutPoint, 0, len(outPoints))
@@ -211,112 +192,10 @@ func (c *RPCClient) BlockStamp() (*waddrmgr.BlockStamp, error) {
 // fetched and filtered. This method returns a FilterBlocksReponse for the first
 // block containing a matching address. If no matches are found in the range of
 // blocks requested, the returned response will be nil.
-// TODO(abe): we don't need the block filter, but for the interface.Interface, use a nil to replace it
-func (c *RPCClient) FilterBlocks(
-	req *FilterBlocksRequest) (*FilterBlocksResponse, error) {
-	return nil, nil
-}
-//TODO(osy): whether use it to request block...
-//func (c *RPCClient) FilterBlocks(
-//	req *FilterBlocksRequest) (*FilterBlocksResponse, error) {
-//
-//	blockFilterer := NewBlockFilterer(c.chainParams, req)
-//
-//	// Construct the watchlist using the addresses and outpoints contained
-//	// in the filter blocks request.
-//	watchList, err := buildFilterBlocksWatchList(req)
-//	if err != nil {
-//		return nil, err
-//	}
-//
-//	// Iterate over the requested blocks, fetching the compact filter for
-//	// each one, and matching it against the watchlist generated above. If
-//	// the filter returns a positive match, the full block is then requested
-//	// and scanned for addresses using the block filterer.
-//	for i, blk := range req.Blocks {
-//		rawFilter, err := c.GetCFilter(&blk.Hash, wire.GCSFilterRegular)
-//		if err != nil {
-//			return nil, err
-//		}
-//
-//		// Ensure the filter is large enough to be deserialized.
-//		if len(rawFilter.Data) < 4 {
-//			continue
-//		}
-//
-//		filter, err := gcs.FromNBytes(
-//			builder.DefaultP, builder.DefaultM, rawFilter.Data,
-//		)
-//		if err != nil {
-//			return nil, err
-//		}
-//
-//		// Skip any empty filters.
-//		if filter.N() == 0 {
-//			continue
-//		}
-//
-//		key := builder.DeriveKey(&blk.Hash)
-//		matched, err := filter.MatchAny(key, watchList)
-//		if err != nil {
-//			return nil, err
-//		} else if !matched {
-//			continue
-//		}
-//
-//		log.Infof("Fetching block height=%d hash=%v",
-//			blk.Height, blk.Hash)
-//
-//		rawBlock, err := c.GetBlock(&blk.Hash)
-//		if err != nil {
-//			return nil, err
-//		}
-//
-//		if !blockFilterer.FilterBlock(rawBlock) {
-//			continue
-//		}
-//
-//		// If any external or internal addresses were detected in this
-//		// block, we return them to the caller so that the rescan
-//		// windows can widened with subsequent addresses. The
-//		// `BatchIndex` is returned so that the caller can compute the
-//		// *next* block from which to begin again.
-//		resp := &FilterBlocksResponse{
-//			BatchIndex:         uint32(i),
-//			BlockMeta:          blk,
-//			FoundExternalAddrs: blockFilterer.FoundExternal,
-//			FoundInternalAddrs: blockFilterer.FoundInternal,
-//			FoundOutPoints:     blockFilterer.FoundOutPoints,
-//			RelevantTxns:       blockFilterer.RelevantTxns,
-//		}
-//
-//		return resp, nil
-//	}
-//
-//	// No addresses were found for this range.
-//	return nil, nil
-//}
 
 // parseBlock parses a btcws definition of the block a tx is mined it to the
 // Block structure of the wtxmgr package, and the block index.  This is done
 // here since rpcclient doesn't parse this nicely for us.
-func parseBlock(block *abejson.BlockDetails) (*wtxmgr.BlockMeta, error) {
-	if block == nil {
-		return nil, nil
-	}
-	blkHash, err := chainhash.NewHashFromStr(block.Hash)
-	if err != nil {
-		return nil, err
-	}
-	blk := &wtxmgr.BlockMeta{
-		Block: wtxmgr.Block{
-			Height: block.Height,
-			Hash:   *blkHash,
-		},
-		Time: time.Unix(block.Time, 0),
-	}
-	return blk, nil
-}
 
 //	todo(ABE):
 func (c *RPCClient) onClientConnect() {
@@ -326,19 +205,6 @@ func (c *RPCClient) onClientConnect() {
 	}
 }
 
-func (c *RPCClient) onBlockConnected(hash *chainhash.Hash, height int32, time time.Time) {
-	select {
-	case c.enqueueNotification <- BlockConnected{
-		Block: wtxmgr.Block{
-			Hash:   *hash,
-			Height: height,
-		},
-		Time: time,
-	}:
-	case <-c.quit:
-	}
-}
-//TODO(abe)
 func (c *RPCClient) onBlockConnectedAbe(hash *chainhash.Hash, height int32, time time.Time) {
 	select {
 	case c.enqueueNotification <- BlockAbeConnected{
@@ -352,19 +218,7 @@ func (c *RPCClient) onBlockConnectedAbe(hash *chainhash.Hash, height int32, time
 	case <-c.quit:
 	}
 }
-func (c *RPCClient) onBlockDisconnected(hash *chainhash.Hash, height int32, time time.Time) {
-	select {
-	case c.enqueueNotification <- BlockDisconnected{
-		Block: wtxmgr.Block{
-			Hash:   *hash,
-			Height: height,
-		},
-		Time: time,
-	}:
-	case <-c.quit:
-	}
-}
-//TODO(abe)
+
 func (c *RPCClient) onBlockDisconnectedAbe(hash *chainhash.Hash, height int32, time time.Time) {
 	select {
 	case c.enqueueNotification <- BlockAbeDisconnected{
@@ -377,46 +231,6 @@ func (c *RPCClient) onBlockDisconnectedAbe(hash *chainhash.Hash, height int32, t
 	}:
 	case <-c.quit:
 	}
-}
-//	todo(ABE): ABE does not support OutPointSpent and addressReceive notifications.
-func (c *RPCClient) onRecvTx(tx *abeutil.Tx, block *abejson.BlockDetails) {
-	blk, err := parseBlock(block)
-	if err != nil {
-		// Log and drop improper notification.
-		log.Errorf("recvtx notification bad block: %v", err)
-		return
-	}
-
-	rec, err := wtxmgr.NewTxRecordFromMsgTx(tx.MsgTx(), time.Now())
-	if err != nil {
-		log.Errorf("Cannot create transaction record for relevant "+
-			"tx: %v", err)
-		return
-	}
-	select {
-	case c.enqueueNotification <- RelevantTx{rec, blk}:
-	case <-c.quit:
-	}
-}
-
-func (c *RPCClient) onRedeemingTx(tx *abeutil.Tx, block *abejson.BlockDetails) {
-	// Handled exactly like recvtx notifications.
-	c.onRecvTx(tx, block)
-}
-
-func (c *RPCClient) onRescanProgress(hash *chainhash.Hash, height int32, blkTime time.Time) {
-	select {
-	case c.enqueueNotification <- &RescanProgress{hash, height, blkTime}:
-	case <-c.quit:
-	}
-}
-
-func (c *RPCClient) onRescanFinished(hash *chainhash.Hash, height int32, blkTime time.Time) {
-	select {
-	case c.enqueueNotification <- &RescanFinished{hash, height, blkTime}:
-	case <-c.quit:
-	}
-
 }
 
 //	todo(ABE): the notification handlers such as OnBlockConnected send messages to c.enqueueNotification and trigger this handler

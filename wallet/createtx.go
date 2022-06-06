@@ -387,13 +387,10 @@ func (w *Wallet) txToOutputs(outputs []*wire.TxOut, account uint32,
 	// that pays to the change address, if there is one, when it confirms.
 	if tx.ChangeIndex >= 0 {
 		changePkScript := tx.Tx.TxOut[tx.ChangeIndex].PkScript
-		_, addrs, _, err := txscript.ExtractPkScriptAddrs(
+		_, _, _, err := txscript.ExtractPkScriptAddrs(
 			changePkScript, w.chainParams,
 		)
 		if err != nil {
-			return nil, err
-		}
-		if err := chainClient.NotifyReceived(addrs); err != nil {
 			return nil, err
 		}
 	}

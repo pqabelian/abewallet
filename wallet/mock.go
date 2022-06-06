@@ -1,7 +1,6 @@
 package wallet
 
 import (
-	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/wire"
 	"github.com/abesuite/abewallet/chain"
@@ -44,11 +43,6 @@ func (m *mockChainClient) IsCurrent() bool {
 	return false
 }
 
-func (m *mockChainClient) FilterBlocks(*chain.FilterBlocksRequest) (
-	*chain.FilterBlocksResponse, error) {
-	return nil, nil
-}
-
 func (m *mockChainClient) BlockStamp() (*waddrmgr.BlockStamp, error) {
 	return &waddrmgr.BlockStamp{
 		Height:    500000,
@@ -62,16 +56,7 @@ func (m *mockChainClient) SendRawTransactionAbe(*wire.MsgTxAbe, bool) (
 	return nil, nil
 }
 
-func (m *mockChainClient) Rescan(*chainhash.Hash, []abeutil.Address,
-	map[wire.OutPoint]abeutil.Address) error {
-	return nil
-}
-
 func (m *mockChainClient) RescanAbe(hash *chainhash.Hash) error {
-	return nil
-}
-
-func (m *mockChainClient) NotifyReceived([]abeutil.Address) error {
 	return nil
 }
 
