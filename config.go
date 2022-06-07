@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abewallet/internal/cfgutil"
-	"github.com/abesuite/abewallet/internal/legacy/keystore"
 	"github.com/abesuite/abewallet/netparams"
 	"github.com/abesuite/abewallet/wallet"
 	"github.com/abesuite/abewallet/wordlists"
@@ -484,7 +483,7 @@ func loadConfig() (*config, []string, error) {
 			// Perform the initial wallet creation wizard.
 			//if err := createSimulationWallet(&cfg); err != nil {
 			//TODO(abe):
-			if err := createSimulationWalletAbe(&cfg); err != nil {
+			if err := createSimulationWallet(&cfg); err != nil {
 				fmt.Fprintln(os.Stderr, "Unable to create wallet:", err)
 				return nil, nil, err
 			}
@@ -511,7 +510,7 @@ func loadConfig() (*config, []string, error) {
 		//	return nil, nil, err
 		//}
 		//TODO(abe):
-		if err := createWalletAbe(&cfg); err != nil {
+		if err := createWallet(&cfg); err != nil {
 			fmt.Fprintln(os.Stderr, "Unable to create wallet:", err)
 			return nil, nil, err
 		}
@@ -519,20 +518,8 @@ func loadConfig() (*config, []string, error) {
 		// Created successfully, so exit now with success.
 		os.Exit(0)
 	} else if !dbFileExists && !cfg.NoInitialLoad {
-		//	todo(ABE): remove the legacy parts (keystore)  please do not do it!!
-		keystorePath := filepath.Join(netDir, keystore.Filename)
-		keystoreExists, err := cfgutil.FileExists(keystorePath)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return nil, nil, err
-		}
-		if !keystoreExists {
-			err = fmt.Errorf("The wallet does not exist.  Run with the " +
-				"--create option to initialize and create it.")
-		} else {
-			err = fmt.Errorf("The wallet is in legacy format.  Run with the " +
-				"--create option to import it.")
-		}
+		err = fmt.Errorf("The wallet does not exist.  Run with the " +
+			"--create option to initialize and create it.")
 		fmt.Fprintln(os.Stderr, err)
 		return nil, nil, err
 	}
