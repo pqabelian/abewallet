@@ -72,28 +72,28 @@ var rpcHandlers = map[string]struct {
 }{
 	//	todo(ABE): The supported RPC requests are here. We need to remove some that are not supported any more.
 	// Reference implementation wallet methods (implemented)
-	"addmultisigaddress":    {handler: addMultiSigAddress},
-	"addpayee":              {handler: addPayee},
+	"addmultisigaddress": {handler: addMultiSigAddress},
+	//"addpayee":              {handler: addPayee},
 	"createmultisig":        {handler: createMultiSig},
 	"dumpprivkey":           {handler: dumpPrivKey},
 	"getaccount":            {handler: getAccount},
 	"getaccountaddress":     {handler: getAccountAddress},
 	"getaddressesbyaccount": {handler: getAddressesByAccount},
-	"getbalance":            {handler: getBalance},
-	"getbalancesabe":        {handler: getBalanceAbe},
-	"getdetailedutxos":      {handler: getDetailedUtxos},
-	"getbestblockhash":      {handler: getBestBlockHash},
-	"getblockcount":         {handler: getBlockCount},
-	"getinfo":               {handlerWithChain: getInfo},
-	"getnewaddress":         {handler: getNewAddress},
-	"getrawchangeaddress":   {handler: getRawChangeAddress},
-	"getreceivedbyaccount":  {handler: getReceivedByAccount},
-	"getreceivedbyaddress":  {handler: getReceivedByAddress},
-	"gettransaction":        {handler: getTransaction},
-	"help":                  {handler: helpNoChainRPC, handlerWithChain: helpWithChainRPC},
-	"importprivkey":         {handler: importPrivKey},
-	"keypoolrefill":         {handler: keypoolRefill},
-	//"listaccounts":           {handler: listAccounts},    //TODO(abe):we have concept of "account"
+	//"getbalance":            {handler: getBalance},
+	"getbalances":          {handler: getBalance},
+	"getdetailedutxos":     {handler: getDetailedUtxos},
+	"getbestblockhash":     {handler: getBestBlockHash},
+	"getblockcount":        {handler: getBlockCount},
+	"getinfo":              {handlerWithChain: getInfo},
+	"getnewaddress":        {handler: getNewAddress},
+	"getrawchangeaddress":  {handler: getRawChangeAddress},
+	"getreceivedbyaccount": {handler: getReceivedByAccount},
+	"getreceivedbyaddress": {handler: getReceivedByAddress},
+	"gettransaction":       {handler: getTransaction},
+	"help":                 {handler: helpNoChainRPC, handlerWithChain: helpWithChainRPC},
+	"importprivkey":        {handler: importPrivKey},
+	"keypoolrefill":        {handler: keypoolRefill},
+	//"listaccounts":           {handler: listAccounts},
 	"listlockunspent":        {handler: listLockUnspent},
 	"listreceivedbyaccount":  {handler: listReceivedByAccount},
 	"listreceivedbyaddress":  {handler: listReceivedByAddress},
@@ -455,37 +455,7 @@ func getAddressesByAccount(icmd interface{}, w *wallet.Wallet) (interface{}, err
 // getBalance handles a getbalance request by returning the balance for an
 // account (wallet), or an error if the requested account does not
 // exist.
-//TODO(abe): we need to recount the balance depend on the unspenttxo bucket
 func getBalance(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.GetBalanceCmd)
-
-	var balance abeutil.Amount
-	var err error
-	accountName := "*"
-	if cmd.Account != nil {
-		accountName = *cmd.Account
-	}
-	if accountName == "*" {
-		balance, err = w.CalculateBalance(int32(*cmd.MinConf))
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		var account uint32
-		account, err = w.AccountNumber(waddrmgr.KeyScopeBIP0044, accountName)
-		if err != nil {
-			return nil, err
-		}
-		bals, err := w.CalculateAccountBalances(account, int32(*cmd.MinConf))
-		if err != nil {
-			return nil, err
-		}
-		balance = bals.Spendable
-	}
-	return balance.ToABE(), nil
-}
-
-func getBalanceAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.GetBalancesAbeCmd)
 
 	currentTime := time.Now().String()

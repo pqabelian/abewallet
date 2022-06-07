@@ -1,5 +1,5 @@
-
-//+build !generate
+//go:build !generate
+// +build !generate
 
 package rpchelp
 
@@ -26,7 +26,7 @@ var Methods = []struct {
 	{"getaccount", returnsString},
 	{"getaccountaddress", returnsString},
 	{"getaddressesbyaccount", returnsStringArray},
-	{"getbalance", append(returnsNumber, returnsNumber[0])},
+	{"getbalance", returnsString},
 	{"getbestblockhash", returnsString},
 	{"getblockcount", returnsNumber},
 	{"getinfo", []interface{}{(*abejson.InfoWalletResult)(nil)}},
@@ -38,7 +38,7 @@ var Methods = []struct {
 	{"help", append(returnsString, returnsString[0])},
 	{"importprivkey", nil},
 	{"keypoolrefill", nil},
-	{"listaccounts", []interface{}{(*map[string]float64)(nil)}},
+	//{"listaccounts", []interface{}{(*map[string]float64)(nil)}},
 	{"listlockunspent", []interface{}{(*[]abejson.TransactionInput)(nil)}},
 	{"listreceivedbyaccount", []interface{}{(*[]abejson.ListReceivedByAccountResult)(nil)}},
 	{"listreceivedbyaddress", []interface{}{(*[]abejson.ListReceivedByAddressResult)(nil)}},
@@ -46,8 +46,8 @@ var Methods = []struct {
 	{"listtransactions", returnsLTRArray},
 	{"listunspent", []interface{}{(*abejson.ListUnspentResult)(nil)}},
 	{"lockunspent", returnsBool},
-	{"sendfrom", returnsString},
-	{"sendmany", returnsString},
+	//{"sendfrom", returnsString},
+	//{"sendmany", returnsString},
 	{"sendtoaddress", returnsString},
 	{"settxfee", returnsBool},
 	{"signmessage", returnsString},

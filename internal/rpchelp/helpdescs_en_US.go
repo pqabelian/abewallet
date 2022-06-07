@@ -1,6 +1,5 @@
-
-
-//+build !generate
+//go:build !genrate
+// +build !genrate
 
 package rpchelp
 

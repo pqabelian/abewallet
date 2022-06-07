@@ -1,4 +1,5 @@
-//+build generate
+//go:build generate
+// +build generate
 
 // TODO(abe): this package need to modify to match our method
 package main
@@ -6,10 +7,10 @@ package main
 import (
 	"fmt"
 	"github.com/abesuite/abec/abejson"
+	"github.com/abesuite/abewallet/internal/rpchelp"
 	"log"
 	"os"
 	"strings"
-	"github.com/abesuite/abewallet/internal/rpchelp"
 )
 
 var outputFile = func() *os.File {
