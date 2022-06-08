@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abecrypto/abecryptoparam"
-	"github.com/abesuite/abec/abecrypto/abesalrs"
 	"github.com/abesuite/abec/abeutil/hdkeychain"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abewallet/wordlists"
@@ -18,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 )
+
+const SeedLength = 32
 
 // ProvideSeed is used to prompt for the wallet seed which maybe required during
 // upgrades.
@@ -230,8 +231,7 @@ func Seed(reader *bufio.Reader) ([]byte, uint64, error) {
 	if !useUserSeed {
 		//seed, err := hdkeychain.GenerateSeed(hdkeychain.RecommendedSeedLen)
 		//seed, err := abesalrs.GenerateSeed(2*abesalrs.RecommendedSeedLen)
-		// TODO(20220321): the length of seed should be a global parameter in config
-		seed := make([]byte, 32)
+		seed := make([]byte, SeedLength)
 		_, err := rand.Read(seed)
 		if err != nil {
 			return nil, 0, errors.New("rand.Read() error in Seed()")
@@ -288,12 +288,12 @@ func Seed(reader *bufio.Reader) ([]byte, uint64, error) {
 		seedStr = strings.TrimSpace(strings.ToLower(seedStr))
 		mnemonics := strings.Split(seedStr, ",")
 		seed := wordsToSeed(mnemonics, wordlists.EnglishMap)
-		if len(seed) != 33 {
+		if len(seed) != SeedLength+1 {
 			fmt.Printf("Invalid mnemonic word list specified\n")
 			continue
 		}
-		seedH := chainhash.DoubleHashH(seed[:32])
-		if !bytes.Equal(seedH[:1], seed[32:]) {
+		seedH := chainhash.DoubleHashH(seed[:SeedLength])
+		if !bytes.Equal(seedH[:1], seed[SeedLength:]) {
 			fmt.Printf("Invalid mnemonic word list specified\n")
 			continue
 		}
@@ -306,22 +306,9 @@ func Seed(reader *bufio.Reader) ([]byte, uint64, error) {
 			return nil, 0, err
 		}
 
-		seed = seed[:32]
-		//seed, err := hex.DecodeString(seedStr)
-		//TODO(abe20210801):remove the salrs dependency
-		if err != nil || len(seed) < abesalrs.MinSeedBytes ||
-			len(seed) > abesalrs.MaxSeedBytes {
-			//if err != nil || len(seed) < hdkeychain.MinSeedBytes ||
-			//	len(seed) > hdkeychain.MaxSeedBytes {
-			fmt.Printf("Invalid mnemonic word list specified\n")
-			//fmt.Printf("Invalid seed specified.  Must be a "+
-			//	"hexadecimal value that is at least %d bits and "+
-			//	"at most %d bits\n", hdkeychain.MinSeedBytes*8,
-			//	hdkeychain.MaxSeedBytes*8)
-			continue
-		}
+		seed = seed[:SeedLength]
 		// add the cryptoScheme before seed
-		tmp := make([]byte, 4, 4+32)
+		tmp := make([]byte, 4, 4+SeedLength)
 		binary.BigEndian.PutUint32(tmp[0:4], uint32(version))
 		seed = append(tmp, seed[:]...)
 		return seed, num, nil

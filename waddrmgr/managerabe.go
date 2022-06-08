@@ -15,7 +15,6 @@ import (
 	"github.com/abesuite/abewallet/snacl"
 	"github.com/abesuite/abewallet/walletdb"
 	"golang.org/x/crypto/sha3"
-	"strings"
 	"sync"
 	"time"
 )
@@ -28,7 +27,7 @@ type ManagerAbe struct {
 	// scopedManager is a mapping of scope of scoped manager, the manager
 	// itself loaded into memory.
 	//scopedManagers map[KeyScope]*ScopedKeyManager  //TODO(abe): we do not need scope manager, the account is we need,each account means a master publick key
-	payeeManagers []*PayeeManager
+	//payeeManagers []*PayeeManager
 	// TODO(abe): we do not need branch due to we can not identify which is a change address or a normal address
 	//  if we need change we just derived a key and form it into an address scipt as a our coin
 	//externalAddrSchemas map[AddressType][]KeyScope
@@ -150,29 +149,6 @@ func (m *ManagerAbe) Close() {
 	return
 }
 
-//TODO(abe): how to store the payee manager
-func (m *ManagerAbe) NewPayeeManager(ns walletdb.ReadWriteBucket, name string) (*PayeeManager, error) {
-	index := 0
-	for ; index < len(m.payeeManagers); index++ {
-		if strings.EqualFold(m.payeeManagers[index].name, name) {
-			break
-		}
-	}
-	if index >= len(m.payeeManagers) {
-		pm := PayeeManager{
-			name:        name,
-			rootManager: m,
-			mpks:        [][]byte{},
-			totalAmount: 0,
-			states:      []state{},
-		}
-		m.payeeManagers = append(m.payeeManagers, &pm)
-		return &pm, putPayeeManager(ns, name, &pm)
-	} else {
-		return m.payeeManagers[index], nil
-	}
-}
-
 // FetchScopedKeyManager attempts to fetch an active scoped manager according to
 // its registered scope. If the manger is found, then a nil error is returned
 // along with the active scoped manager. Otherwise, a nil manager and a non-nil
@@ -189,28 +165,7 @@ func (m *ManagerAbe) NewPayeeManager(ns walletdb.ReadWriteBucket, name string) (
 //
 //	return sm, nil
 //}
-func (m *ManagerAbe) FetchPayeeManager(name string) (*PayeeManager, error) {
-	m.mtx.RLock()
-	defer m.mtx.RUnlock()
 
-	index := 0
-	for ; index < len(m.payeeManagers); index++ {
-		if strings.EqualFold(m.payeeManagers[index].name, name) {
-			return m.payeeManagers[index], nil
-		}
-	}
-	return nil, fmt.Errorf("there have no payee manager named %s", name)
-}
-func (m *ManagerAbe) FetchPayeeManagerFromDB(ns walletdb.ReadBucket, name string) (*PayeeManager, error) {
-	m.mtx.RLock()
-	defer m.mtx.RUnlock()
-	manager, err := fetchPayeeManager(ns, name)
-	if manager == nil || err != nil {
-		return nil, err
-	}
-	m.payeeManagers = append(m.payeeManagers, manager)
-	return manager, err
-}
 func (m *ManagerAbe) DecryptAddressKey(addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc []byte) ([]byte, []byte, []byte, []byte, error) {
 	var addressBytes, valueSecretKeyBytes []byte
 	var err error
@@ -775,8 +730,7 @@ func (m *ManagerAbe) Decrypt(keyType CryptoKeyType, in []byte) ([]byte, error) {
 func newManagerAbe(chainParams *chaincfg.Params, masterKeyPub *snacl.SecretKey,
 	masterKeyPriv *snacl.SecretKey, cryptoKeyPub EncryptorDecryptor,
 	cryptoKeySeedEncrypted, cryptoKeyPrivEncrypted, cryptoKeyScriptEncrypted []byte, syncInfo *syncState,
-	birthday time.Time, privPassphraseSalt [saltSize]byte,
-	payeeManager []*PayeeManager, watchingOnly bool) *ManagerAbe {
+	birthday time.Time, privPassphraseSalt [saltSize]byte, watchingOnly bool) *ManagerAbe {
 
 	m := &ManagerAbe{
 		chainParams:              chainParams,
@@ -793,7 +747,6 @@ func newManagerAbe(chainParams *chaincfg.Params, masterKeyPub *snacl.SecretKey,
 		cryptoKeyScriptEncrypted: cryptoKeyScriptEncrypted,
 		cryptoKeyScript:          &cryptoKey{},
 		privPassphraseSalt:       privPassphraseSalt,
-		payeeManagers:            payeeManager,
 		//scopedManagers:           scopedManagers,
 		//externalAddrSchemas:      make(map[AddressType][]KeyScope),
 		//internalAddrSchemas:      make(map[AddressType][]KeyScope),
@@ -911,18 +864,6 @@ func loadManagerAbe(ns walletdb.ReadBucket, pubPassphrase []byte,
 
 	// Next, we'll need to load all known manager scopes from disk. Each
 	// scope is on a distinct top-level path within our HD key chain.
-	payeeManagers := *new([]*PayeeManager)
-	err = forEachPayee(ns, func(name string) error {
-		payeeMgr, err := fetchPayeeManager(ns, name)
-		if err != nil {
-			return err
-		}
-		payeeManagers = append(payeeManagers, payeeMgr)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
 	//scopedManagers := make(map[KeyScope]*ScopedKeyManager)
 	//err = forEachKeyScope(ns, func(scope KeyScope) error {
 	//	scopeSchema, err := fetchScopeAddrSchema(ns, &scope)
@@ -950,12 +891,8 @@ func loadManagerAbe(ns walletdb.ReadBucket, pubPassphrase []byte,
 	mgr := newManagerAbe(
 		chainParams, &masterKeyPub, &masterKeyPriv,
 		cryptoKeyPub, cryptoKeySeedEnc, cryptoKeyPrivEnc, cryptoKeyScriptEnc, syncInfo,
-		birthday, privPassphraseSalt, payeeManagers, watchingOnly,
+		birthday, privPassphraseSalt, watchingOnly,
 	)
-
-	for _, payeeManager := range payeeManagers {
-		payeeManager.rootManager = mgr
-	}
 
 	return mgr, nil
 }
@@ -1044,12 +981,6 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 		return managerError(ErrEmptyPassphrase, str, nil)
 	}
 
-	// TODO(abe):this scope will be removed because we do not support it
-	// Perform the initial bucket creation and database namespace setup.
-	//defaultScopes := map[KeyScope]ScopeAddrSchema{}
-	//if !isWatchingOnly {
-	//	defaultScopes = ScopeAddrMap
-	//}
 	if err := createManagerNSAbe(ns); err != nil {
 		return maybeConvertDbError(err)
 	}

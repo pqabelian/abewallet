@@ -492,8 +492,8 @@ func loadConfig() (*config, []string, error) {
 		// Error if the create flag is set and the wallet already
 		// exists.
 		if dbFileExists {
-			err := fmt.Errorf("The wallet database file `%v` "+
-				"already exists.", dbPath)
+			err := fmt.Errorf("the wallet database file `%v` "+
+				"already exists", dbPath)
 			fmt.Fprintln(os.Stderr, err)
 			return nil, nil, err
 		}
@@ -505,11 +505,6 @@ func loadConfig() (*config, []string, error) {
 		}
 
 		// Perform the initial wallet creation wizard.
-		//if err := createWallet(&cfg); err != nil {
-		//	fmt.Fprintln(os.Stderr, "Unable to create wallet:", err)
-		//	return nil, nil, err
-		//}
-		//TODO(abe):
 		if err := createWallet(&cfg); err != nil {
 			fmt.Fprintln(os.Stderr, "Unable to create wallet:", err)
 			return nil, nil, err

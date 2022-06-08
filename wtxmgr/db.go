@@ -56,9 +56,9 @@ const NUMBERBLOCKABE = 24 //TODO(abe):this value need to think about
 //	todo(ABE): wallet buckets
 // Bucket names
 var (
-	bucketBlocks         = []byte("b")
-	bucketTxRecords      = []byte("t")
-	bucketTxLabels       = []byte("l")
+	bucketBlocks         = []byte("b") // store blocks
+	bucketTxRecords      = []byte("t") // store transaction
+	bucketTxLabels       = []byte("l") // not support now
 	bucketCredits        = []byte("c")
 	bucketUnspent        = []byte("u")
 	bucketDebits         = []byte("d")
@@ -79,9 +79,8 @@ var (
 	bucketSpentButUnmined         = []byte("spentbutumined")
 	bucketSpentConfirmed          = []byte("spentconfirmed")
 
-	bucketNeedUpdateUTXORing = []byte("needupdateutxoring") // would be delete
-	bucketUTXORing           = []byte("utxoring")
-	bucketRingDetails        = []byte("utxoringdetails") //TODO(abe):we should add a block height in database, meaning that the txo in ring had consumed completely .
+	bucketUTXORing    = []byte("utxoring")
+	bucketRingDetails = []byte("utxoringdetails") //TODO(abe):we should add a block height in database, meaning that the txo in ring had consumed completely .
 
 	bucketUnminedAbe = []byte("unminedtx")
 )
@@ -90,9 +89,9 @@ var (
 var (
 	rootCreateDate       = []byte("date")
 	rootVersion          = []byte("vers")
-	rootMinedBalance     = []byte("bal") // will be discard
-	rootSpendableBalance = []byte("spendablebal")
-	rootFreezedBalance   = []byte("freezedbal")
+	rootMinedBalance     = []byte("bal")          // total balance
+	rootSpendableBalance = []byte("spendablebal") // spendable balance
+	rootFreezedBalance   = []byte("freezedbal")   // freeze balance
 )
 
 // The root bucket's mined balance k/v pair records the total balance for all
@@ -1862,35 +1861,6 @@ func updateDeletedHeightRingDetails(ns walletdb.ReadWriteBucket, k []byte, heigh
 	return nil
 }
 
-func putRawNeedUpdateUTXORing(ns walletdb.ReadWriteBucket, k, v []byte) error {
-	err := ns.NestedReadWriteBucket(bucketNeedUpdateUTXORing).Put(k, v)
-	if err != nil {
-		str := "failed to put ring details"
-		return storeError(ErrDatabase, str, err)
-	}
-	return nil
-}
-
-func FetchNeedUpdateUTXORing(ns walletdb.ReadBucket, k []byte) (bool, error) {
-	v := ns.NestedReadBucket(bucketNeedUpdateUTXORing).Get(k)
-	if v != nil && v[0] == 1 {
-		return true, nil
-	} else {
-		return false, fmt.Errorf("can not read the key %v from bucketNeedUpdateUTXORing", k)
-	}
-}
-func ForEachNeedUpdateUTXORing(ns walletdb.ReadBucket, fun func(k, v []byte) error) error {
-	return ns.NestedReadBucket(bucketNeedUpdateUTXORing).ForEach(fun)
-}
-func DeleteNeedUpdateUTXORing(ns walletdb.ReadWriteBucket, k []byte) error {
-	err := ns.NestedReadWriteBucket(bucketNeedUpdateUTXORing).Delete(k)
-	if err != nil {
-		str := "failed to delete ring details"
-		return storeError(ErrDatabase, str, err)
-	}
-	return nil
-}
-
 //All the relevant ring are keyed as such:
 //
 //    [0:32] RingHash(32 bytes)
@@ -2789,10 +2759,6 @@ func createBuckets(ns walletdb.ReadWriteBucket) error {
 		str := "fialed to create spent and confirmed bucket"
 		return storeError(ErrDatabase, str, err)
 	}
-	if _, err := ns.CreateBucket(bucketNeedUpdateUTXORing); err != nil {
-		str := "fialed to create needupdatedutxoring bucket"
-		return storeError(ErrDatabase, str, err)
-	}
 	if _, err := ns.CreateBucket(bucketUTXORing); err != nil {
 		str := "fialed to create utxo ring bucket"
 		return storeError(ErrDatabase, str, err)
@@ -2884,10 +2850,6 @@ func deleteBuckets(ns walletdb.ReadWriteBucket) error {
 	}
 	if err := ns.DeleteNestedBucket(bucketSpentConfirmed); err != nil {
 		str := "fialed to delete spent and confirmed txo bucket"
-		return storeError(ErrDatabase, str, err)
-	}
-	if err := ns.DeleteNestedBucket(bucketNeedUpdateUTXORing); err != nil {
-		str := "fialed to delete needupdatedutxo ring bucket"
 		return storeError(ErrDatabase, str, err)
 	}
 	if err := ns.DeleteNestedBucket(bucketUTXORing); err != nil {

@@ -18,6 +18,7 @@ import (
 	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abec/wire"
 	"github.com/abesuite/abewallet/chain"
+	"github.com/abesuite/abewallet/internal/prompt"
 	"github.com/abesuite/abewallet/waddrmgr"
 	"github.com/abesuite/abewallet/wallet/txauthor"
 	"github.com/abesuite/abewallet/wallet/txrules"
@@ -151,11 +152,9 @@ func (w *Wallet) Start() {
 	w.quitMu.Unlock()
 
 	//w.wg.Add(2)
-	//w.wg.Add(3)
-	w.wg.Add(4)
+	w.wg.Add(3)
 	go w.txCreator() // TODO(abe) :this go routine will be delete   ,and the Add will be modified
 	go w.txAbeCreator()
-	go w.ringFresher()
 	go w.walletLocker()
 }
 
@@ -995,109 +994,6 @@ out:
 	w.wg.Done()
 }
 
-func (w *Wallet) ringFresher() {
-	quit := w.quitChan()
-out:
-	for {
-		select {
-		case req := <-w.refreshRequests:
-			var err error
-			err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-				waddrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-				wtxmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-				if w.ManagerAbe.IsLocked() {
-					return fmt.Errorf("the wallet is locked")
-				}
-				err = wtxmgr.ForEachNeedUpdateUTXORing(wtxmgrNs, func(k, v []byte) error {
-					utxoring, err := wtxmgr.FetchUTXORing(wtxmgrNs, k)
-					if err != nil {
-						return err
-					}
-					ring, err := wtxmgr.FetchRingDetails(wtxmgrNs, k)
-					if err != nil {
-						return err
-					}
-					nullSn, _ := abecryptoparam.GetNullSerialNumber(utxoring.Version)
-					for i := 0; i < len(utxoring.IsMy); i++ {
-						if utxoring.IsMy[i] && (utxoring.OriginSerialNumberes == nil || bytes.Equal(utxoring.OriginSerialNumberes[uint8(i)], nullSn)) {
-							coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(ring.TxoScripts[i], abecryptoparam.CryptoSchemePQRingCT)
-							if err != nil {
-								return err
-							}
-							_, _, asksnEnc, _, err := w.ManagerAbe.FetchAddressKeyEncAbe(waddrmgrNs, coinAddr)
-							if asksnEnc == nil || err != nil {
-								return err
-							}
-							_, _, asksn, _, err := w.ManagerAbe.DecryptAddressKey(nil, nil, asksnEnc, nil)
-							if err != nil {
-								return err
-							}
-							sn, err := abecrypto.TxoCoinSerialNumberGen(&wire.TxOutAbe{
-								Version:   ring.Version,
-								TxoScript: ring.TxoScripts[i],
-							}, utxoring.RingHash, uint8(i), asksn)
-							if err != nil {
-								return err
-							}
-							if utxoring.OriginSerialNumberes == nil {
-								utxoring.OriginSerialNumberes = make(map[uint8][]byte)
-							}
-							utxoring.OriginSerialNumberes[uint8(i)] = sn
-
-							// check whether the sn occur in chain
-							for j := 0; j < len(utxoring.GotSerialNumberes); j++ {
-								tmp := utxoring.GotSerialNumberes[j]
-								if utxoring.IsMy[i] && bytes.Equal(tmp, sn[:]) {
-									// move the utxo to SpentAndConfirm bucket
-									err = wtxmgr.ConfirmSpentTXO(wtxmgrNs, utxoring.TxHashes[i], utxoring.OutputIndexes[i], tmp)
-									if err != nil {
-										return err
-									}
-									utxoring.Spent[i] = true
-									break
-								}
-							}
-						}
-						utxoring.AllSpent = true
-					}
-					for i := 0; i < len(utxoring.IsMy); i++ {
-						if utxoring.IsMy[i] && !utxoring.Spent[i] {
-							utxoring.AllSpent = false
-							break
-						}
-					}
-					if !utxoring.AllSpent {
-						err = wtxmgr.PutUTXORing(wtxmgrNs, k, utxoring) //record this serial number
-						if err != nil {
-							return err
-						}
-					}
-
-					// delete from bucket needUpadte
-					err = wtxmgr.DeleteNeedUpdateUTXORing(wtxmgrNs, k)
-					if err != nil {
-						return err
-					}
-					return nil
-				})
-				if err != nil {
-					return err
-				}
-				return nil
-			})
-			if err != nil {
-				req.resp <- refreshResponse{false, err}
-			} else {
-				req.resp <- refreshResponse{true, nil}
-			}
-
-		case <-quit:
-			break out
-		}
-	}
-	w.wg.Done()
-}
-
 // CreateSimpleTx creates a new signed transaction spending unspent P2PKH
 // outputs with at least minconf confirmations spending to any number of
 // address/amount pairs.  Change and an appropriate transaction fee are
@@ -1838,53 +1734,6 @@ func (w *Wallet) RenameAccount(scope waddrmgr.KeyScope, account uint32, newName 
 		w.NtfnServer.notifyAccountProperties(props)
 	}
 	return err
-}
-
-//TODO(abe):add log information in log file
-func (w *Wallet) AddPayee(name string, masterPubKey string) error {
-	// check the address legitimacy
-	_, err := abeutil.DecodeMasterAddressAbe(masterPubKey)
-	if err != nil {
-		return err
-	}
-	addrBytes, err := hex.DecodeString(masterPubKey) // the reverse method is hex.EncodeToString
-	if err != nil {
-		return err
-	}
-	manager, err := w.ManagerAbe.FetchPayeeManager(name)
-	if err != nil && err.Error() != fmt.Sprintf("there have no payee manager named %s", name) {
-		return err
-	}
-	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-		addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
-		if manager == nil {
-			manager, err = w.ManagerAbe.FetchPayeeManagerFromDB(addrmgrNs, name)
-		}
-		if manager == nil {
-			manager, err = w.ManagerAbe.NewPayeeManager(addrmgrNs, name)
-			if err != nil {
-				return err
-			}
-		}
-		return manager.AddMPK(addrmgrNs, addrBytes[1:])
-	})
-	return err
-}
-
-func (w *Wallet) FetchPayeeManager(name string) (*waddrmgr.PayeeManager, error) {
-	manager, err := w.ManagerAbe.FetchPayeeManager(name)
-	if err != nil && err.Error() != fmt.Sprintf("there have no payee manager named %s", name) {
-		return nil, err
-	}
-	if manager != nil {
-		return manager, nil
-	}
-	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		manager, err = w.ManagerAbe.FetchPayeeManagerFromDB(addrmgrNs, name)
-		return err
-	})
-	return manager, err
 }
 
 const maxEmptyAccounts = 100
@@ -3814,9 +3663,7 @@ func create(db walletdb.DB, pubPass, privPass, seed []byte,
 // TODO(abe):
 func createAbe(db walletdb.DB, pubPass, privPass, seed []byte, end uint64,
 	params *chaincfg.Params, birthday time.Time, isWatchingOnly bool) error {
-	// TODO(20220321):the length of seed should be a global paramter in config
 	// TODO: the following snippet is not run?
-	seedLength := 32
 	if !isWatchingOnly {
 		// If a seed was provided, ensure that it is of valid length. Otherwise,
 		// we generate a random seed for the wallet with the recommended seed
@@ -3826,20 +3673,13 @@ func createAbe(db walletdb.DB, pubPass, privPass, seed []byte, end uint64,
 			//	todo(ABE.MUST): the generation of the seed
 			//	How does ABE generates the seed? By outputting the seed in the process of generating MPK.
 			//	Or generating
-			//hdSeed, err := hdkeychain.GenerateSeed(
-			//	hdkeychain.RecommendedSeedLen)
-			//salrsSeed, err := abesalrs.GenerateSeed(abesalrs.RecommendedSeedLen)
-			seed = make([]byte, seedLength)
+			seed = make([]byte, prompt.SeedLength)
 			_, err := rand.Read(seed[:])
 			if err != nil {
 				str := "failed to read random source"
 				return errors.New(str)
 			}
 		}
-		//if len(seed) < abesalrs.MinSeedBytes || len(seed) > abesalrs.MaxSeedBytes {
-		//	return abesalrs.ErrInvalidSeedLen
-		//}
-
 	}
 	return walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
 		addrmgrNs, err := tx.CreateTopLevelBucket(waddrmgrNamespaceKey)

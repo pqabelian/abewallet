@@ -100,14 +100,13 @@ func createWallet(cfg *config) error {
 		var seed []byte
 		var mnemonics []string
 		if !cfg.WithMnemonic {
-			// TODO(20220320): the length of seed should be a global parameter in config
-			seed = make([]byte, 32)
+			seed = make([]byte, prompt.SeedLength)
 			_, err = rand.Read(seed)
 			if err != nil {
 				return err
 			}
 			mnemonics = prompt.SeedToWords(seed, wordlists.English)
-			tmp := make([]byte, 4, 4+32)
+			tmp := make([]byte, 4, 4+prompt.SeedLength)
 			binary.BigEndian.PutUint32(tmp[0:4], uint32(abecryptoparam.CryptoSchemePQRingCT))
 			seed = append(tmp, seed[:]...)
 			cfg.MyRestoreNumber = 0xFFFF_FFFF_FFFF_FFFF
@@ -119,16 +118,16 @@ func createWallet(cfg *config) error {
 			}
 			mnemonics = strings.Split(cfg.MyMnemonic, ",")
 			seed = prompt.WordsToSeed(mnemonics, wordlists.EnglishMap)
-			if len(seed) != 33 {
+			if len(seed) != prompt.SeedLength+1 {
 				return errors.New("Invalid mnemonic word list specified\n")
 			}
 			seedH := chainhash.DoubleHashH(seed[:32])
-			if !bytes.Equal(seedH[:1], seed[32:]) {
+			if !bytes.Equal(seedH[:1], seed[prompt.SeedLength:]) {
 				return errors.New("Invalid mnemonic word list specified\n")
 			}
-			seed = seed[:32]
+			seed = seed[:prompt.SeedLength]
 			// add the cryptoScheme before seed
-			tmp := make([]byte, 4, 4+32)
+			tmp := make([]byte, 4, 4+prompt.SeedLength)
 			binary.BigEndian.PutUint32(tmp[0:4], uint32(version))
 			seed = append(tmp, seed[:]...)
 		}

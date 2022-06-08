@@ -4559,14 +4559,6 @@ func (s *Store) BalanceAbeNew(ns walletdb.ReadBucket, minConf int32, syncHeight 
 	}
 	return []abeutil.Amount{allBal, spendableBal, freezedBal, allBal - spendableBal - freezedBal}, nil
 }
-func (s *Store) NeedUpdateNum(ns walletdb.ReadBucket) (int, error) {
-	num := 0
-	err := ForEachNeedUpdateUTXORing(ns, func(k, v []byte) error {
-		num++
-		return nil
-	})
-	return num, err
-}
 
 // PutTxLabel validates transaction labels and writes them to disk if they
 // are non-zero and within the label length limit. The entry is keyed by the

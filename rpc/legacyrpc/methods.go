@@ -72,34 +72,34 @@ var rpcHandlers = map[string]struct {
 }{
 	//	todo(ABE): The supported RPC requests are here. We need to remove some that are not supported any more.
 	// Reference implementation wallet methods (implemented)
-	"addmultisigaddress": {handler: addMultiSigAddress},
+	//"addmultisigaddress": {handler: addMultiSigAddress},
 	//"addpayee":              {handler: addPayee},
-	"createmultisig":        {handler: createMultiSig},
-	"dumpprivkey":           {handler: dumpPrivKey},
-	"getaccount":            {handler: getAccount},
-	"getaccountaddress":     {handler: getAccountAddress},
-	"getaddressesbyaccount": {handler: getAddressesByAccount},
+	//"createmultisig":        {handler: createMultiSig},
+	//"dumpprivkey":           {handler: dumpPrivKey},
+	//"getaccount":            {handler: getAccount},
+	//"getaccountaddress":     {handler: getAccountAddress},
+	//"getaddressesbyaccount": {handler: getAddressesByAccount},
 	//"getbalance":            {handler: getBalance},
-	"getbalances":          {handler: getBalance},
-	"getdetailedutxos":     {handler: getDetailedUtxos},
-	"getbestblockhash":     {handler: getBestBlockHash},
-	"getblockcount":        {handler: getBlockCount},
-	"getinfo":              {handlerWithChain: getInfo},
-	"getnewaddress":        {handler: getNewAddress},
-	"getrawchangeaddress":  {handler: getRawChangeAddress},
-	"getreceivedbyaccount": {handler: getReceivedByAccount},
-	"getreceivedbyaddress": {handler: getReceivedByAddress},
-	"gettransaction":       {handler: getTransaction},
-	"help":                 {handler: helpNoChainRPC, handlerWithChain: helpWithChainRPC},
-	"importprivkey":        {handler: importPrivKey},
-	"keypoolrefill":        {handler: keypoolRefill},
+	"getbalancesabe":   {handler: getBalances},
+	"getdetailedutxos": {handler: getDetailedUtxos},
+	"getbestblockhash": {handler: getBestBlockHash},
+	"getblockcount":    {handler: getBlockCount},
+	"getinfo":          {handlerWithChain: getInfo},
+	//"getnewaddress":        {handler: getNewAddress},
+	//"getrawchangeaddress":  {handler: getRawChangeAddress},
+	//"getreceivedbyaccount": {handler: getReceivedByAccount},
+	//"getreceivedbyaddress": {handler: getReceivedByAddress},
+	//"gettransaction": {handler: getTransaction},
+	"help": {handler: helpNoChainRPC, handlerWithChain: helpWithChainRPC},
+	//"importprivkey":  {handler: importPrivKey},
+	"keypoolrefill": {handler: keypoolRefill}, // TODO
 	//"listaccounts":           {handler: listAccounts},
-	"listlockunspent":        {handler: listLockUnspent},
-	"listreceivedbyaccount":  {handler: listReceivedByAccount},
-	"listreceivedbyaddress":  {handler: listReceivedByAddress},
-	"listsinceblock":         {handlerWithChain: listSinceBlock},
-	"listtransactions":       {handler: listTransactions},
-	"listunspent":            {handler: listUnspent},
+	"listlockunspent": {handler: listLockUnspent},
+	//"listreceivedbyaccount":  {handler: listReceivedByAccount},
+	//"listreceivedbyaddress":  {handler: listReceivedByAddress},
+	"listsinceblock": {handlerWithChain: listSinceBlock},
+	//"listtransactions":       {handler: listTransactions},
+	//"listunspent":            {handler: listUnspent},
 	"listallutxoabe":         {handler: listAllUTXOAbe},
 	"listunmaturedabe":       {handler: listUnmaturedUTXOAbe},
 	"listunspentabe":         {handler: listUnspentAbe},
@@ -111,14 +111,14 @@ var rpcHandlers = map[string]struct {
 	"sendtoaddressesabe": {handler: sendToAddressesAbe},
 	"generateaddressabe": {handler: generateAddressAbe},
 	//"sendtoaddress":          {handler: sendToAddress},
-	"sendtopayee":            {handler: sendToPayees},
-	"settxfee":               {handler: setTxFee},
-	"signmessage":            {handler: signMessage},
-	"signrawtransaction":     {handlerWithChain: signRawTransaction},
-	"validateaddress":        {handler: validateAddress},
-	"verifymessage":          {handler: verifyMessage},
-	"walletlock":             {handler: walletLock},
-	"freshen":                {handler: freshen},
+	//"sendtopayee":            {handler: sendToPayees},
+	"settxfee": {handler: setTxFee}, // TODO
+	//"signmessage":            {handler: signMessage},
+	"signrawtransaction": {handlerWithChain: signRawTransaction},
+	"validateaddress":    {handler: validateAddress}, // just support for address in database
+	//"verifymessage":          {handler: verifyMessage},
+	"walletlock": {handler: walletLock},
+	//"freshen":                {handler: freshen},
 	"walletpassphrase":       {handler: walletPassphrase},
 	"walletpassphrasechange": {handler: walletPassphraseChange},
 
@@ -136,8 +136,8 @@ var rpcHandlers = map[string]struct {
 	"setaccount":    {handler: unsupported, noHelp: true},
 
 	// Extensions to the reference client JSON-RPC API
-	"createnewaccount": {handler: createNewAccount},
-	"getbestblock":     {handler: getBestBlock},
+	//"createnewaccount": {handler: createNewAccount},
+	"getbestblock": {handler: getBestBlock},
 	// This was an extension but the reference implementation added it as
 	// well, but with a different API (no account parameter).  It's listed
 	// here because it hasn't been update to use the reference
@@ -145,8 +145,8 @@ var rpcHandlers = map[string]struct {
 	"getunconfirmedbalance":   {handler: getUnconfirmedBalance},
 	"listaddresstransactions": {handler: listAddressTransactions},
 	"listalltransactions":     {handler: listAllTransactions},
-	"renameaccount":           {handler: renameAccount},
-	"walletislocked":          {handler: walletIsLocked},
+	//"renameaccount":           {handler: renameAccount},
+	"walletislocked": {handler: walletIsLocked},
 }
 
 // unimplemented handles an unimplemented RPC request with the
@@ -362,18 +362,6 @@ func addMultiSigAddress(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 
 	return p2shAddr.EncodeAddress(), nil
 }
-func addPayee(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.AddPayeeCmd)
-	// check whether the parameter have right format
-	if cmd.Name == "" {
-		return nil, errors.New("the name is empty")
-	}
-	err := w.AddPayee(cmd.Name, cmd.MasterPubKey)
-	if err != nil {
-		return err.Error(), err
-	}
-	return fmt.Sprintf("successful!"), nil
-}
 
 // createMultiSig handles an createmultisig request by returning a
 // multisig address for the given inputs.
@@ -455,7 +443,7 @@ func getAddressesByAccount(icmd interface{}, w *wallet.Wallet) (interface{}, err
 // getBalance handles a getbalance request by returning the balance for an
 // account (wallet), or an error if the requested account does not
 // exist.
-func getBalance(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+func getBalances(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.GetBalancesAbeCmd)
 
 	currentTime := time.Now().String()
@@ -1563,25 +1551,6 @@ func makeOutputs(pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) 
 		}
 
 		outputs = append(outputs, wire.NewTxOut(int64(amt), pkScript))
-	}
-	return outputs, nil
-}
-
-//TODO(abe):add the chainPramas into the decoding of address
-func makeOutputsAbe(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) ([]*wire.TxOutAbe, error) {
-	outputs := make([]*wire.TxOutAbe, 0, len(pairs))
-	//coinValues := []int64{500, 200, 100, 50, 20, 10, 5, 2, 1}
-	for name, amt := range pairs {
-		payeeManager, err := w.FetchPayeeManager(name)
-		if payeeManager == nil {
-			return nil, err
-		}
-		addr, err := payeeManager.ChooseMAddr()
-		if err != nil {
-			return nil, fmt.Errorf("cannot get an address from given payee: %s", err)
-		}
-		targetAmount := uint64(amt)
-		abecrypto.NewAbeTxOutDesc(addr, targetAmount)
 	}
 	return outputs, nil
 }

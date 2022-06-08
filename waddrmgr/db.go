@@ -2683,11 +2683,6 @@ func createManagerNSAbe(ns walletdb.ReadWriteBucket) error {
 		str := "failed to create sync bucket"
 		return managerError(ErrDatabase, str, err)
 	}
-	_, err = ns.CreateBucket(payeeBucketName)
-	if err != nil {
-		str := "failed to create sync bucket"
-		return managerError(ErrDatabase, str, err)
-	}
 	// We'll also create the two top-level scope related buckets as
 	// preparation for the operations below.
 	// TODO(abe):we do not support th scope
