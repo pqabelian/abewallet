@@ -14,7 +14,7 @@ const (
 	// MaxReorgDepth represents the maximum number of block hashes we'll
 	// keep within the wallet at any given point in order to recover from
 	// long reorgs.
-	MaxReorgDepth = 10000
+	MaxReorgDepth = 10000 // TODO: this const variable can reuse for other intention such as NUMBERBLOCKABE
 )
 
 var (
@@ -228,21 +228,19 @@ var (
 	// flag, the master private key (encrypted), the master HD private key
 	// (encrypted), and also versioning information.
 	mainBucketName  = []byte("main")
-	addrBukcetName  = []byte("address")
-	askspBukcetName = []byte("asksp")
-	asksnBukcetName = []byte("asksn")
-	vskBukcetName   = []byte("valuesk")
+	addrBukcetName  = []byte("address") // instance address = coin address + value address
+	askspBukcetName = []byte("asksp")   // coin spend key
+	asksnBukcetName = []byte("asksn")   // coin serial number key
+	vskBukcetName   = []byte("valuesk") // value secret key
 	// masterHDPrivName is the name of the key that stores the master HD
 	// private key. This key is encrypted with the master private crypto
 	// encryption key. This resides under the main bucket.
-	masterHDPrivName     = []byte("mhdpriv") //TODO(abe):will be deleted, this is the master root private key
-	masterSecretSignName = []byte("mssk")
+	masterHDPrivName = []byte("mhdpriv") //TODO(abe):will be deleted, this is the master root private key
 
-	seedKeyName = []byte("seed")
-	//valueSecretKeyName     = []byte("vsk")
-	//addressSecretKeySpName = []byte("asksp")
-	//addressSecretKeySnName = []byte("asksn")
+	// derived seed and its used status
+	seedKeyName    = []byte("seed")
 	seedStatusName = []byte("sdcnt")
+
 	// masterHDPubName is the name of the key that stores the master HD
 	// public key. This key is encrypted with the master public crypto
 	// encryption key. This reside under the main bucket.
@@ -260,13 +258,13 @@ var (
 	mgrCreateDateName = []byte("mgrcreated")
 
 	// Crypto related key names (main bucket).
-	masterPrivKeyName = []byte("mpriv") // TODO(abe):use this to encrypt the cryptoPrivKey
-	masterPubKeyName  = []byte("mpub")  // TODO(abe): use this to encrypt the cryptoPubKey
+	masterPrivKeyName = []byte("mpriv")
+	masterPubKeyName  = []byte("mpub")
 
 	cryptoSeedKeyName   = []byte("cseed")
-	cryptoPrivKeyName   = []byte("cpriv")   //TODO(abe): use this to encrypt the mssk
-	cryptoPubKeyName    = []byte("cpub")    //TODO(abe): use this to encrypt the msvk and mpk
-	cryptoScriptKeyName = []byte("cscript") //TODO(abe):this key will be deleted because we do not have script address,we just encoding address(named script)
+	cryptoPrivKeyName   = []byte("cpriv")
+	cryptoPubKeyName    = []byte("cpub")
+	cryptoScriptKeyName = []byte("cscript") // useless temporary
 	watchingOnlyName    = []byte("watchonly")
 
 	// Sync related key names (sync bucket).
@@ -2069,134 +2067,6 @@ func deletePrivateKeysAbe(ns walletdb.ReadWriteBucket) error {
 		str := "failed to delete crypto script key"
 		return managerError(ErrDatabase, str, err)
 	}
-	//if err := bucket.Delete(masterHDPrivName); err != nil {
-	//	str := "failed to delete master HD priv key"
-	//	return managerError(ErrDatabase, str, err)
-	//}
-	if err := bucket.Delete(masterSecretSignName); err != nil {
-		str := "failed to delete master secret sign key"
-		return managerError(ErrDatabase, str, err)
-	}
-
-	// TODO(abe): we do not need scope
-
-	// With the master key and meta encryption keys deleted, we'll need to
-	// delete the keys for all known scopes as well.
-	//scopeBucket := ns.NestedReadWriteBucket(scopeBucketName)
-	//err := scopeBucket.ForEach(func(scopeKey, _ []byte) error {
-	//	if len(scopeKey) != 8 {
-	//		return nil
-	//	}
-	//
-	//	managerScopeBucket := scopeBucket.NestedReadWriteBucket(scopeKey)
-	//
-	//	if err := managerScopeBucket.Delete(coinTypePrivKeyName); err != nil {
-	//		str := "failed to delete cointype private key"
-	//		return managerError(ErrDatabase, str, err)
-	//	}
-	//
-	//	// Delete the account extended private key for all accounts.
-	//	bucket = managerScopeBucket.NestedReadWriteBucket(acctBucketName)
-	//	err := bucket.ForEach(func(k, v []byte) error {
-	//		// Skip buckets.
-	//		if v == nil {
-	//			return nil
-	//		}
-	//
-	//		// Deserialize the account row first to determine the type.
-	//		row, err := deserializeAccountRow(k, v)
-	//		if err != nil {
-	//			return err
-	//		}
-	//
-	//		switch row.acctType {
-	//		case accountDefault:
-	//			arow, err := deserializeDefaultAccountRow(k, row)
-	//			if err != nil {
-	//				return err
-	//			}
-	//
-	//			// Reserialize the account without the private key and
-	//			// store it.
-	//			row.rawData = serializeDefaultAccountRow(
-	//				arow.pubKeyEncrypted, nil,
-	//				arow.nextExternalIndex, arow.nextInternalIndex,
-	//				arow.name,
-	//			)
-	//			err = bucket.Put(k, serializeAccountRow(row))
-	//			if err != nil {
-	//				str := "failed to delete account private key"
-	//				return managerError(ErrDatabase, str, err)
-	//			}
-	//		}
-	//
-	//		return nil
-	//	})
-	//	if err != nil {
-	//		return maybeConvertDbError(err)
-	//	}
-	//
-	//	// Delete the private key for all imported addresses.
-	//	bucket = managerScopeBucket.NestedReadWriteBucket(addrBucketName)
-	//	err = bucket.ForEach(func(k, v []byte) error {
-	//		// Skip buckets.
-	//		if v == nil {
-	//			return nil
-	//		}
-	//
-	//		// Deserialize the address row first to determine the field
-	//		// values.
-	//		row, err := deserializeAddressRow(v)
-	//		if err != nil {
-	//			return err
-	//		}
-	//
-	//		switch row.addrType {
-	//		case adtImport:
-	//			irow, err := deserializeImportedAddress(row)
-	//			if err != nil {
-	//				return err
-	//			}
-	//
-	//			// Reserialize the imported address without the private
-	//			// key and store it.
-	//			row.rawData = serializeImportedAddress(
-	//				irow.encryptedPubKey, nil)
-	//			err = bucket.Put(k, serializeAddressRow(row))
-	//			if err != nil {
-	//				str := "failed to delete imported private key"
-	//				return managerError(ErrDatabase, str, err)
-	//			}
-	//
-	//		case adtScript:
-	//			srow, err := deserializeScriptAddress(row)
-	//			if err != nil {
-	//				return err
-	//			}
-	//
-	//			// Reserialize the script address without the script
-	//			// and store it.
-	//			row.rawData = serializeScriptAddress(srow.encryptedHash,
-	//				nil)
-	//			err = bucket.Put(k, serializeAddressRow(row))
-	//			if err != nil {
-	//				str := "failed to delete imported script"
-	//				return managerError(ErrDatabase, str, err)
-	//			}
-	//		}
-	//
-	//		return nil
-	//	})
-	//	if err != nil {
-	//		return maybeConvertDbError(err)
-	//	}
-	//
-	//	return nil
-	//})
-	//if err != nil {
-	//	return maybeConvertDbError(err)
-	//}
-
 	return nil
 }
 
@@ -2671,55 +2541,22 @@ func createManagerNS(ns walletdb.ReadWriteBucket,
 }
 func createManagerNSAbe(ns walletdb.ReadWriteBucket) error {
 
-	// First, we'll create all the relevant buckets that stem off of the
-	// main bucket.
+	// First, we'll create a main bucket
 	mainBucket, err := ns.CreateBucket(mainBucketName)
 	if err != nil {
 		str := "failed to create main bucket"
 		return managerError(ErrDatabase, str, err)
 	}
+
+	// Then, we'll create a bucket for storing the sync status
 	_, err = ns.CreateBucket(syncBucketName)
 	if err != nil {
 		str := "failed to create sync bucket"
 		return managerError(ErrDatabase, str, err)
 	}
-	// We'll also create the two top-level scope related buckets as
-	// preparation for the operations below.
-	// TODO(abe):we do not support th scope
-	//scopeBucket, err := ns.CreateBucket(scopeBucketName)
-	//if err != nil {
-	//	str := "failed to create scope bucket"
-	//	return managerError(ErrDatabase, str, err)
-	//}
-	//scopeSchemas, err := ns.CreateBucket(scopeSchemaBucketName)
-	//if err != nil {
-	//	str := "failed to create scope schema bucket"
-	//	return managerError(ErrDatabase, str, err)
-	//}
-	//
-	//// Next, we'll create the namespace for each of the relevant default
-	//// manager scopes.
-	//for scope, scopeSchema := range defaultScopes {
-	//	// Before we create the entire namespace of this scope, we'll
-	//	// update the schema mapping to note what types of addresses it
-	//	// prefers.
-	//	scopeKey := scopeToBytes(&scope)
-	//	schemaBytes := scopeSchemaToBytes(&scopeSchema)
-	//	err := scopeSchemas.Put(scopeKey[:], schemaBytes)
-	//	if err != nil {
-	//		return err
-	//	}
-	//
-	//	err = createScopedManagerNS(scopeBucket, &scope)
-	//	if err != nil {
-	//		return err
-	//	}
-	//
-	//	err = putLastAccount(ns, &scope, DefaultAccountNum)
-	//	if err != nil {
-	//		return err
-	//	}
-	//}
+
+	// Last, we'll create all the relevant buckets and key/value that
+	// stem off of the main bucket.
 
 	if err := putManagerVersion(ns, latestMgrVersion); err != nil {
 		return err

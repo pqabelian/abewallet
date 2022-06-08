@@ -19,6 +19,7 @@ import (
 )
 
 const SeedLength = 32
+const MAXCOUNTERADDRESS = 0xFFFF_FFFF_FFFF_FFFF
 
 // ProvideSeed is used to prompt for the wallet seed which maybe required during
 // upgrades.
@@ -266,7 +267,7 @@ func Seed(reader *bufio.Reader) ([]byte, uint64, error) {
 		tmp := make([]byte, 4, 4+32)
 		binary.BigEndian.PutUint32(tmp[0:4], uint32(abecryptoparam.CryptoSchemePQRingCT))
 		seed = append(tmp, seed[:]...)
-		return seed, 0xFFFF_FFFF_FFFF_FFFF, nil
+		return seed, MAXCOUNTERADDRESS, nil
 	}
 
 	for {

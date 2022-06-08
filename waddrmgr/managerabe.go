@@ -11,6 +11,7 @@ import (
 	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/txscript"
+	"github.com/abesuite/abewallet/internal/prompt"
 	"github.com/abesuite/abewallet/internal/zero"
 	"github.com/abesuite/abewallet/snacl"
 	"github.com/abesuite/abewallet/walletdb"
@@ -1110,7 +1111,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 		if err != nil {
 			return maybeConvertDbError(err)
 		}
-		if end == 0xFFFF_FFFF_FFFF_FFFF {
+		if end == prompt.MAXCOUNTERADDRESS {
 			// create and generate an address and print it
 			// generate an address and information for spending
 			serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, err := generateAddressSk(usedSeed, 2*seedLength, 0)
@@ -1156,7 +1157,6 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 			fmt.Println(`Please remember the initial address:`)
 			fmt.Println(hex.EncodeToString(b))
 		} else {
-			// restore
 			// restore the previous address
 			for i := uint64(0); i <= end; i++ {
 				// generate an address and information for spending
