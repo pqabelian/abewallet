@@ -367,11 +367,8 @@ func (m *Manager) lock() {
 
 	// Remove clear text private keys and scripts from all address entries.
 	for _, manager := range m.scopedManagers {
-		for _, ma := range manager.addrs {
-			switch addr := ma.(type) {
-			case *managedAddress:
-				addr.lock()
-			}
+		for _, _ = range manager.addrs {
+			// TODO: delete
 		}
 	}
 
@@ -1008,12 +1005,7 @@ func (m *Manager) ConvertToWatchingOnly(ns walletdb.ReadWriteBucket) error {
 	// Clear and remove encrypted private keys and encrypted scripts from
 	// all address entries.
 	for _, manager := range m.scopedManagers {
-		for _, ma := range manager.addrs {
-			switch addr := ma.(type) {
-			case *managedAddress:
-				zero.Bytes(addr.privKeyEncrypted)
-				addr.privKeyEncrypted = nil
-			}
+		for _, _ = range manager.addrs {
 		}
 	}
 
@@ -1174,19 +1166,13 @@ func (m *Manager) Unlock(ns walletdb.ReadBucket, passphrase []byte) error {
 			addressKey.Zero()
 
 			privKeyBytes := privKey.Serialize()
-			privKeyEncrypted, err := m.cryptoKeyPriv.Encrypt(privKeyBytes)
+			_, err = m.cryptoKeyPriv.Encrypt(privKeyBytes)
 			zero.BigInt(privKey.D)
 			if err != nil {
 				m.lock()
 				str := fmt.Sprintf("failed to encrypt private key for "+
 					"address %s", info.managedAddr.Address())
 				return managerError(ErrCrypto, str, err)
-			}
-
-			switch a := info.managedAddr.(type) {
-			case *managedAddress:
-				a.privKeyEncrypted = privKeyEncrypted
-				a.privKeyCT = privKeyBytes
 			}
 
 			// Avoid re-deriving this key on subsequent unlocks.
