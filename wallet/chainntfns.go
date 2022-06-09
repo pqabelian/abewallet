@@ -7,7 +7,6 @@ import (
 	"github.com/abesuite/abec/abecrypto"
 	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abec/chainhash"
-	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abec/wire"
 	"github.com/abesuite/abewallet/chain"
 	"github.com/abesuite/abewallet/waddrmgr"
@@ -483,90 +482,6 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 }
 
 //	todo(ABE): Wallet adds transactions to wallet db.
-func (w *Wallet) addRelevantTx(dbtx walletdb.ReadWriteTx, rec *wtxmgr.TxRecord, block *wtxmgr.BlockMeta) error {
-	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
-	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
-
-	// At the moment all notified transactions are assumed to actually be
-	// relevant.  This assumption will not hold true when SPV support is
-	// added, but until then, simply insert the transaction because there
-	// should either be one or more relevant inputs or outputs.
-	err := w.TxStore.InsertTx(txmgrNs, rec, block)
-	if err != nil {
-		return err
-	}
-
-	// Check every output to determine whether it is controlled by a wallet
-	// key.  If so, mark the output as a credit.
-	for i, output := range rec.MsgTx.TxOut {
-		_, addrs, _, err := txscript.ExtractPkScriptAddrs(output.PkScript,
-			w.chainParams)
-		if err != nil {
-			// Non-standard outputs are skipped.
-			continue
-		}
-		for _, addr := range addrs {
-			ma, err := w.Manager.Address(addrmgrNs, addr)
-			if err == nil {
-				// TODO: Credits should be added with the
-				// account they belong to, so wtxmgr is able to
-				// track per-account balances.
-				err = w.TxStore.AddCredit(txmgrNs, rec, block, uint32(i),
-					ma.Internal())
-				if err != nil {
-					return err
-				}
-				err = w.Manager.MarkUsed(addrmgrNs, addr)
-				if err != nil {
-					return err
-				}
-				log.Debugf("Marked address %v used", addr)
-				continue
-			}
-
-			// Missing addresses are skipped.  Other errors should
-			// be propagated.
-			if !waddrmgr.IsError(err, waddrmgr.ErrAddressNotFound) {
-				return err
-			}
-		}
-	}
-
-	// Send notification of mined or unmined transaction to any interested
-	// clients.
-	//
-	// TODO: Avoid the extra db hits.
-	if block == nil {
-		details, err := w.TxStore.UniqueTxDetails(txmgrNs, &rec.Hash, nil)
-		if err != nil {
-			log.Errorf("Cannot query transaction details for notification: %v", err)
-		}
-
-		// It's possible that the transaction was not found within the
-		// wallet's set of unconfirmed transactions due to it already
-		// being confirmed, so we'll avoid notifying it.
-		//
-		// TODO(wilmer): ideally we should find the culprit to why we're
-		// receiving an additional unconfirmed chain.RelevantTx
-		// notification from the chain backend.
-		if details != nil {
-			w.NtfnServer.notifyUnminedTransaction(dbtx, details)
-		}
-	} else {
-		details, err := w.TxStore.UniqueTxDetails(txmgrNs, &rec.Hash, &block.Block)
-		if err != nil {
-			log.Errorf("Cannot query transaction details for notification: %v", err)
-		}
-
-		// We'll only notify the transaction if it was found within the
-		// wallet's set of confirmed transactions.
-		if details != nil {
-			w.NtfnServer.notifyMinedTransaction(dbtx, details, block)
-		}
-	}
-
-	return nil
-}
 func (w *Wallet) addRelevantTxAbe(dbtx walletdb.ReadWriteTx, rec *wtxmgr.TxRecordAbe, block *wtxmgr.BlockAbeMeta) error {
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
 	//addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)

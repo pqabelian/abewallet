@@ -776,24 +776,6 @@ func listAllTransactions(icmd interface{}, w *wallet.Wallet) (interface{}, error
 }
 
 // listUnspent handles the listunspent command.
-func listUnspent(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.ListUnspentCmd)
-
-	var addresses map[string]struct{}
-	if cmd.Addresses != nil {
-		addresses = make(map[string]struct{})
-		// confirm that all of them are good:
-		for _, as := range *cmd.Addresses {
-			a, err := decodeAddress(as, w.ChainParams())
-			if err != nil {
-				return nil, err
-			}
-			addresses[a.EncodeAddress()] = struct{}{}
-		}
-	}
-
-	return w.ListUnspent(int32(*cmd.MinConf), int32(*cmd.MaxConf), addresses)
-}
 
 // For test
 type utxo struct {
@@ -1356,350 +1338,177 @@ func setTxFee(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 
 // signRawTransaction handles the signrawtransaction command.
 func signRawTransaction(icmd interface{}, w *wallet.Wallet, chainClient *chain.RPCClient) (interface{}, error) {
-	cmd := icmd.(*abejson.SignRawTransactionCmd)
+	_ = icmd.(*abejson.SignRawTransactionCmd)
 
-	serializedTx, err := decodeHexStr(cmd.RawTx)
-	if err != nil {
-		return nil, err
-	}
-	var tx wire.MsgTx
-	err = tx.Deserialize(bytes.NewBuffer(serializedTx))
-	if err != nil {
-		e := errors.New("TX decode failed")
-		return nil, DeserializationError{e}
-	}
-
-	var hashType txscript.SigHashType
-	switch *cmd.Flags {
-	case "ALL":
-		hashType = txscript.SigHashAll
-	case "NONE":
-		hashType = txscript.SigHashNone
-	case "SINGLE":
-		hashType = txscript.SigHashSingle
-	case "ALL|ANYONECANPAY":
-		hashType = txscript.SigHashAll | txscript.SigHashAnyOneCanPay
-	case "NONE|ANYONECANPAY":
-		hashType = txscript.SigHashNone | txscript.SigHashAnyOneCanPay
-	case "SINGLE|ANYONECANPAY":
-		hashType = txscript.SigHashSingle | txscript.SigHashAnyOneCanPay
-	default:
-		e := errors.New("Invalid sighash parameter")
-		return nil, InvalidParameterError{e}
-	}
-
-	// TODO: really we probably should look these up with btcd anyway to
-	// make sure that they match the blockchain if present.
-	inputs := make(map[wire.OutPoint][]byte)
-	scripts := make(map[string][]byte)
-	var cmdInputs []abejson.RawTxInput
-	if cmd.Inputs != nil {
-		cmdInputs = *cmd.Inputs
-	}
-	for _, rti := range cmdInputs {
-		inputHash, err := chainhash.NewHashFromStr(rti.Txid)
-		if err != nil {
-			return nil, DeserializationError{err}
-		}
-
-		script, err := decodeHexStr(rti.ScriptPubKey)
-		if err != nil {
-			return nil, err
-		}
-
-		// redeemScript is only actually used iff the user provided
-		// private keys. In which case, it is used to get the scripts
-		// for signing. If the user did not provide keys then we always
-		// get scripts from the wallet.
-		// Empty strings are ok for this one and hex.DecodeString will
-		// DTRT.
-		if cmd.PrivKeys != nil && len(*cmd.PrivKeys) != 0 {
-			redeemScript, err := decodeHexStr(rti.RedeemScript)
-			if err != nil {
-				return nil, err
-			}
-
-			addr, err := abeutil.NewAddressScriptHash(redeemScript,
-				w.ChainParams())
-			if err != nil {
-				return nil, DeserializationError{err}
-			}
-			scripts[addr.String()] = redeemScript
-		}
-		inputs[wire.OutPoint{
-			Hash:  *inputHash,
-			Index: rti.Vout,
-		}] = script
-	}
-
-	// Now we go and look for any inputs that we were not provided by
-	// querying btcd with getrawtransaction. We queue up a bunch of async
-	// requests and will wait for replies after we have checked the rest of
-	// the arguments.
-	requested := make(map[wire.OutPoint]rpcclient.FutureGetTxOutResult)
-	for _, txIn := range tx.TxIn {
-		// Did we get this outpoint from the arguments?
-		if _, ok := inputs[txIn.PreviousOutPoint]; ok {
-			continue
-		}
-
-		// Asynchronously request the output script.
-		requested[txIn.PreviousOutPoint] = chainClient.GetTxOutAsync(
-			&txIn.PreviousOutPoint.Hash, txIn.PreviousOutPoint.Index,
-			true)
-	}
-
-	// Parse list of private keys, if present. If there are any keys here
-	// they are the keys that we may use for signing. If empty we will
-	// use any keys known to us already.
-	var keys map[string]*abeutil.WIF
-	if cmd.PrivKeys != nil {
-		keys = make(map[string]*abeutil.WIF)
-
-		for _, key := range *cmd.PrivKeys {
-			wif, err := abeutil.DecodeWIF(key)
-			if err != nil {
-				return nil, DeserializationError{err}
-			}
-
-			if !wif.IsForNet(w.ChainParams()) {
-				s := "key network doesn't match wallet's"
-				return nil, DeserializationError{errors.New(s)}
-			}
-
-			addr, err := abeutil.NewAddressPubKey(wif.SerializePubKey(),
-				w.ChainParams())
-			if err != nil {
-				return nil, DeserializationError{err}
-			}
-			keys[addr.EncodeAddress()] = wif
-		}
-	}
-
-	// We have checked the rest of the args. now we can collect the async
-	// txs. TODO: If we don't mind the possibility of wasting work we could
-	// move waiting to the following loop and be slightly more asynchronous.
-	for outPoint, resp := range requested {
-		result, err := resp.Receive()
-		if err != nil {
-			return nil, err
-		}
-		script, err := hex.DecodeString(result.ScriptPubKey.Hex)
-		if err != nil {
-			return nil, err
-		}
-		inputs[outPoint] = script
-	}
-
-	// All args collected. Now we can sign all the inputs that we can.
-	// `complete' denotes that we successfully signed all outputs and that
-	// all scripts will run to completion. This is returned as part of the
-	// reply.
-	signErrs, err := w.SignTransaction(&tx, hashType, inputs, keys, scripts)
-	if err != nil {
-		return nil, err
-	}
-
-	var buf bytes.Buffer
-	buf.Grow(tx.SerializeSize())
-
-	// All returned errors (not OOM, which panics) encounted during
-	// bytes.Buffer writes are unexpected.
-	if err = tx.Serialize(&buf); err != nil {
-		panic(err)
-	}
-
-	signErrors := make([]abejson.SignRawTransactionError, 0, len(signErrs))
-	for _, e := range signErrs {
-		input := tx.TxIn[e.InputIndex]
-		signErrors = append(signErrors, abejson.SignRawTransactionError{
-			TxID:      input.PreviousOutPoint.Hash.String(),
-			Vout:      input.PreviousOutPoint.Index,
-			ScriptSig: hex.EncodeToString(input.SignatureScript),
-			Sequence:  input.Sequence,
-			Error:     e.Error.Error(),
-		})
-	}
-
-	return abejson.SignRawTransactionResult{
-		Hex:      hex.EncodeToString(buf.Bytes()),
-		Complete: len(signErrors) == 0,
-		Errors:   signErrors,
-	}, nil
-}
-
-//TODO(abe): we sign a transaction just when the wallet creates a unsigned transaction
-func signRawTransactionAbe(icmd interface{}, w *wallet.Wallet, chainClient *chain.RPCClient) (interface{}, error) {
-	cmd := icmd.(*abejson.SignRawTransactionCmd)
-
-	serializedTx, err := decodeHexStr(cmd.RawTx)
-	if err != nil {
-		return nil, err
-	}
-	var tx wire.MsgTx
-	err = tx.Deserialize(bytes.NewBuffer(serializedTx))
-	if err != nil {
-		e := errors.New("TX decode failed")
-		return nil, DeserializationError{e}
-	}
-
-	var hashType txscript.SigHashType
-	switch *cmd.Flags {
-	case "ALL":
-		hashType = txscript.SigHashAll
-	case "NONE":
-		hashType = txscript.SigHashNone
-	case "SINGLE":
-		hashType = txscript.SigHashSingle
-	case "ALL|ANYONECANPAY":
-		hashType = txscript.SigHashAll | txscript.SigHashAnyOneCanPay
-	case "NONE|ANYONECANPAY":
-		hashType = txscript.SigHashNone | txscript.SigHashAnyOneCanPay
-	case "SINGLE|ANYONECANPAY":
-		hashType = txscript.SigHashSingle | txscript.SigHashAnyOneCanPay
-	default:
-		e := errors.New("Invalid sighash parameter")
-		return nil, InvalidParameterError{e}
-	}
-
-	// TODO: really we probably should look these up with btcd anyway to
-	// make sure that they match the blockchain if present.
-	inputs := make(map[wire.OutPoint][]byte)
-	scripts := make(map[string][]byte)
-	var cmdInputs []abejson.RawTxInput
-	if cmd.Inputs != nil {
-		cmdInputs = *cmd.Inputs
-	}
-	for _, rti := range cmdInputs {
-		inputHash, err := chainhash.NewHashFromStr(rti.Txid)
-		if err != nil {
-			return nil, DeserializationError{err}
-		}
-
-		script, err := decodeHexStr(rti.ScriptPubKey)
-		if err != nil {
-			return nil, err
-		}
-
-		// redeemScript is only actually used iff the user provided
-		// private keys. In which case, it is used to get the scripts
-		// for signing. If the user did not provide keys then we always
-		// get scripts from the wallet.
-		// Empty strings are ok for this one and hex.DecodeString will
-		// DTRT.
-		if cmd.PrivKeys != nil && len(*cmd.PrivKeys) != 0 {
-			redeemScript, err := decodeHexStr(rti.RedeemScript)
-			if err != nil {
-				return nil, err
-			}
-
-			addr, err := abeutil.NewAddressScriptHash(redeemScript,
-				w.ChainParams())
-			if err != nil {
-				return nil, DeserializationError{err}
-			}
-			scripts[addr.String()] = redeemScript
-		}
-		inputs[wire.OutPoint{
-			Hash:  *inputHash,
-			Index: rti.Vout,
-		}] = script
-	}
-
-	// Now we go and look for any inputs that we were not provided by
-	// querying btcd with getrawtransaction. We queue up a bunch of async
-	// requests and will wait for replies after we have checked the rest of
-	// the arguments.
-	requested := make(map[wire.OutPoint]rpcclient.FutureGetTxOutResult)
-	for _, txIn := range tx.TxIn {
-		// Did we get this outpoint from the arguments?
-		if _, ok := inputs[txIn.PreviousOutPoint]; ok {
-			continue
-		}
-
-		// Asynchronously request the output script.
-		requested[txIn.PreviousOutPoint] = chainClient.GetTxOutAsync(
-			&txIn.PreviousOutPoint.Hash, txIn.PreviousOutPoint.Index,
-			true)
-	}
-
-	// Parse list of private keys, if present. If there are any keys here
-	// they are the keys that we may use for signing. If empty we will
-	// use any keys known to us already.
-	var keys map[string]*abeutil.WIF
-	if cmd.PrivKeys != nil {
-		keys = make(map[string]*abeutil.WIF)
-
-		for _, key := range *cmd.PrivKeys {
-			wif, err := abeutil.DecodeWIF(key)
-			if err != nil {
-				return nil, DeserializationError{err}
-			}
-
-			if !wif.IsForNet(w.ChainParams()) {
-				s := "key network doesn't match wallet's"
-				return nil, DeserializationError{errors.New(s)}
-			}
-
-			addr, err := abeutil.NewAddressPubKey(wif.SerializePubKey(),
-				w.ChainParams())
-			if err != nil {
-				return nil, DeserializationError{err}
-			}
-			keys[addr.EncodeAddress()] = wif
-		}
-	}
-
-	// We have checked the rest of the args. now we can collect the async
-	// txs. TODO: If we don't mind the possibility of wasting work we could
-	// move waiting to the following loop and be slightly more asynchronous.
-	for outPoint, resp := range requested {
-		result, err := resp.Receive()
-		if err != nil {
-			return nil, err
-		}
-		script, err := hex.DecodeString(result.ScriptPubKey.Hex)
-		if err != nil {
-			return nil, err
-		}
-		inputs[outPoint] = script
-	}
-
-	// All args collected. Now we can sign all the inputs that we can.
-	// `complete' denotes that we successfully signed all outputs and that
-	// all scripts will run to completion. This is returned as part of the
-	// reply.
-	signErrs, err := w.SignTransaction(&tx, hashType, inputs, keys, scripts)
-	if err != nil {
-		return nil, err
-	}
-
-	var buf bytes.Buffer
-	buf.Grow(tx.SerializeSize())
-
-	// All returned errors (not OOM, which panics) encounted during
-	// bytes.Buffer writes are unexpected.
-	if err = tx.Serialize(&buf); err != nil {
-		panic(err)
-	}
-
-	signErrors := make([]abejson.SignRawTransactionError, 0, len(signErrs))
-	for _, e := range signErrs {
-		input := tx.TxIn[e.InputIndex]
-		signErrors = append(signErrors, abejson.SignRawTransactionError{
-			TxID:      input.PreviousOutPoint.Hash.String(),
-			Vout:      input.PreviousOutPoint.Index,
-			ScriptSig: hex.EncodeToString(input.SignatureScript),
-			Sequence:  input.Sequence,
-			Error:     e.Error.Error(),
-		})
-	}
-
-	return abejson.SignRawTransactionResult{
-		Hex:      hex.EncodeToString(buf.Bytes()),
-		Complete: len(signErrors) == 0,
-		Errors:   signErrors,
-	}, nil
+	return nil, fmt.Errorf("unsupport")
+	//serializedTx, err := decodeHexStr(cmd.RawTx)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//var tx wire.MsgTx
+	//err = tx.Deserialize(bytes.NewBuffer(serializedTx))
+	//if err != nil {
+	//	e := errors.New("TX decode failed")
+	//	return nil, DeserializationError{e}
+	//}
+	//
+	//var hashType txscript.SigHashType
+	//switch *cmd.Flags {
+	//case "ALL":
+	//	hashType = txscript.SigHashAll
+	//case "NONE":
+	//	hashType = txscript.SigHashNone
+	//case "SINGLE":
+	//	hashType = txscript.SigHashSingle
+	//case "ALL|ANYONECANPAY":
+	//	hashType = txscript.SigHashAll | txscript.SigHashAnyOneCanPay
+	//case "NONE|ANYONECANPAY":
+	//	hashType = txscript.SigHashNone | txscript.SigHashAnyOneCanPay
+	//case "SINGLE|ANYONECANPAY":
+	//	hashType = txscript.SigHashSingle | txscript.SigHashAnyOneCanPay
+	//default:
+	//	e := errors.New("Invalid sighash parameter")
+	//	return nil, InvalidParameterError{e}
+	//}
+	//
+	//// TODO: really we probably should look these up with btcd anyway to
+	//// make sure that they match the blockchain if present.
+	//inputs := make(map[wire.OutPoint][]byte)
+	//scripts := make(map[string][]byte)
+	//var cmdInputs []abejson.RawTxInput
+	//if cmd.Inputs != nil {
+	//	cmdInputs = *cmd.Inputs
+	//}
+	//for _, rti := range cmdInputs {
+	//	inputHash, err := chainhash.NewHashFromStr(rti.Txid)
+	//	if err != nil {
+	//		return nil, DeserializationError{err}
+	//	}
+	//
+	//	script, err := decodeHexStr(rti.ScriptPubKey)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//
+	//	// redeemScript is only actually used iff the user provided
+	//	// private keys. In which case, it is used to get the scripts
+	//	// for signing. If the user did not provide keys then we always
+	//	// get scripts from the wallet.
+	//	// Empty strings are ok for this one and hex.DecodeString will
+	//	// DTRT.
+	//	if cmd.PrivKeys != nil && len(*cmd.PrivKeys) != 0 {
+	//		redeemScript, err := decodeHexStr(rti.RedeemScript)
+	//		if err != nil {
+	//			return nil, err
+	//		}
+	//
+	//		addr, err := abeutil.NewAddressScriptHash(redeemScript,
+	//			w.ChainParams())
+	//		if err != nil {
+	//			return nil, DeserializationError{err}
+	//		}
+	//		scripts[addr.String()] = redeemScript
+	//	}
+	//	inputs[wire.OutPoint{
+	//		Hash:  *inputHash,
+	//		Index: rti.Vout,
+	//	}] = script
+	//}
+	//
+	//// Now we go and look for any inputs that we were not provided by
+	//// querying btcd with getrawtransaction. We queue up a bunch of async
+	//// requests and will wait for replies after we have checked the rest of
+	//// the arguments.
+	//requested := make(map[wire.OutPoint]rpcclient.FutureGetTxOutResult)
+	//for _, txIn := range tx.TxIn {
+	//	// Did we get this outpoint from the arguments?
+	//	if _, ok := inputs[txIn.PreviousOutPoint]; ok {
+	//		continue
+	//	}
+	//
+	//	// Asynchronously request the output script.
+	//	requested[txIn.PreviousOutPoint] = chainClient.GetTxOutAsync(
+	//		&txIn.PreviousOutPoint.Hash, txIn.PreviousOutPoint.Index,
+	//		true)
+	//}
+	//
+	//// Parse list of private keys, if present. If there are any keys here
+	//// they are the keys that we may use for signing. If empty we will
+	//// use any keys known to us already.
+	//var keys map[string]*abeutil.WIF
+	//if cmd.PrivKeys != nil {
+	//	keys = make(map[string]*abeutil.WIF)
+	//
+	//	for _, key := range *cmd.PrivKeys {
+	//		wif, err := abeutil.DecodeWIF(key)
+	//		if err != nil {
+	//			return nil, DeserializationError{err}
+	//		}
+	//
+	//		if !wif.IsForNet(w.ChainParams()) {
+	//			s := "key network doesn't match wallet's"
+	//			return nil, DeserializationError{errors.New(s)}
+	//		}
+	//
+	//		addr, err := abeutil.NewAddressPubKey(wif.SerializePubKey(),
+	//			w.ChainParams())
+	//		if err != nil {
+	//			return nil, DeserializationError{err}
+	//		}
+	//		keys[addr.EncodeAddress()] = wif
+	//	}
+	//}
+	//
+	//// We have checked the rest of the args. now we can collect the async
+	//// txs. TODO: If we don't mind the possibility of wasting work we could
+	//// move waiting to the following loop and be slightly more asynchronous.
+	//for outPoint, resp := range requested {
+	//	result, err := resp.Receive()
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	script, err := hex.DecodeString(result.ScriptPubKey.Hex)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	inputs[outPoint] = script
+	//}
+	//
+	//// All args collected. Now we can sign all the inputs that we can.
+	//// `complete' denotes that we successfully signed all outputs and that
+	//// all scripts will run to completion. This is returned as part of the
+	//// reply.
+	//signErrs, err := w.SignTransaction(&tx, hashType, inputs, keys, scripts)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//
+	//var buf bytes.Buffer
+	//buf.Grow(tx.SerializeSize())
+	//
+	//// All returned errors (not OOM, which panics) encounted during
+	//// bytes.Buffer writes are unexpected.
+	//if err = tx.Serialize(&buf); err != nil {
+	//	panic(err)
+	//}
+	//
+	//signErrors := make([]abejson.SignRawTransactionError, 0, len(signErrs))
+	//for _, e := range signErrs {
+	//	input := tx.TxIn[e.InputIndex]
+	//	signErrors = append(signErrors, abejson.SignRawTransactionError{
+	//		TxID:      input.PreviousOutPoint.Hash.String(),
+	//		Vout:      input.PreviousOutPoint.Index,
+	//		ScriptSig: hex.EncodeToString(input.SignatureScript),
+	//		Sequence:  input.Sequence,
+	//		Error:     e.Error.Error(),
+	//	})
+	//}
+	//
+	//return abejson.SignRawTransactionResult{
+	//	Hex:      hex.EncodeToString(buf.Bytes()),
+	//	Complete: len(signErrors) == 0,
+	//	Errors:   signErrors,
+	//}, nil
 }
 
 // validateAddress handles the validateaddress command.

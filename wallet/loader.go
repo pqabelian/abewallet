@@ -97,13 +97,7 @@ func (l *Loader) RunAfterLoad(fn func(*Wallet)) {
 // CreateNewWallet creates a new wallet using the provided public and private
 // passphrases.  The seed is optional.  If non-nil, addresses are derived from
 // this seed.  If nil, a secure random seed is generated.
-func (l *Loader) CreateNewWallet(pubPassphrase, privPassphrase, seed []byte,
-	bday time.Time) (*Wallet, error) {
 
-	return l.createNewWallet(
-		pubPassphrase, privPassphrase, seed, bday, false,
-	)
-}
 func (l *Loader) CreateNewWalletAbe(pubPassphrase, privPassphrase, seed []byte, end uint64,
 	bday time.Time) (*Wallet, error) {
 
@@ -115,67 +109,13 @@ func (l *Loader) CreateNewWalletAbe(pubPassphrase, privPassphrase, seed []byte, 
 // CreateNewWatchingOnlyWallet creates a new wallet using the provided
 // public passphrase.  No seed or private passphrase may be provided
 // since the wallet is watching-only.
-func (l *Loader) CreateNewWatchingOnlyWallet(pubPassphrase []byte,
-	bday time.Time) (*Wallet, error) {
 
-	return l.createNewWallet(
-		pubPassphrase, nil, nil, bday, true,
+func (l *Loader) CreateNewWatchingOnlyWalletAbe(pubPassphrase, privPassphrase,
+	seed []byte, end uint64, bday time.Time, isWatchingOnly bool) (*Wallet, error) {
+
+	return l.createNewWalletAbe(
+		pubPassphrase, privPassphrase, seed, end, bday, true,
 	)
-}
-
-func (l *Loader) createNewWallet(pubPassphrase, privPassphrase,
-	seed []byte, bday time.Time, isWatchingOnly bool) (*Wallet, error) {
-
-	defer l.mu.Unlock()
-	l.mu.Lock()
-
-	if l.wallet != nil {
-		return nil, ErrLoaded
-	}
-
-	dbPath := filepath.Join(l.dbDirPath, walletDbName)
-	exists, err := fileExists(dbPath)
-	if err != nil {
-		return nil, err
-	}
-	if exists {
-		return nil, ErrExists
-	}
-
-	// Create the wallet database backed by bolt db.
-	err = os.MkdirAll(l.dbDirPath, 0700)
-	if err != nil {
-		return nil, err
-	}
-	db, err := walletdb.Create("bdb", dbPath, l.noFreelistSync)
-	if err != nil {
-		return nil, err
-	}
-
-	// Initialize the newly created database for the wallet before opening.
-	if isWatchingOnly {
-		err = CreateWatchingOnly(db, pubPassphrase, l.chainParams, bday)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		err = Create(
-			db, pubPassphrase, privPassphrase, seed, l.chainParams, bday,
-		)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// Open the newly-created wallet.
-	w, err := Open(db, pubPassphrase, nil, l.chainParams, l.recoveryWindow)
-	if err != nil {
-		return nil, err
-	}
-	w.Start()
-
-	l.onLoaded(w, db)
-	return w, nil
 }
 
 //TODO(abe):

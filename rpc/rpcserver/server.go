@@ -390,45 +390,45 @@ func (s *walletServer) SignTransaction(ctx context.Context, req *pb.SignTransact
 	*pb.SignTransactionResponse, error) {
 
 	defer zero.Bytes(req.Passphrase)
-
-	var tx wire.MsgTx
-	err := tx.Deserialize(bytes.NewReader(req.SerializedTransaction))
-	if err != nil {
-		return nil, grpc.Errorf(codes.InvalidArgument,
-			"Bytes do not represent a valid raw transaction: %v", err)
-	}
-
-	lock := make(chan time.Time, 1)
-	defer func() {
-		lock <- time.Time{} // send matters, not the value
-	}()
-	err = s.wallet.Unlock(req.Passphrase, lock)
-	if err != nil {
-		return nil, translateError(err)
-	}
-
-	invalidSigs, err := s.wallet.SignTransaction(&tx, txscript.SigHashAll, nil, nil, nil)
-	if err != nil {
-		return nil, translateError(err)
-	}
-
-	invalidInputIndexes := make([]uint32, len(invalidSigs))
-	for i, e := range invalidSigs {
-		invalidInputIndexes[i] = e.InputIndex
-	}
-
-	var serializedTransaction bytes.Buffer
-	serializedTransaction.Grow(tx.SerializeSize())
-	err = tx.Serialize(&serializedTransaction)
-	if err != nil {
-		return nil, translateError(err)
-	}
-
-	resp := &pb.SignTransactionResponse{
-		Transaction:          serializedTransaction.Bytes(),
-		UnsignedInputIndexes: invalidInputIndexes,
-	}
-	return resp, nil
+	return nil, translateError(fmt.Errorf("unsupport"))
+	//var tx wire.MsgTx
+	//err := tx.Deserialize(bytes.NewReader(req.SerializedTransaction))
+	//if err != nil {
+	//	return nil, grpc.Errorf(codes.InvalidArgument,
+	//		"Bytes do not represent a valid raw transaction: %v", err)
+	//}
+	//
+	//lock := make(chan time.Time, 1)
+	//defer func() {
+	//	lock <- time.Time{} // send matters, not the value
+	//}()
+	//err = s.wallet.Unlock(req.Passphrase, lock)
+	//if err != nil {
+	//	return nil, translateError(err)
+	//}
+	//
+	//invalidSigs, err := s.wallet.SignTransaction(&tx, txscript.SigHashAll, nil, nil, nil)
+	//if err != nil {
+	//	return nil, translateError(err)
+	//}
+	//
+	//invalidInputIndexes := make([]uint32, len(invalidSigs))
+	//for i, e := range invalidSigs {
+	//	invalidInputIndexes[i] = e.InputIndex
+	//}
+	//
+	//var serializedTransaction bytes.Buffer
+	//serializedTransaction.Grow(tx.SerializeSize())
+	//err = tx.Serialize(&serializedTransaction)
+	//if err != nil {
+	//	return nil, translateError(err)
+	//}
+	//
+	//resp := &pb.SignTransactionResponse{
+	//	Transaction:          serializedTransaction.Bytes(),
+	//	UnsignedInputIndexes: invalidInputIndexes,
+	//}
+	//return resp, nil
 }
 
 // BUGS:
@@ -651,20 +651,22 @@ func (s *loaderServer) CreateWallet(ctx context.Context, req *pb.CreateWalletReq
 		pubPassphrase = []byte(wallet.InsecurePubPassphrase)
 	}
 
-	wallet, err := s.loader.CreateNewWallet(
-		pubPassphrase, req.PrivatePassphrase, req.Seed, time.Now(),
-	)
-	if err != nil {
-		return nil, translateError(err)
-	}
-
-	s.mu.Lock()
-	if s.rpcClient != nil {
-		wallet.SynchronizeRPC(s.rpcClient)
-	}
-	s.mu.Unlock()
-
-	return &pb.CreateWalletResponse{}, nil
+	// TODO
+	return nil, translateError(fmt.Errorf("unsupport"))
+	//wallet, err := s.loader.CreateNewWallet(
+	//	pubPassphrase, req.PrivatePassphrase, req.Seed, time.Now(),
+	//)
+	//if err != nil {
+	//	return nil, translateError(err)
+	//}
+	//
+	//s.mu.Lock()
+	//if s.rpcClient != nil {
+	//	wallet.SynchronizeRPC(s.rpcClient)
+	//}
+	//s.mu.Unlock()
+	//
+	//return &pb.CreateWalletResponse{}, nil
 }
 
 //TODO(abe):

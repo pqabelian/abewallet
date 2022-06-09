@@ -326,14 +326,6 @@ const scopeKeySize = 8
 
 // putScopeAddrSchema attempts to store the passed addr scehma for the given
 // manager scope.
-func putPayeeManager(ns walletdb.ReadWriteBucket, name string, p *PayeeManager) error {
-	payeeBucket := ns.NestedReadWriteBucket(payeeBucketName)
-	if payeeBucket == nil {
-		str := fmt.Sprintf("unable to find payee bucket")
-		return managerError(ErrScopeNotFound, str, nil)
-	}
-	return payeeBucket.Put([]byte(name), p.Serialize())
-}
 
 // fetchManagerVersion fetches the current manager version from the database.
 func fetchManagerVersion(ns walletdb.ReadBucket) (uint32, error) {

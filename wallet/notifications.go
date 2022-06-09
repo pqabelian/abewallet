@@ -8,7 +8,6 @@ import (
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abec/wire"
-	"github.com/abesuite/abewallet/waddrmgr"
 	"github.com/abesuite/abewallet/walletdb"
 	"github.com/abesuite/abewallet/wtxmgr"
 )
@@ -68,25 +67,6 @@ func lookupInputAccount(dbtx walletdb.ReadTx, w *Wallet, details *wtxmgr.TxDetai
 }
 
 //lookupOutputChain look up the address chain which idetifies the address which is contained in the credit
-func lookupOutputChain(dbtx walletdb.ReadTx, w *Wallet, details *wtxmgr.TxDetails,
-	cred wtxmgr.CreditRecord) (account uint32, internal bool) {
-
-	addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
-
-	output := details.MsgTx.TxOut[cred.Index]
-	_, addrs, _, err := txscript.ExtractPkScriptAddrs(output.PkScript, w.chainParams)
-	var ma waddrmgr.ManagedAddress
-	if err == nil && len(addrs) > 0 {
-		ma, err = w.Manager.Address(addrmgrNs, addrs[0])
-	}
-	if err != nil {
-		log.Errorf("Cannot fetch account for wallet output: %v", err)
-	} else {
-		account = ma.Account()
-		internal = ma.Internal()
-	}
-	return
-}
 
 func makeTxSummary(dbtx walletdb.ReadTx, w *Wallet, details *wtxmgr.TxDetails) TransactionSummary {
 	serializedTx := details.SerializedTx
@@ -125,11 +105,10 @@ func makeTxSummary(dbtx walletdb.ReadTx, w *Wallet, details *wtxmgr.TxDetails) T
 		if !mine {
 			continue
 		}
-		acct, internal := lookupOutputChain(dbtx, w, details, details.Credits[credIndex])
 		output := TransactionSummaryOutput{
 			Index:    uint32(i),
-			Account:  acct,
-			Internal: internal,
+			Account:  ^uint32(0),
+			Internal: false,
 		}
 		outputs = append(outputs, output)
 	}
@@ -543,25 +522,6 @@ type AccountNotification struct {
 	ExternalKeyCount uint32
 	InternalKeyCount uint32
 	ImportedKeyCount uint32
-}
-
-func (s *NotificationServer) notifyAccountProperties(props *waddrmgr.AccountProperties) {
-	defer s.mu.Unlock()
-	s.mu.Lock()
-	clients := s.accountClients
-	if len(clients) == 0 {
-		return
-	}
-	n := &AccountNotification{
-		AccountNumber:    props.AccountNumber,
-		AccountName:      props.AccountName,
-		ExternalKeyCount: props.ExternalKeyCount,
-		InternalKeyCount: props.InternalKeyCount,
-		ImportedKeyCount: props.ImportedKeyCount,
-	}
-	for _, c := range clients {
-		c <- n
-	}
 }
 
 // AccountNotificationsClient receives AccountNotifications over the channel C.

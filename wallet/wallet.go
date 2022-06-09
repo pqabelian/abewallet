@@ -3,16 +3,13 @@ package wallet
 import (
 	"bytes"
 	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abecrypto"
 	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abec/abejson"
 	"github.com/abesuite/abec/abeutil"
-	"github.com/abesuite/abec/abeutil/hdkeychain"
 	"github.com/abesuite/abec/blockchain"
-	"github.com/abesuite/abec/btcec"
 	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/txscript"
@@ -26,7 +23,6 @@ import (
 	"github.com/abesuite/abewallet/walletdb/migration"
 	"github.com/abesuite/abewallet/wtxmgr"
 	"math"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -992,7 +988,6 @@ out:
 		case req := <-w.changePassphrase:
 			err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 				addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
-				//return w.Manager.ChangePassphrase(
 				return w.ManagerAbe.ChangePassphrase(
 					addrmgrNs, req.old, req.new, req.private,
 					&waddrmgr.DefaultScryptOptions,
@@ -1004,7 +999,6 @@ out:
 		case req := <-w.changePassphrases:
 			err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 				addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
-				//err := w.Manager.ChangePassphrase(
 				err := w.ManagerAbe.ChangePassphrase(
 					addrmgrNs, req.publicOld, req.publicNew,
 					false, &waddrmgr.DefaultScryptOptions,
@@ -1013,7 +1007,7 @@ out:
 					return err
 				}
 
-				return w.Manager.ChangePassphrase(
+				return w.ManagerAbe.ChangePassphrase(
 					addrmgrNs, req.privateOld, req.privateNew,
 					true, &waddrmgr.DefaultScryptOptions,
 				)
@@ -1022,7 +1016,6 @@ out:
 			continue
 
 		case req := <-w.holdUnlockRequests:
-			//if w.Manager.IsLocked() {
 			if w.ManagerAbe.IsLocked() {
 				close(req)
 				continue
@@ -1044,9 +1037,6 @@ out:
 			default:
 				continue
 			}
-		//TODO(abe):replace with manage abe
-		//case w.lockState <- w.Manager.IsLocked():
-		//	continue
 		case w.lockState <- w.ManagerAbe.IsLocked():
 			continue
 
@@ -1387,34 +1377,10 @@ func (w *Wallet) LabelTransaction(hash chainhash.Hash, label string,
 // address.
 
 // HaveAddress returns whether the wallet is the owner of the address a.
-func (w *Wallet) HaveAddress(a abeutil.Address) (bool, error) {
-	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		_, err := w.Manager.Address(addrmgrNs, a)
-		return err
-	})
-	if err == nil {
-		return true, nil
-	}
-	if waddrmgr.IsError(err, waddrmgr.ErrAddressNotFound) {
-		return false, nil
-	}
-	return false, err
-}
 
 // AccountOfAddress finds the account that an address is associated with.
 
 // AddressInfo returns detailed information regarding a wallet address.
-func (w *Wallet) AddressInfo(a abeutil.Address) (waddrmgr.ManagedAddress, error) {
-	var managedAddress waddrmgr.ManagedAddress
-	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		var err error
-		managedAddress, err = w.Manager.Address(addrmgrNs, a)
-		return err
-	})
-	return managedAddress, err
-}
 
 // AccountNumber returns the account number for an account name under a
 // particular key scope.
@@ -1912,19 +1878,9 @@ func (w *Wallet) GetTransactions(startBlock, endBlock *BlockIdentifier, cancel <
 }
 
 // AccountResult is a single account result for the AccountsResult type.
-type AccountResult struct {
-	waddrmgr.AccountProperties
-	TotalBalance abeutil.Amount
-}
 
 // AccountsResult is the resutl of the wallet's Accounts method.  See that
 // method for more details.
-type AccountsResult struct {
-	Accounts           []AccountResult
-	CurrentBlockHash   *chainhash.Hash
-	CurrentBlockHeight int32
-}
-
 // Accounts returns the current names, numbers, and total balances of all
 // accounts in the wallet restricted to a particular key scope.  The current
 // chain tip is included in the result for atomicity reasons.
@@ -2011,132 +1967,6 @@ func (u unspentUTXOSlice) Swap(i, j int) {
 // minconf, less than maxconf and if addresses is populated only the addresses
 // contained within it will be considered.  If we know nothing about a
 // transaction an empty array will be returned.
-func (w *Wallet) ListUnspent(minconf, maxconf int32,
-	addresses map[string]struct{}) ([]*abejson.ListUnspentResult, error) {
-
-	var results []*abejson.ListUnspentResult
-	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
-
-		syncBlock := w.Manager.SyncedTo()
-
-		filter := len(addresses) != 0
-		unspent, err := w.TxStore.UnspentOutputs(txmgrNs)
-		if err != nil {
-			return err
-		}
-		sort.Sort(sort.Reverse(creditSlice(unspent)))
-
-		defaultAccountName := "default"
-
-		results = make([]*abejson.ListUnspentResult, 0, len(unspent))
-		for i := range unspent {
-			output := unspent[i]
-
-			// Outputs with fewer confirmations than the minimum or more
-			// confs than the maximum are excluded.
-			confs := confirms(output.Height, syncBlock.Height)
-			if confs < minconf || confs > maxconf {
-				continue
-			}
-
-			// Only mature coinbase outputs are included.
-			if output.FromCoinBase {
-				target := int32(w.ChainParams().CoinbaseMaturity)
-				if !confirmed(target, output.Height, syncBlock.Height) {
-					continue
-				}
-			}
-
-			// Exclude locked outputs from the result set.
-			if w.LockedOutpoint(output.OutPoint) {
-				continue
-			}
-
-			// Lookup the associated account for the output.  Use the
-			// default account name in case there is no associated account
-			// for some reason, although this should never happen.
-			//
-			// This will be unnecessary once transactions and outputs are
-			// grouped under the associated account in the db.
-			acctName := defaultAccountName
-			sc, addrs, _, err := txscript.ExtractPkScriptAddrs(
-				output.PkScript, w.chainParams)
-			if err != nil {
-				continue
-			}
-
-			if filter {
-				for _, addr := range addrs {
-					_, ok := addresses[addr.EncodeAddress()]
-					if ok {
-						goto include
-					}
-				}
-				continue
-			}
-
-		include:
-			// At the moment watch-only addresses are not supported, so all
-			// recorded outputs that are not multisig are "spendable".
-			// Multisig outputs are only "spendable" if all keys are
-			// controlled by this wallet.
-			//
-			// TODO: Each case will need updates when watch-only addrs
-			// is added.  For P2PK, P2PKH, and P2SH, the address must be
-			// looked up and not be watching-only.  For multisig, all
-			// pubkeys must belong to the manager with the associated
-			// private key (currently it only checks whether the pubkey
-			// exists, since the private key is required at the moment).
-			var spendable bool
-		scSwitch:
-			switch sc {
-			case txscript.PubKeyHashTy:
-				spendable = true
-			case txscript.PubKeyTy:
-				spendable = true
-			case txscript.WitnessV0ScriptHashTy:
-				spendable = true
-			case txscript.WitnessV0PubKeyHashTy:
-				spendable = true
-			case txscript.MultiSigTy:
-				for _, a := range addrs {
-					_, err := w.Manager.Address(addrmgrNs, a)
-					if err == nil {
-						continue
-					}
-					if waddrmgr.IsError(err, waddrmgr.ErrAddressNotFound) {
-						break scSwitch
-					}
-					return err
-				}
-				spendable = true
-			}
-
-			result := &abejson.ListUnspentResult{
-				TxID:          output.OutPoint.Hash.String(),
-				Vout:          output.OutPoint.Index,
-				Account:       acctName,
-				ScriptPubKey:  hex.EncodeToString(output.PkScript),
-				Amount:        output.Amount.ToABE(),
-				Confirmations: int64(confs),
-				Spendable:     spendable,
-			}
-
-			// BUG: this should be a JSON array so that all
-			// addresses can be included, or removed (and the
-			// caller extracts addresses from the pkScript).
-			if len(addrs) > 0 {
-				result.Address = addrs[0].EncodeAddress()
-			}
-
-			results = append(results, result)
-		}
-		return nil
-	})
-	return results, err
-}
 
 // DumpPrivKeys returns the WIF-encoded private keys for all addresses with
 // private keys in a wallet.
@@ -2473,110 +2303,6 @@ type SignatureError struct {
 // being unable to determine a previous output script to redeem.
 //
 // The transaction pointed to by tx is modified by this function.
-func (w *Wallet) SignTransaction(tx *wire.MsgTx, hashType txscript.SigHashType,
-	additionalPrevScripts map[wire.OutPoint][]byte,
-	additionalKeysByAddress map[string]*abeutil.WIF,
-	p2shRedeemScriptsByAddress map[string][]byte) ([]SignatureError, error) {
-
-	var signErrors []SignatureError
-	err := walletdb.View(w.db, func(dbtx walletdb.ReadTx) error {
-		addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
-		txmgrNs := dbtx.ReadBucket(wtxmgrNamespaceKey)
-
-		for i, txIn := range tx.TxIn {
-			prevOutScript, ok := additionalPrevScripts[txIn.PreviousOutPoint]
-			if !ok {
-				prevHash := &txIn.PreviousOutPoint.Hash
-				prevIndex := txIn.PreviousOutPoint.Index
-				txDetails, err := w.TxStore.TxDetails(txmgrNs, prevHash)
-				if err != nil {
-					return fmt.Errorf("cannot query previous transaction "+
-						"details for %v: %v", txIn.PreviousOutPoint, err)
-				}
-				if txDetails == nil {
-					return fmt.Errorf("%v not found",
-						txIn.PreviousOutPoint)
-				}
-				prevOutScript = txDetails.MsgTx.TxOut[prevIndex].PkScript
-			}
-
-			// Set up our callbacks that we pass to txscript so it can
-			// look up the appropriate keys and scripts by address.
-			getKey := txscript.KeyClosure(func(addr abeutil.Address) (*btcec.PrivateKey, bool, error) {
-				if len(additionalKeysByAddress) != 0 {
-					addrStr := addr.EncodeAddress()
-					wif, ok := additionalKeysByAddress[addrStr]
-					if !ok {
-						return nil, false,
-							errors.New("no key for address")
-					}
-					return wif.PrivKey, wif.CompressPubKey, nil
-				}
-				_, err := w.Manager.Address(addrmgrNs, addr)
-				if err != nil {
-					return nil, false, err
-				}
-
-				return nil, false, fmt.Errorf("not support")
-			})
-			getScript := txscript.ScriptClosure(func(addr abeutil.Address) ([]byte, error) {
-				// If keys were provided then we can only use the
-				// redeem scripts provided with our inputs, too.
-				if len(additionalKeysByAddress) != 0 {
-					addrStr := addr.EncodeAddress()
-					script, ok := p2shRedeemScriptsByAddress[addrStr]
-					if !ok {
-						return nil, errors.New("no script for address")
-					}
-					return script, nil
-				}
-				_, err := w.Manager.Address(addrmgrNs, addr)
-				if err != nil {
-					return nil, err
-				}
-
-				return nil, fmt.Errorf("not support")
-			})
-
-			// SigHashSingle inputs can only be signed if there's a
-			// corresponding output. However this could be already signed,
-			// so we always verify the output.
-			if (hashType&txscript.SigHashSingle) !=
-				txscript.SigHashSingle || i < len(tx.TxOut) {
-
-				script, err := txscript.SignTxOutput(w.ChainParams(),
-					tx, i, prevOutScript, hashType, getKey,
-					getScript, txIn.SignatureScript)
-				// Failure to sign isn't an error, it just means that
-				// the tx isn't complete.
-				if err != nil {
-					signErrors = append(signErrors, SignatureError{
-						InputIndex: uint32(i),
-						Error:      err,
-					})
-					continue
-				}
-				txIn.SignatureScript = script
-			}
-
-			// Either it was already signed or we just signed it.
-			// Find out if it is completely satisfied or still needs more.
-			vm, err := txscript.NewEngine(prevOutScript, tx, i,
-				txscript.StandardVerifyFlags, nil, nil, 0)
-			if err == nil {
-				err = vm.Execute()
-			}
-			if err != nil {
-				signErrors = append(signErrors, SignatureError{
-					InputIndex: uint32(i),
-					Error:      err,
-				})
-			}
-		}
-		return nil
-	})
-	return signErrors, err
-}
 
 // ErrDoubleSpend is an error returned from PublishTransaction in case the
 // published transaction failed to propagate since it was double spending a
@@ -2844,13 +2570,6 @@ func (w *Wallet) Database() walletdb.DB {
 // Create creates an new wallet, writing it to an empty database.  If the passed
 // seed is non-nil, it is used.  Otherwise, a secure random seed of the
 // recommended length is generated.
-func Create(db walletdb.DB, pubPass, privPass, seed []byte,
-	params *chaincfg.Params, birthday time.Time) error {
-
-	return create(
-		db, pubPass, privPass, seed, params, birthday, false,
-	)
-}
 
 // TODO(abe):
 func CreateAbe(db walletdb.DB, pubPass, privPass, seed []byte, end uint64,
@@ -2865,13 +2584,6 @@ func CreateAbe(db walletdb.DB, pubPass, privPass, seed []byte, end uint64,
 // an empty database. No seed can be provided as this wallet will be
 // watching only.  Likewise no private passphrase may be provided
 // either.
-func CreateWatchingOnly(db walletdb.DB, pubPass []byte,
-	params *chaincfg.Params, birthday time.Time) error {
-
-	return create(
-		db, pubPass, nil, nil, params, birthday, true,
-	)
-}
 
 //TODO(abe):
 func CreateWatchingOnlyAbe(db walletdb.DB, pubPass []byte,
@@ -2880,50 +2592,6 @@ func CreateWatchingOnlyAbe(db walletdb.DB, pubPass []byte,
 	return createAbe(
 		db, pubPass, nil, nil, 0, params, birthday, true,
 	)
-}
-
-func create(db walletdb.DB, pubPass, privPass, seed []byte,
-	params *chaincfg.Params, birthday time.Time, isWatchingOnly bool) error {
-
-	if !isWatchingOnly {
-		// If a seed was provided, ensure that it is of valid length. Otherwise,
-		// we generate a random seed for the wallet with the recommended seed
-		// length.
-		if seed == nil {
-			//	todo(ABE.MUST): the generation of the seed
-			//	How does ABE generates the seed? By outputting the seed in the process of generating MPK.
-			//	Or generating
-			hdSeed, err := hdkeychain.GenerateSeed(
-				hdkeychain.RecommendedSeedLen)
-			if err != nil {
-				return err
-			}
-			seed = hdSeed
-		}
-		if len(seed) < hdkeychain.MinSeedBytes ||
-			len(seed) > hdkeychain.MaxSeedBytes {
-			return hdkeychain.ErrInvalidSeedLen
-		}
-	}
-
-	return walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
-		addrmgrNs, err := tx.CreateTopLevelBucket(waddrmgrNamespaceKey)
-		if err != nil {
-			return err
-		}
-		txmgrNs, err := tx.CreateTopLevelBucket(wtxmgrNamespaceKey)
-		if err != nil {
-			return err
-		}
-
-		err = waddrmgr.Create(
-			addrmgrNs, seed, pubPass, privPass, params, nil, birthday,
-		)
-		if err != nil {
-			return err
-		}
-		return wtxmgr.Create(txmgrNs)
-	})
 }
 
 // TODO(abe):
