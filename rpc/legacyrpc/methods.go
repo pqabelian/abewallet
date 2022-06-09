@@ -11,7 +11,6 @@ import (
 	"github.com/abesuite/abec/abejson"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abewallet/wallet/txrules"
-	"github.com/abesuite/abewallet/wtxmgr"
 	"sort"
 	"strings"
 	"sync"
@@ -142,7 +141,7 @@ var rpcHandlers = map[string]struct {
 	// well, but with a different API (no account parameter).  It's listed
 	// here because it hasn't been update to use the reference
 	// implemenation's API.
-	"getunconfirmedbalance":   {handler: getUnconfirmedBalance},
+	//"getunconfirmedbalance":   {handler: getUnconfirmedBalance},
 	"listaddresstransactions": {handler: listAddressTransactions},
 	"listalltransactions":     {handler: listAllTransactions},
 	//"renameaccount":           {handler: renameAccount},
@@ -298,38 +297,6 @@ func jsonError(err error) *abejson.RPCError {
 
 // makeMultiSigScript is a helper function to combine common logic for
 // AddMultiSig and CreateMultiSig.
-func makeMultiSigScript(w *wallet.Wallet, keys []string, nRequired int) ([]byte, error) {
-	keysesPrecious := make([]*abeutil.AddressPubKey, len(keys))
-
-	// The address list will made up either of addreseses (pubkey hash), for
-	// which we need to look up the keys in wallet, straight pubkeys, or a
-	// mixture of the two.
-	for i, a := range keys {
-		// try to parse as pubkey address
-		a, err := decodeAddress(a, w.ChainParams())
-		if err != nil {
-			return nil, err
-		}
-
-		switch addr := a.(type) {
-		case *abeutil.AddressPubKey:
-			keysesPrecious[i] = addr
-		default:
-			pubKey, err := w.PubKeyForAddress(addr)
-			if err != nil {
-				return nil, err
-			}
-			pubKeyAddr, err := abeutil.NewAddressPubKey(
-				pubKey.SerializeCompressed(), w.ChainParams())
-			if err != nil {
-				return nil, err
-			}
-			keysesPrecious[i] = pubKeyAddr
-		}
-	}
-
-	return txscript.MultiSigScript(keysesPrecious, nRequired)
-}
 
 // addMultiSigAddress handles an addmultisigaddress request by adding a
 // multisig address to the given wallet.
@@ -343,38 +310,10 @@ func makeMultiSigScript(w *wallet.Wallet, keys []string, nRequired int) ([]byte,
 
 // dumpWallet handles a dumpwallet request by returning  all private
 // keys in a wallet, or an appropiate error if the wallet is locked.
-// TODO: finish this to match bitcoind by writing the dump to a file.
-func dumpWallet(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	keys, err := w.DumpPrivKeys()
-	if waddrmgr.IsError(err, waddrmgr.ErrLocked) {
-		return nil, &ErrWalletUnlockNeeded
-	}
-
-	return keys, err
-}
 
 // getAddressesByAccount handles a getaddressesbyaccount request by returning
 // all addresses for an account, or an error if the requested account does
 // not exist.
-func getAddressesByAccount(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.GetAddressesByAccountCmd)
-
-	account, err := w.AccountNumber(waddrmgr.KeyScopeBIP0044, cmd.Account)
-	if err != nil {
-		return nil, err
-	}
-
-	addrs, err := w.AccountAddresses(account)
-	if err != nil {
-		return nil, err
-	}
-
-	addrStrs := make([]string, len(addrs))
-	for i, a := range addrs {
-		addrStrs[i] = a.EncodeAddress()
-	}
-	return addrStrs, nil
-}
 
 // getBalance handles a getbalance request by returning the balance for an
 // account (wallet), or an error if the requested account does not
@@ -521,24 +460,6 @@ func decodeAddress(s string, params *chaincfg.Params) (abeutil.Address, error) {
 
 // getUnconfirmedBalance handles a getunconfirmedbalance extension request
 // by returning the current unconfirmed balance of an account.
-func getUnconfirmedBalance(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.GetUnconfirmedBalanceCmd)
-
-	acctName := "default"
-	if cmd.Account != nil {
-		acctName = *cmd.Account
-	}
-	account, err := w.AccountNumber(waddrmgr.KeyScopeBIP0044, acctName)
-	if err != nil {
-		return nil, err
-	}
-	bals, err := w.CalculateAccountBalances(account, 1)
-	if err != nil {
-		return nil, err
-	}
-
-	return (bals.Total - bals.Spendable).ToABE(), nil
-}
 
 // importPrivKey handles an importprivkey request by parsing
 // a WIF-encoded private key and adding it to an account.
@@ -561,76 +482,15 @@ func keypoolRefill(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 // error is returned.
 // TODO: Follow BIP 0044 and warn if number of unused addresses exceeds
 // the gap limit.
-func getNewAddress(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.GetNewAddressCmd)
-
-	acctName := "default"
-	if cmd.Account != nil {
-		acctName = *cmd.Account
-	}
-	account, err := w.AccountNumber(waddrmgr.KeyScopeBIP0044, acctName)
-	if err != nil {
-		return nil, err
-	}
-	addr, err := w.NewAddress(account, waddrmgr.KeyScopeBIP0044)
-	if err != nil {
-		return nil, err
-	}
-
-	// Return the new payment address string.
-	return addr.EncodeAddress(), nil
-}
 
 // getRawChangeAddress handles a getrawchangeaddress request by creating
 // and returning a new change address for an account.
 //
 // Note: bitcoind allows specifying the account as an optional parameter,
 // but ignores the parameter.
-func getRawChangeAddress(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.GetRawChangeAddressCmd)
-
-	acctName := "default"
-	if cmd.Account != nil {
-		acctName = *cmd.Account
-	}
-	account, err := w.AccountNumber(waddrmgr.KeyScopeBIP0044, acctName)
-	if err != nil {
-		return nil, err
-	}
-	addr, err := w.NewChangeAddress(account, waddrmgr.KeyScopeBIP0044)
-	if err != nil {
-		return nil, err
-	}
-
-	// Return the new payment address string.
-	return addr.EncodeAddress(), nil
-}
 
 // getReceivedByAccount handles a getreceivedbyaccount request by returning
 // the total amount received by addresses of an account.
-func getReceivedByAccount(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.GetReceivedByAccountCmd)
-
-	account, err := w.AccountNumber(waddrmgr.KeyScopeBIP0044, cmd.Account)
-	if err != nil {
-		return nil, err
-	}
-
-	// TODO: This is more inefficient that it could be, but the entire
-	// algorithm is already dominated by reading every transaction in the
-	// wallet's history.
-	results, err := w.TotalReceivedForAccounts(
-		waddrmgr.KeyScopeBIP0044, int32(*cmd.MinConf),
-	)
-	if err != nil {
-		return nil, err
-	}
-	acctIndex := int(account)
-	if account == waddrmgr.ImportedAddrAccount {
-		acctIndex = len(results) - 1
-	}
-	return results[acctIndex].TotalReceived.ToABE(), nil
-}
 
 // getReceivedByAddress handles a getreceivedbyaddress request by returning
 // the total amount received by a single address.
@@ -651,142 +511,6 @@ func getReceivedByAddress(icmd interface{}, w *wallet.Wallet) (interface{}, erro
 
 // getTransaction handles a gettransaction request by returning details about
 // a single transaction saved by wallet.
-func getTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.GetTransactionCmd)
-
-	txHash, err := chainhash.NewHashFromStr(cmd.Txid)
-	if err != nil {
-		return nil, &abejson.RPCError{
-			Code:    abejson.ErrRPCDecodeHexString,
-			Message: "Transaction hash string decode failed: " + err.Error(),
-		}
-	}
-
-	details, err := wallet.UnstableAPI(w).TxDetails(txHash)
-	if err != nil {
-		return nil, err
-	}
-	if details == nil {
-		return nil, &ErrNoTransactionInfo
-	}
-
-	syncBlock := w.Manager.SyncedTo()
-
-	// TODO: The serialized transaction is already in the DB, so
-	// reserializing can be avoided here.
-	var txBuf bytes.Buffer
-	txBuf.Grow(details.MsgTx.SerializeSize())
-	err = details.MsgTx.Serialize(&txBuf)
-	if err != nil {
-		return nil, err
-	}
-
-	// TODO: Add a "generated" field to this result type.  "generated":true
-	// is only added if the transaction is a coinbase.
-	ret := abejson.GetTransactionResult{
-		TxID:            cmd.Txid,
-		Hex:             hex.EncodeToString(txBuf.Bytes()),
-		Time:            details.Received.Unix(),
-		TimeReceived:    details.Received.Unix(),
-		WalletConflicts: []string{}, // Not saved
-		//Generated:     blockchain.IsCoinBaseTx(&details.MsgTx),
-	}
-
-	if details.Block.Height != -1 {
-		ret.BlockHash = details.Block.Hash.String()
-		ret.BlockTime = details.Block.Time.Unix()
-		ret.Confirmations = int64(confirms(details.Block.Height, syncBlock.Height))
-	}
-
-	var (
-		debitTotal  abeutil.Amount
-		creditTotal abeutil.Amount // Excludes change
-		fee         abeutil.Amount
-		feeF64      float64
-	)
-	for _, deb := range details.Debits {
-		debitTotal += deb.Amount
-	}
-	for _, cred := range details.Credits {
-		if !cred.Change {
-			creditTotal += cred.Amount
-		}
-	}
-	// Fee can only be determined if every input is a debit.
-	if len(details.Debits) == len(details.MsgTx.TxIn) {
-		var outputTotal abeutil.Amount
-		for _, output := range details.MsgTx.TxOut {
-			outputTotal += abeutil.Amount(output.Value)
-		}
-		fee = debitTotal - outputTotal
-		//feeF64 = fee.ToBTC()
-		feeF64 = fee.ToABE()
-	}
-
-	if len(details.Debits) == 0 {
-		// Credits must be set later, but since we know the full length
-		// of the details slice, allocate it with the correct cap.
-		ret.Details = make([]abejson.GetTransactionDetailsResult, 0, len(details.Credits))
-	} else {
-		ret.Details = make([]abejson.GetTransactionDetailsResult, 1, len(details.Credits)+1)
-
-		ret.Details[0] = abejson.GetTransactionDetailsResult{
-			// Fields left zeroed:
-			//   InvolvesWatchOnly
-			//   Account
-			//   Address
-			//   Vout
-			//
-			// TODO(jrick): Address and Vout should always be set,
-			// but we're doing the wrong thing here by not matching
-			// core.  Instead, gettransaction should only be adding
-			// details for transaction outputs, just like
-			// listtransactions (but using the short result format).
-			Category: "send",
-			Amount:   (-debitTotal).ToABE(), // negative since it is a send
-			Fee:      &feeF64,
-		}
-		ret.Fee = feeF64
-	}
-
-	credCat := wallet.RecvCategory(details, syncBlock.Height, w.ChainParams()).String()
-	for _, cred := range details.Credits {
-		// Change is ignored.
-		if cred.Change {
-			continue
-		}
-
-		var address string
-		var accountName string
-		_, addrs, _, err := txscript.ExtractPkScriptAddrs(
-			details.MsgTx.TxOut[cred.Index].PkScript, w.ChainParams())
-		if err == nil && len(addrs) == 1 {
-			addr := addrs[0]
-			address = addr.EncodeAddress()
-			account, err := w.AccountOfAddress(addr)
-			if err == nil {
-				name, err := w.AccountName(waddrmgr.KeyScopeBIP0044, account)
-				if err == nil {
-					accountName = name
-				}
-			}
-		}
-
-		ret.Details = append(ret.Details, abejson.GetTransactionDetailsResult{
-			// Fields left zeroed:
-			//   InvolvesWatchOnly
-			//   Fee
-			Account:  accountName,
-			Address:  address,
-			Category: credCat,
-			Amount:   cred.Amount.ToABE(),
-			Vout:     cred.Index,
-		})
-	}
-
-	ret.Amount = creditTotal.ToABE()
-	return ret, nil
-}
 
 // These generators create the following global variables in this package:
 //
@@ -910,21 +634,6 @@ func help(icmd interface{}, w *wallet.Wallet, chainClient *chain.RPCClient) (int
 
 // listAccounts handles a listaccounts request by returning a map of account
 // names to their balances.
-func listAccounts(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.ListAccountsCmd)
-
-	accountBalances := map[string]float64{}
-	results, err := w.AccountBalances(waddrmgr.KeyScopeBIP0044, int32(*cmd.MinConf))
-	if err != nil {
-		return nil, err
-	}
-	for _, result := range results {
-		//accountBalances[result.AccountName] = result.AccountBalance.ToBTC()
-		accountBalances[result.AccountName] = result.AccountBalance.ToABE()
-	}
-	// Return the map.  This will be marshaled into a JSON object.
-	return accountBalances, nil
-}
 
 // listLockUnspent handles a listlockunspent request by returning an slice of
 // all locked outpoints.
@@ -942,26 +651,6 @@ func listLockUnspent(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 //             default: one;
 //  "includeempty": whether or not to include addresses that have no transactions -
 //                  default: false.
-func listReceivedByAccount(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.ListReceivedByAccountCmd)
-
-	results, err := w.TotalReceivedForAccounts(
-		waddrmgr.KeyScopeBIP0044, int32(*cmd.MinConf),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	jsonResults := make([]abejson.ListReceivedByAccountResult, 0, len(results))
-	for _, result := range results {
-		jsonResults = append(jsonResults, abejson.ListReceivedByAccountResult{
-			Account:       result.AccountName,
-			Amount:        result.TotalReceived.ToABE(),
-			Confirmations: uint64(result.LastConfirmation),
-		})
-	}
-	return jsonResults, nil
-}
 
 // listReceivedByAddress handles a listreceivedbyaddress request by returning
 // a slice of objects, each one containing:
@@ -974,93 +663,6 @@ func listReceivedByAccount(icmd interface{}, w *wallet.Wallet) (interface{}, err
 //             default: one;
 //  "includeempty": whether or not to include addresses that have no transactions -
 //                  default: false.
-func listReceivedByAddress(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.ListReceivedByAddressCmd)
-
-	// Intermediate data for each address.
-	type AddrData struct {
-		// Total amount received.
-		amount abeutil.Amount
-		// Number of confirmations of the last transaction.
-		confirmations int32
-		// Hashes of transactions which include an output paying to the address
-		tx []string
-		// Account which the address belongs to
-		account string
-	}
-
-	syncBlock := w.Manager.SyncedTo()
-
-	// Intermediate data for all addresses.
-	allAddrData := make(map[string]AddrData)
-	// Create an AddrData entry for each active address in the account.
-	// Otherwise we'll just get addresses from transactions later.
-	sortedAddrs, err := w.SortedActivePaymentAddresses()
-	if err != nil {
-		return nil, err
-	}
-	for _, address := range sortedAddrs {
-		// There might be duplicates, just overwrite them.
-		allAddrData[address] = AddrData{}
-	}
-
-	minConf := *cmd.MinConf
-	var endHeight int32
-	if minConf == 0 {
-		endHeight = -1
-	} else {
-		endHeight = syncBlock.Height - int32(minConf) + 1
-	}
-	err = wallet.UnstableAPI(w).RangeTransactions(0, endHeight, func(details []wtxmgr.TxDetails) (bool, error) {
-		confirmations := confirms(details[0].Block.Height, syncBlock.Height)
-		for _, tx := range details {
-			for _, cred := range tx.Credits {
-				pkScript := tx.MsgTx.TxOut[cred.Index].PkScript
-				_, addrs, _, err := txscript.ExtractPkScriptAddrs(
-					pkScript, w.ChainParams())
-				if err != nil {
-					// Non standard script, skip.
-					continue
-				}
-				for _, addr := range addrs {
-					addrStr := addr.EncodeAddress()
-					addrData, ok := allAddrData[addrStr]
-					if ok {
-						addrData.amount += cred.Amount
-						// Always overwrite confirmations with newer ones.
-						addrData.confirmations = confirmations
-					} else {
-						addrData = AddrData{
-							amount:        cred.Amount,
-							confirmations: confirmations,
-						}
-					}
-					addrData.tx = append(addrData.tx, tx.Hash.String())
-					allAddrData[addrStr] = addrData
-				}
-			}
-		}
-		return false, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Massage address data into output format.
-	numAddresses := len(allAddrData)
-	ret := make([]abejson.ListReceivedByAddressResult, numAddresses, numAddresses)
-	idx := 0
-	for address, addrData := range allAddrData {
-		ret[idx] = abejson.ListReceivedByAddressResult{
-			Address:       address,
-			Amount:        addrData.amount.ToABE(),
-			Confirmations: uint64(addrData.confirmations),
-			TxIDs:         addrData.tx,
-		}
-		idx++
-	}
-	return ret, nil
-}
 
 // listSinceBlock handles a listsinceblock request by returning an array of maps
 // with details of sent and received wallet transactions since the given block.
@@ -1751,31 +1353,6 @@ func setTxFee(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 
 // signMessage signs the given message with the private key for the given
 // address
-func signMessage(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.SignMessageCmd)
-
-	addr, err := decodeAddress(cmd.Address, w.ChainParams())
-	if err != nil {
-		return nil, err
-	}
-
-	privKey, err := w.PrivKeyForAddress(addr)
-	if err != nil {
-		return nil, err
-	}
-
-	var buf bytes.Buffer
-	wire.WriteVarString(&buf, 0, "Bitcoin Signed Message:\n")
-	wire.WriteVarString(&buf, 0, cmd.Message)
-	messageHash := chainhash.DoubleHashB(buf.Bytes())
-	sigbytes, err := btcec.SignCompact(btcec.S256(), privKey,
-		messageHash, true)
-	if err != nil {
-		return nil, err
-	}
-
-	return base64.StdEncoding.EncodeToString(sigbytes), nil
-}
 
 // signRawTransaction handles the signrawtransaction command.
 func signRawTransaction(icmd interface{}, w *wallet.Wallet, chainClient *chain.RPCClient) (interface{}, error) {

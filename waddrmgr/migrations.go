@@ -19,10 +19,6 @@ var versions = []migration.Version{
 		Migration: upgradeToVersion2,
 	},
 	{
-		Number:    5,
-		Migration: upgradeToVersion5,
-	},
-	{
 		Number:    6,
 		Migration: populateBirthdayBlock,
 	},
@@ -122,119 +118,6 @@ func upgradeToVersion2(ns walletdb.ReadWriteBucket) error {
 // to the fact that in version 5, we now store the encrypted master private
 // keys on disk. However, using the BIP0044 key scope, users will still be able
 // to create old p2pkh addresses.
-func upgradeToVersion5(ns walletdb.ReadWriteBucket) error {
-	// First, we'll check if there are any existing segwit addresses, which
-	// can't be upgraded to the new version. If so, we abort and warn the
-	// user.
-	err := ns.NestedReadBucket(addrBucketName).ForEach(
-		func(k []byte, v []byte) error {
-			row, err := deserializeAddressRow(v)
-			if err != nil {
-				return err
-			}
-			if row.addrType > adtScript {
-				return fmt.Errorf("segwit address exists in " +
-					"wallet, can't upgrade from v4 to " +
-					"v5: well, we tried  ¯\\_(ツ)_/¯")
-			}
-			return nil
-		})
-	if err != nil {
-		return err
-	}
-
-	// Next, we'll write out the new database version.
-	if err := putManagerVersion(ns, 5); err != nil {
-		return err
-	}
-
-	// First, we'll need to create the new buckets that are used in the new
-	// database version.
-	scopeBucket, err := ns.CreateBucket(scopeBucketName)
-	if err != nil {
-		str := "failed to create scope bucket"
-		return managerError(ErrDatabase, str, err)
-	}
-	scopeSchemas, err := ns.CreateBucket(scopeSchemaBucketName)
-	if err != nil {
-		str := "failed to create scope schema bucket"
-		return managerError(ErrDatabase, str, err)
-	}
-
-	// With the buckets created, we can now create the default BIP0044
-	// scope which will be the only scope usable in the database after this
-	// update.
-	scopeKey := scopeToBytes(&KeyScopeBIP0044)
-	scopeSchema := ScopeAddrMap[KeyScopeBIP0044]
-	schemaBytes := scopeSchemaToBytes(&scopeSchema)
-	if err := scopeSchemas.Put(scopeKey[:], schemaBytes); err != nil {
-		return err
-	}
-	if err := createScopedManagerNS(scopeBucket, &KeyScopeBIP0044); err != nil {
-		return err
-	}
-
-	bip44Bucket := scopeBucket.NestedReadWriteBucket(scopeKey[:])
-
-	// With the buckets created, we now need to port over *each* item in
-	// the prior main bucket, into the new default scope.
-	mainBucket := ns.NestedReadWriteBucket(mainBucketName)
-
-	// First, we'll move over the encrypted coin type private and public
-	// keys to the new sub-bucket.
-	encCoinPrivKeys := mainBucket.Get(coinTypePrivKeyName)
-	encCoinPubKeys := mainBucket.Get(coinTypePubKeyName)
-
-	err = bip44Bucket.Put(coinTypePrivKeyName, encCoinPrivKeys)
-	if err != nil {
-		return err
-	}
-	err = bip44Bucket.Put(coinTypePubKeyName, encCoinPubKeys)
-	if err != nil {
-		return err
-	}
-
-	if err := mainBucket.Delete(coinTypePrivKeyName); err != nil {
-		return err
-	}
-	if err := mainBucket.Delete(coinTypePubKeyName); err != nil {
-		return err
-	}
-
-	// Next, we'll move over everything that was in the meta bucket to the
-	// meta bucket within the new scope.
-	metaBucket := ns.NestedReadWriteBucket(metaBucketName)
-	lastAccount := metaBucket.Get(lastAccountName)
-	if err := metaBucket.Delete(lastAccountName); err != nil {
-		return err
-	}
-
-	scopedMetaBucket := bip44Bucket.NestedReadWriteBucket(metaBucketName)
-	err = scopedMetaBucket.Put(lastAccountName, lastAccount)
-	if err != nil {
-		return err
-	}
-
-	// Finally, we'll recursively move over a set of keys which were
-	// formerly under the main bucket, into the new scoped buckets. We'll
-	// do so by obtaining a slice of all the keys that we need to modify
-	// and then recursing through each of them, moving both nested buckets
-	// and key/value pairs.
-	keysToMigrate := [][]byte{
-		acctBucketName, addrBucketName, usedAddrBucketName,
-		addrAcctIdxBucketName, acctNameIdxBucketName, acctIDIdxBucketName,
-	}
-
-	// Migrate each bucket recursively.
-	for _, bucketKey := range keysToMigrate {
-		err := migrateRecursively(ns, bip44Bucket, bucketKey)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
 
 // migrateRecursively moves a nested bucket from one bucket to another,
 // recursing into nested buckets as required.

@@ -3,6 +3,7 @@ package rpcserver
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -147,49 +148,17 @@ func (s *walletServer) Network(ctx context.Context, req *pb.NetworkRequest) (
 func (s *walletServer) AccountNumber(ctx context.Context, req *pb.AccountNumberRequest) (
 	*pb.AccountNumberResponse, error) {
 
-	accountNum, err := s.wallet.AccountNumber(waddrmgr.KeyScopeBIP0044, req.AccountName)
-	if err != nil {
-		return nil, translateError(err)
-	}
-
-	return &pb.AccountNumberResponse{AccountNumber: accountNum}, nil
+	return nil, fmt.Errorf("unsupport")
 }
 
 func (s *walletServer) Accounts(ctx context.Context, req *pb.AccountsRequest) (
 	*pb.AccountsResponse, error) {
-
-	resp, err := s.wallet.Accounts(waddrmgr.KeyScopeBIP0044)
-	if err != nil {
-		return nil, translateError(err)
-	}
-	accounts := make([]*pb.AccountsResponse_Account, len(resp.Accounts))
-	for i := range resp.Accounts {
-		a := &resp.Accounts[i]
-		accounts[i] = &pb.AccountsResponse_Account{
-			AccountNumber:    a.AccountNumber,
-			AccountName:      a.AccountName,
-			TotalBalance:     int64(a.TotalBalance),
-			ExternalKeyCount: a.ExternalKeyCount,
-			InternalKeyCount: a.InternalKeyCount,
-			ImportedKeyCount: a.ImportedKeyCount,
-		}
-	}
-	return &pb.AccountsResponse{
-		Accounts:           accounts,
-		CurrentBlockHash:   resp.CurrentBlockHash[:],
-		CurrentBlockHeight: resp.CurrentBlockHeight,
-	}, nil
+	return nil, fmt.Errorf("unsupport")
 }
 
 func (s *walletServer) RenameAccount(ctx context.Context, req *pb.RenameAccountRequest) (
 	*pb.RenameAccountResponse, error) {
-
-	err := s.wallet.RenameAccount(waddrmgr.KeyScopeBIP0044, req.AccountNumber, req.NewName)
-	if err != nil {
-		return nil, translateError(err)
-	}
-
-	return &pb.RenameAccountResponse{}, nil
+	return nil, fmt.Errorf("unsupport")
 }
 
 func (s *walletServer) NextAccount(ctx context.Context, req *pb.NextAccountRequest) (
@@ -209,35 +178,12 @@ func (s *walletServer) NextAccount(ctx context.Context, req *pb.NextAccountReque
 	if err != nil {
 		return nil, translateError(err)
 	}
-
-	account, err := s.wallet.NextAccount(waddrmgr.KeyScopeBIP0044, req.AccountName)
-	if err != nil {
-		return nil, translateError(err)
-	}
-
-	return &pb.NextAccountResponse{AccountNumber: account}, nil
+	return nil, grpc.Errorf(codes.Canceled, "unsupport")
 }
 
 func (s *walletServer) NextAddress(ctx context.Context, req *pb.NextAddressRequest) (
 	*pb.NextAddressResponse, error) {
-
-	var (
-		addr abeutil.Address
-		err  error
-	)
-	switch req.Kind {
-	case pb.NextAddressRequest_BIP0044_EXTERNAL:
-		addr, err = s.wallet.NewAddress(req.Account, waddrmgr.KeyScopeBIP0044)
-	case pb.NextAddressRequest_BIP0044_INTERNAL:
-		addr, err = s.wallet.NewChangeAddress(req.Account, waddrmgr.KeyScopeBIP0044)
-	default:
-		return nil, grpc.Errorf(codes.InvalidArgument, "kind=%v", req.Kind)
-	}
-	if err != nil {
-		return nil, translateError(err)
-	}
-
-	return &pb.NextAddressResponse{Address: addr.EncodeAddress()}, nil
+	return nil, grpc.Errorf(codes.Canceled, "unsupport", req.Kind)
 }
 
 func (s *walletServer) ImportPrivateKey(ctx context.Context, req *pb.ImportPrivateKeyRequest) (
@@ -267,7 +213,7 @@ func (s *walletServer) ImportPrivateKey(ctx context.Context, req *pb.ImportPriva
 			"Only the imported account accepts private key imports")
 	}
 
-	_, err = s.wallet.ImportPrivateKey(waddrmgr.KeyScopeBIP0044, wif, nil, req.Rescan)
+	_, err = s.wallet.ImportPrivateKey(wif, nil, req.Rescan)
 	if err != nil {
 		return nil, translateError(err)
 	}
@@ -278,21 +224,7 @@ func (s *walletServer) ImportPrivateKey(ctx context.Context, req *pb.ImportPriva
 func (s *walletServer) Balance(ctx context.Context, req *pb.BalanceRequest) (
 	*pb.BalanceResponse, error) {
 
-	account := req.AccountNumber
-	reqConfs := req.RequiredConfirmations
-	bals, err := s.wallet.CalculateAccountBalances(account, reqConfs)
-	if err != nil {
-		return nil, translateError(err)
-	}
-
-	// TODO: Spendable currently includes multisig outputs that may not
-	// actually be spendable without additional keys.
-	resp := &pb.BalanceResponse{
-		Total:          int64(bals.Total),
-		Spendable:      int64(bals.Spendable),
-		ImmatureReward: int64(bals.ImmatureReward),
-	}
-	return resp, nil
+	return nil, fmt.Errorf("not support now")
 }
 
 // confirmed checks whether a transaction at height txHeight has met minconf
@@ -345,7 +277,8 @@ func (s *walletServer) FundTransaction(ctx context.Context, req *pb.FundTransact
 
 	var changeScript []byte
 	if req.IncludeChangeScript && totalAmount > abeutil.Amount(req.TargetAmount) {
-		changeAddr, err := s.wallet.NewChangeAddress(req.Account, waddrmgr.KeyScopeBIP0044)
+		// TODO: this method is not support by abelian
+		var changeAddr abeutil.Address
 		if err != nil {
 			return nil, translateError(err)
 		}

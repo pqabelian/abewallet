@@ -7,7 +7,6 @@ import (
 	"github.com/abesuite/abec/abecrypto"
 	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abec/abeutil"
-	"github.com/abesuite/abec/btcec"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abec/wire"
@@ -203,44 +202,6 @@ func makeInputSource(eligible []wtxmgr.Credit) txauthor.InputSource {
 
 // secretSource is an implementation of txauthor.SecretSource for the wallet's
 // address manager.
-type secretSource struct {
-	*waddrmgr.Manager
-	addrmgrNs walletdb.ReadBucket
-}
-
-func (s secretSource) GetKey(addr abeutil.Address) (*btcec.PrivateKey, bool, error) {
-	ma, err := s.Address(s.addrmgrNs, addr)
-	if err != nil {
-		return nil, false, err
-	}
-
-	mpka, ok := ma.(waddrmgr.ManagedPubKeyAddress)
-	if !ok {
-		e := fmt.Errorf("managed address type for %v is `%T` but "+
-			"want waddrmgr.ManagedPubKeyAddress", addr, ma)
-		return nil, false, e
-	}
-	privKey, err := mpka.PrivKey()
-	if err != nil {
-		return nil, false, err
-	}
-	return privKey, ma.Compressed(), nil
-}
-
-func (s secretSource) GetScript(addr abeutil.Address) ([]byte, error) {
-	ma, err := s.Address(s.addrmgrNs, addr)
-	if err != nil {
-		return nil, err
-	}
-
-	msa, ok := ma.(waddrmgr.ManagedScriptAddress)
-	if !ok {
-		e := fmt.Errorf("managed address type for %v is `%T` but "+
-			"want waddrmgr.ManagedScriptAddress", addr, ma)
-		return nil, e
-	}
-	return msa.Script()
-}
 
 //type secretSourceAbe struct {
 //	*waddrmgr.ManagerAbe
@@ -289,116 +250,7 @@ func (s secretSource) GetScript(addr abeutil.Address) ([]byte, error) {
 // NOTE: The dryRun argument can be set true to create a tx that doesn't alter
 // the database. A tx created with this set to true will intentionally have no
 // input scripts added and SHOULD NOT be broadcasted.
-//	todo(ABE.2)
-func (w *Wallet) txToOutputs(outputs []*wire.TxOut, account uint32,
-	minconf int32, feeSatPerKb abeutil.Amount, dryRun bool) (
-	tx *txauthor.AuthoredTx, err error) {
 
-	chainClient, err := w.requireChainClient()
-	if err != nil {
-		return nil, err
-	}
-
-	dbtx, err := w.db.BeginReadWriteTx()
-	if err != nil {
-		return nil, err
-	}
-	defer dbtx.Rollback()
-
-	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
-
-	// Get current block's height and hash.
-	bs, err := chainClient.BlockStamp()
-	if err != nil {
-		return nil, err
-	}
-
-	eligible, err := w.findEligibleOutputs(dbtx, account, minconf, bs)
-	if err != nil {
-		return nil, err
-	}
-
-	inputSource := makeInputSource(eligible)
-	changeSource := func() ([]byte, error) {
-		// Derive the change output script. We'll use the default key
-		// scope responsible for P2WPKH addresses to do so. As a hack to
-		// allow spending from the imported account, change addresses
-		// are created from account 0.
-		var changeAddr abeutil.Address
-		var err error
-		changeKeyScope := waddrmgr.KeyScopeBIP0084
-		if account == waddrmgr.ImportedAddrAccount {
-			changeAddr, err = w.newChangeAddress(
-				addrmgrNs, 0, changeKeyScope,
-			)
-		} else {
-			changeAddr, err = w.newChangeAddress(
-				addrmgrNs, account, changeKeyScope,
-			)
-		}
-		if err != nil {
-			return nil, err
-		}
-		return txscript.PayToAddrScript(changeAddr)
-	}
-	tx, err = txauthor.NewUnsignedTransaction(outputs, feeSatPerKb,
-		inputSource, changeSource)
-	if err != nil {
-		return nil, err
-	}
-
-	// Randomize change position, if change exists, before signing.  This
-	// doesn't affect the serialize size, so the change amount will still
-	// be valid.
-	if tx.ChangeIndex >= 0 {
-		tx.RandomizeChangePosition()
-	}
-
-	// If a dry run was requested, we return now before adding the input
-	// scripts, and don't commit the database transaction. The DB will be
-	// rolled back when this method returns to ensure the dry run didn't
-	// alter the DB in any way.
-	if dryRun {
-		return tx, nil
-	}
-
-	err = tx.AddAllInputScripts(secretSource{w.Manager, addrmgrNs})
-	if err != nil {
-		return nil, err
-	}
-
-	//	todo(ABE): Is this necessary?
-	err = validateMsgTx(tx.Tx, tx.PrevScripts, tx.PrevInputValues)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := dbtx.Commit(); err != nil {
-		return nil, err
-	}
-
-	if tx.ChangeIndex >= 0 && account == waddrmgr.ImportedAddrAccount {
-		changeAmount := abeutil.Amount(tx.Tx.TxOut[tx.ChangeIndex].Value)
-		log.Warnf("Spend from imported account produced change: moving"+
-			" %v from imported account into default account.", changeAmount)
-	}
-
-	// Finally, we'll request the backend to notify us of the transaction
-	// that pays to the change address, if there is one, when it confirms.
-	if tx.ChangeIndex >= 0 {
-		changePkScript := tx.Tx.TxOut[tx.ChangeIndex].PkScript
-		_, _, _, err := txscript.ExtractPkScriptAddrs(
-			changePkScript, w.chainParams,
-		)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return tx, nil
-}
-
-// TODO(abe): compute the transaction fee
 //func (w *Wallet) txAbeToOutputs(txOutDescs []*abepqringct.AbeTxOutDesc, minconf int32, feeSatPerKb abeutil.Amount, dryRun bool) (
 //	unsignedTx *txauthor.AuthoredTxAbe, err error) {
 //
@@ -1106,61 +958,6 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 	////}
 	//
 	//return tx, nil
-}
-
-func (w *Wallet) findEligibleOutputs(dbtx walletdb.ReadTx, account uint32, minconf int32, bs *waddrmgr.BlockStamp) ([]wtxmgr.Credit, error) {
-	addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
-	txmgrNs := dbtx.ReadBucket(wtxmgrNamespaceKey)
-
-	unspent, err := w.TxStore.UnspentOutputs(txmgrNs)
-	if err != nil {
-		return nil, err
-	}
-
-	// TODO: Eventually all of these filters (except perhaps output locking)
-	// should be handled by the call to UnspentOutputs (or similar).
-	// Because one of these filters requires matching the output script to
-	// the desired account, this change depends on making wtxmgr a waddrmgr
-	// dependancy and requesting unspent outputs for a single account.
-	eligible := make([]wtxmgr.Credit, 0, len(unspent))
-	for i := range unspent {
-		output := &unspent[i]
-
-		// Only include this output if it meets the required number of
-		// confirmations.  Coinbase transactions must have have reached
-		// maturity before their outputs may be spent.
-		if !confirmed(minconf, output.Height, bs.Height) {
-			continue
-		}
-		if output.FromCoinBase {
-			target := int32(w.chainParams.CoinbaseMaturity)
-			if !confirmed(target, output.Height, bs.Height) {
-				continue
-			}
-		}
-
-		// Locked unspent outputs are skipped.
-		if w.LockedOutpoint(output.OutPoint) {
-			continue
-		}
-
-		// Only include the output if it is associated with the passed
-		// account.
-		//
-		// TODO: Handle multisig outputs by determining if enough of the
-		// addresses are controlled.
-		_, addrs, _, err := txscript.ExtractPkScriptAddrs(
-			output.PkScript, w.chainParams)
-		if err != nil || len(addrs) != 1 {
-			continue
-		}
-		_, addrAcct, err := w.Manager.AddrAccount(addrmgrNs, addrs[0])
-		if err != nil || addrAcct != account {
-			continue
-		}
-		eligible = append(eligible, *output)
-	}
-	return eligible, nil
 }
 
 // TODO(abe):we should request the unspent transaction output from tx manager

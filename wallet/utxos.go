@@ -22,7 +22,7 @@ func (p *OutputSelectionPolicy) meetsRequiredConfs(txHeight, curHeight int32) bo
 func (w *Wallet) UnspentOutputs(policy OutputSelectionPolicy) ([]*TransactionOutput, error) {
 	var outputResults []*TransactionOutput
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+		//addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 
 		syncBlock := w.Manager.SyncedTo()
@@ -49,13 +49,6 @@ func (w *Wallet) UnspentOutputs(policy OutputSelectionPolicy) ([]*TransactionOut
 				// to without a valid address.  TODO: Fix this
 				// by saving outputs per account, or accounts
 				// per output.
-				continue
-			}
-			_, outputAcct, err := w.Manager.AddrAccount(addrmgrNs, addrs[0])
-			if err != nil {
-				return err
-			}
-			if outputAcct != policy.Account {
 				continue
 			}
 

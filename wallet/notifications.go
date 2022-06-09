@@ -45,7 +45,7 @@ func newNotificationServer(wallet *Wallet) *NotificationServer {
 
 // lookupInputAccount look up the account which contain the address in the output the debit pointing to
 func lookupInputAccount(dbtx walletdb.ReadTx, w *Wallet, details *wtxmgr.TxDetails, deb wtxmgr.DebitRecord) uint32 {
-	addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
+	//addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
 	txmgrNs := dbtx.ReadBucket(wtxmgrNamespaceKey)
 
 	// TODO: Debits should record which account(s?) they
@@ -61,17 +61,12 @@ func lookupInputAccount(dbtx walletdb.ReadTx, w *Wallet, details *wtxmgr.TxDetai
 		return 0
 	}
 	prevOut := prev.MsgTx.TxOut[prevOP.Index]
-	_, addrs, _, err := txscript.ExtractPkScriptAddrs(prevOut.PkScript, w.chainParams)
+	_, _, _, err = txscript.ExtractPkScriptAddrs(prevOut.PkScript, w.chainParams)
 	var inputAcct uint32
-	if err == nil && len(addrs) > 0 {
-		_, inputAcct, err = w.Manager.AddrAccount(addrmgrNs, addrs[0])
-	}
-	if err != nil {
-		log.Errorf("Cannot fetch account for previous output %v: %v", prevOP, err)
-		inputAcct = 0
-	}
+	// TODO delete it
 	return inputAcct
 }
+
 //lookupOutputChain look up the address chain which idetifies the address which is contained in the credit
 func lookupOutputChain(dbtx walletdb.ReadTx, w *Wallet, details *wtxmgr.TxDetails,
 	cred wtxmgr.CreditRecord) (account uint32, internal bool) {
@@ -150,26 +145,6 @@ func makeTxSummary(dbtx walletdb.ReadTx, w *Wallet, details *wtxmgr.TxDetails) T
 }
 
 func totalBalances(dbtx walletdb.ReadTx, w *Wallet, m map[uint32]abeutil.Amount) error {
-	addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
-	unspent, err := w.TxStore.UnspentOutputs(dbtx.ReadBucket(wtxmgrNamespaceKey))
-	if err != nil {
-		return err
-	}
-	for i := range unspent {
-		output := &unspent[i]
-		var outputAcct uint32
-		_, addrs, _, err := txscript.ExtractPkScriptAddrs(
-			output.PkScript, w.chainParams)
-		if err == nil && len(addrs) > 0 {
-			_, outputAcct, err = w.Manager.AddrAccount(addrmgrNs, addrs[0])
-		}
-		if err == nil {
-			_, ok := m[outputAcct]
-			if ok {
-				m[outputAcct] += output.Amount
-			}
-		}
-	}
 	return nil
 }
 
