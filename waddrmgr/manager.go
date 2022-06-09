@@ -371,8 +371,6 @@ func (m *Manager) lock() {
 			switch addr := ma.(type) {
 			case *managedAddress:
 				addr.lock()
-			case *scriptAddress:
-				addr.lock()
 			}
 		}
 	}
@@ -1015,9 +1013,6 @@ func (m *Manager) ConvertToWatchingOnly(ns walletdb.ReadWriteBucket) error {
 			case *managedAddress:
 				zero.Bytes(addr.privKeyEncrypted)
 				addr.privKeyEncrypted = nil
-			case *scriptAddress:
-				zero.Bytes(addr.scriptEncrypted)
-				addr.scriptEncrypted = nil
 			}
 		}
 	}
@@ -1192,7 +1187,6 @@ func (m *Manager) Unlock(ns walletdb.ReadBucket, passphrase []byte) error {
 			case *managedAddress:
 				a.privKeyEncrypted = privKeyEncrypted
 				a.privKeyCT = privKeyBytes
-			case *scriptAddress:
 			}
 
 			// Avoid re-deriving this key on subsequent unlocks.

@@ -542,16 +542,6 @@ func (s *ScopedKeyManager) importedAddressRowToManaged(row *dbImportedAddressRow
 
 // scriptAddressRowToManaged returns a new managed address based on script
 // address data loaded from the database.
-func (s *ScopedKeyManager) scriptAddressRowToManaged(row *dbScriptAddressRow) (ManagedAddress, error) {
-	// Use the crypto public key to decrypt the imported script hash.
-	scriptHash, err := s.rootManager.cryptoKeyPub.Decrypt(row.encryptedHash)
-	if err != nil {
-		str := "failed to decrypt imported script hash"
-		return nil, managerError(ErrCrypto, str, err)
-	}
-
-	return newScriptAddress(s, row.account, scriptHash, row.encryptedScript)
-}
 
 // rowInterfaceToManaged returns a new managed address based on the given
 // address data loaded from the database.  It will automatically select the
@@ -568,8 +558,6 @@ func (s *ScopedKeyManager) rowInterfaceToManaged(ns walletdb.ReadBucket,
 	case *dbImportedAddressRow:
 		return s.importedAddressRowToManaged(row)
 
-	case *dbScriptAddressRow:
-		return s.scriptAddressRowToManaged(row)
 	}
 
 	str := fmt.Sprintf("unsupported address type %T", rowInterface)
@@ -790,26 +778,11 @@ func (s *ScopedKeyManager) nextAddresses(ns walletdb.ReadWriteBucket,
 		ma := info.managedAddr
 		addressID := ma.Address().ScriptAddress()
 
-		switch a := ma.(type) {
+		switch ma.(type) {
 		case *managedAddress:
 			err := putChainedAddress(
 				ns, &s.scope, addressID, account, ssFull,
 				info.branch, info.index, adtChain,
-			)
-			if err != nil {
-				return nil, maybeConvertDbError(err)
-			}
-		case *scriptAddress:
-			encryptedHash, err := s.rootManager.cryptoKeyPub.Encrypt(a.AddrHash())
-			if err != nil {
-				str := fmt.Sprintf("failed to encrypt script hash %x",
-					a.AddrHash())
-				return nil, managerError(ErrCrypto, str, err)
-			}
-
-			err = putScriptAddress(
-				ns, &s.scope, a.AddrHash(), ImportedAddrAccount,
-				ssNone, encryptedHash, a.scriptEncrypted,
 			)
 			if err != nil {
 				return nil, maybeConvertDbError(err)
@@ -992,26 +965,11 @@ func (s *ScopedKeyManager) extendAddresses(ns walletdb.ReadWriteBucket,
 		ma := info.managedAddr
 		addressID := ma.Address().ScriptAddress()
 
-		switch a := ma.(type) {
+		switch ma.(type) {
 		case *managedAddress:
 			err := putChainedAddress(
 				ns, &s.scope, addressID, account, ssFull,
 				info.branch, info.index, adtChain,
-			)
-			if err != nil {
-				return maybeConvertDbError(err)
-			}
-		case *scriptAddress:
-			encryptedHash, err := s.rootManager.cryptoKeyPub.Encrypt(a.AddrHash())
-			if err != nil {
-				str := fmt.Sprintf("failed to encrypt script hash %x",
-					a.AddrHash())
-				return managerError(ErrCrypto, str, err)
-			}
-
-			err = putScriptAddress(
-				ns, &s.scope, a.AddrHash(), ImportedAddrAccount,
-				ssNone, encryptedHash, a.scriptEncrypted,
 			)
 			if err != nil {
 				return maybeConvertDbError(err)
@@ -1619,107 +1577,10 @@ func (s *ScopedKeyManager) ImportPrivateKey(ns walletdb.ReadWriteBucket,
 // This function will return an error if the address manager is locked and not
 // watching-only, or the address already exists.  Any other errors returned are
 // generally unexpected.
-func (s *ScopedKeyManager) ImportScript(ns walletdb.ReadWriteBucket,
-	script []byte, bs *BlockStamp) (ManagedScriptAddress, error) {
-
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	// The manager must be unlocked to encrypt the imported script.
-	if s.rootManager.IsLocked() && !s.rootManager.WatchOnly() {
-		return nil, managerError(ErrLocked, errLocked, nil)
-	}
-
-	// Prevent duplicates.
-	scriptHash := abeutil.Hash160(script)
-	alreadyExists := s.existsAddress(ns, scriptHash)
-	if alreadyExists {
-		str := fmt.Sprintf("address for script hash %x already exists",
-			scriptHash)
-		return nil, managerError(ErrDuplicateAddress, str, nil)
-	}
-
-	// Encrypt the script hash using the crypto public key so it is
-	// accessible when the address manager is locked or watching-only.
-	encryptedHash, err := s.rootManager.cryptoKeyPub.Encrypt(scriptHash)
-	if err != nil {
-		str := fmt.Sprintf("failed to encrypt script hash %x",
-			scriptHash)
-		return nil, managerError(ErrCrypto, str, err)
-	}
-
-	// Encrypt the script for storage in database using the crypto script
-	// key when not a watching-only address manager.
-	var encryptedScript []byte
-	if !s.rootManager.WatchOnly() {
-		encryptedScript, err = s.rootManager.cryptoKeyScript.Encrypt(
-			script,
-		)
-		if err != nil {
-			str := fmt.Sprintf("failed to encrypt script for %x",
-				scriptHash)
-			return nil, managerError(ErrCrypto, str, err)
-		}
-	}
-
-	// The start block needs to be updated when the newly imported address
-	// is before the current one.
-	updateStartBlock := false
-	s.rootManager.mtx.Lock()
-	if bs.Height < s.rootManager.syncState.startBlock.Height {
-		updateStartBlock = true
-	}
-	s.rootManager.mtx.Unlock()
-
-	// Save the new imported address to the db and update start block (if
-	// needed) in a single transaction.
-	err = putScriptAddress(
-		ns, &s.scope, scriptHash, ImportedAddrAccount, ssNone,
-		encryptedHash, encryptedScript,
-	)
-	if err != nil {
-		return nil, maybeConvertDbError(err)
-	}
-
-	if updateStartBlock {
-		err := putStartBlock(ns, bs)
-		if err != nil {
-			return nil, maybeConvertDbError(err)
-		}
-	}
-
-	// Now that the database has been updated, update the start block in
-	// memory too if needed.
-	if updateStartBlock {
-		s.rootManager.mtx.Lock()
-		s.rootManager.syncState.startBlock = *bs
-		s.rootManager.mtx.Unlock()
-	}
-
-	// Create a new managed address based on the imported script.  Also,
-	// when not a watching-only address manager, make a copy of the script
-	// since it will be cleared on lock and the script the caller passed
-	// should not be cleared out from under the caller.
-	scriptAddr, err := newScriptAddress(
-		s, ImportedAddrAccount, scriptHash, encryptedScript,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if !s.rootManager.WatchOnly() {
-		scriptAddr.scriptCT = make([]byte, len(script))
-		copy(scriptAddr.scriptCT, script)
-	}
-
-	// Add the new managed address to the cache of recent addresses and
-	// return it.
-	s.addrs[addrKey(scriptHash)] = scriptAddr
-	return scriptAddr, nil
-}
 
 // lookupAccount loads account number stored in the manager for the given
 // account name
-//
+//b
 // This function MUST be called with the manager lock held for reads.
 func (s *ScopedKeyManager) lookupAccount(ns walletdb.ReadBucket, name string) (uint32, error) {
 	return fetchAccountByName(ns, &s.scope, name)
