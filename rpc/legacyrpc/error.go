@@ -51,12 +51,6 @@ var (
 		Message: "address not found in wallet",
 	}
 
-	ErrAccountNameNotFound = abejson.RPCError{
-		Code:    abejson.ErrRPCWalletInvalidAccountName,
-		Message: "account name not found",
-	}
-
-
 	ErrUnloadedWallet = abejson.RPCError{
 		Code:    abejson.ErrRPCWallet,
 		Message: "Request requires a wallet but wallet has not loaded yet",
@@ -67,23 +61,8 @@ var (
 		Message: "Enter the wallet passphrase with walletpassphrase first",
 	}
 
-	ErrNotImportedAccount = abejson.RPCError{
-		Code:    abejson.ErrRPCWallet,
-		Message: "imported addresses must belong to the imported account",
-	}
-
 	ErrNoTransactionInfo = abejson.RPCError{
 		Code:    abejson.ErrRPCNoTxInfo,
 		Message: "No information for transaction",
-	}
-
-	ErrReservedAccountName = abejson.RPCError{
-		Code:    abejson.ErrRPCInvalidParameter,
-		Message: "Account name is reserved by RPC server",
-	}
-	//TODO(abe): this error is for deserializing the master address when adding payerr
-	ErrMasterPubKeyLength = abejson.RPCError{
-		Code:    abejson.ErrRPCInvalidParameter,
-		Message: "The length of master public key is wrong",
 	}
 )

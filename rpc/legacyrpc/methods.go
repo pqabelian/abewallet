@@ -333,77 +333,13 @@ func makeMultiSigScript(w *wallet.Wallet, keys []string, nRequired int) ([]byte,
 
 // addMultiSigAddress handles an addmultisigaddress request by adding a
 // multisig address to the given wallet.
-func addMultiSigAddress(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.AddMultisigAddressCmd)
-
-	// If an account is specified, ensure that is the imported account.
-	if cmd.Account != nil && *cmd.Account != waddrmgr.ImportedAddrAccountName {
-		return nil, &ErrNotImportedAccount
-	}
-
-	secp256k1Addrs := make([]abeutil.Address, len(cmd.Keys))
-	for i, k := range cmd.Keys {
-		addr, err := decodeAddress(k, w.ChainParams())
-		if err != nil {
-			return nil, ParseError{err}
-		}
-		secp256k1Addrs[i] = addr
-	}
-
-	script, err := w.MakeMultiSigScript(secp256k1Addrs, cmd.NRequired)
-	if err != nil {
-		return nil, err
-	}
-
-	p2shAddr, err := w.ImportP2SHRedeemScript(script)
-	if err != nil {
-		return nil, err
-	}
-
-	return p2shAddr.EncodeAddress(), nil
-}
 
 // createMultiSig handles an createmultisig request by returning a
 // multisig address for the given inputs.
-func createMultiSig(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.CreateMultisigCmd)
-
-	script, err := makeMultiSigScript(w, cmd.Keys, cmd.NRequired)
-	if err != nil {
-		return nil, ParseError{err}
-	}
-
-	address, err := abeutil.NewAddressScriptHash(script, w.ChainParams())
-	if err != nil {
-		// above is a valid script, shouldn't happen.
-		return nil, err
-	}
-
-	return abejson.CreateMultiSigResult{
-		Address:      address.EncodeAddress(),
-		RedeemScript: hex.EncodeToString(script),
-	}, nil
-}
 
 // dumpPrivKey handles a dumpprivkey request with the private key
 // for a single address, or an appropiate error if the wallet
 // is locked.
-func dumpPrivKey(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.DumpPrivKeyCmd)
-
-	addr, err := decodeAddress(cmd.Address, w.ChainParams())
-	if err != nil {
-		return nil, err
-	}
-
-	key, err := w.DumpWIFPrivateKey(addr)
-	if waddrmgr.IsError(err, waddrmgr.ErrLocked) {
-		// Address was found, but the private key isn't
-		// accessible.
-		return nil, &ErrWalletUnlockNeeded
-	}
-	return key, err
-}
 
 // dumpWallet handles a dumpwallet request by returning  all private
 // keys in a wallet, or an appropiate error if the wallet is locked.
@@ -459,10 +395,10 @@ func getBalances(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 		CurrentTime      string  `json:"current_time,omitempty"`
 		CurrentHeight    int32   `json:"current_height,omitempty"`
 		CurrentBlockHash string  `json:"current_block_hash,omitempty"`
-		TotalBalance     float64 `json:"total_balance,omitempty"`
-		SpendableBalance float64 `json:"spendable_balance,omitempty"`
-		FreezeBalance    float64 `json:"freeze_balance,omitempty"`
-		LockedBalance    float64 `json:"locked_balance,omitempty"`
+		TotalBalance     float64 `json:"total_balance"`
+		SpendableBalance float64 `json:"spendable_balance"`
+		FreezeBalance    float64 `json:"freeze_balance"`
+		LockedBalance    float64 `json:"locked_balance"`
 	}
 	res := &tt{
 		CurrentTime:      currentTime,
@@ -575,27 +511,6 @@ func decodeAddress(s string, params *chaincfg.Params) (abeutil.Address, error) {
 
 // getAccount handles a getaccount request by returning the account name
 // associated with a single address.
-// TODO(abe): In ABE, we do not support the "account"
-func getAccount(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.GetAccountCmd)
-
-	addr, err := decodeAddress(cmd.Address, w.ChainParams())
-	if err != nil {
-		return nil, err
-	}
-
-	// Fetch the associated account
-	account, err := w.AccountOfAddress(addr)
-	if err != nil {
-		return nil, &ErrAddressNotInWallet
-	}
-
-	acctName, err := w.AccountName(waddrmgr.KeyScopeBIP0044, account)
-	if err != nil {
-		return nil, &ErrAccountNameNotFound
-	}
-	return acctName, nil
-}
 
 // getAccountAddress handles a getaccountaddress by returning the most
 // recently-created chained address that has not yet been used (does not yet
@@ -603,22 +518,6 @@ func getAccount(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 // If the most recently-requested address has been used, a new address (the
 // next chained address in the keypool) is used.  This can fail if the keypool
 // runs out (and will return abejson.ErrRPCWalletKeypoolRanOut if that happens).
-// TODO(abe): In ABE, we do not support the "account"
-// TODO(abe): we need to show the payees
-func getAccountAddress(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.GetAccountAddressCmd)
-
-	account, err := w.AccountNumber(waddrmgr.KeyScopeBIP0044, cmd.Account)
-	if err != nil {
-		return nil, err
-	}
-	addr, err := w.CurrentAddress(account, waddrmgr.KeyScopeBIP0044)
-	if err != nil {
-		return nil, err
-	}
-
-	return addr.EncodeAddress(), err
-}
 
 // getUnconfirmedBalance handles a getunconfirmedbalance extension request
 // by returning the current unconfirmed balance of an account.
@@ -643,42 +542,6 @@ func getUnconfirmedBalance(icmd interface{}, w *wallet.Wallet) (interface{}, err
 
 // importPrivKey handles an importprivkey request by parsing
 // a WIF-encoded private key and adding it to an account.
-func importPrivKey(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.ImportPrivKeyCmd)
-
-	// Ensure that private keys are only imported to the correct account.
-	//
-	// Yes, Label is the account name.
-	if cmd.Label != nil && *cmd.Label != waddrmgr.ImportedAddrAccountName {
-		return nil, &ErrNotImportedAccount
-	}
-
-	wif, err := abeutil.DecodeWIF(cmd.PrivKey)
-	if err != nil {
-		return nil, &abejson.RPCError{
-			Code:    abejson.ErrRPCInvalidAddressOrKey,
-			Message: "WIF decode failed: " + err.Error(),
-		}
-	}
-	if !wif.IsForNet(w.ChainParams()) {
-		return nil, &abejson.RPCError{
-			Code:    abejson.ErrRPCInvalidAddressOrKey,
-			Message: "Key is not intended for " + w.ChainParams().Name,
-		}
-	}
-
-	// Import the private key, handling any errors.
-	_, err = w.ImportPrivateKey(waddrmgr.KeyScopeBIP0044, wif, nil, *cmd.Rescan)
-	switch {
-	case waddrmgr.IsError(err, waddrmgr.ErrDuplicateAddress):
-		// Do not return duplicate key errors to the client.
-		return nil, nil
-	case waddrmgr.IsError(err, waddrmgr.ErrLocked):
-		return nil, &ErrWalletUnlockNeeded
-	}
-
-	return nil, err
-}
 
 // keypoolRefill handles the keypoolrefill command. Since we handle the keypool
 // automatically this does nothing since refilling is never manually required.
@@ -689,44 +552,9 @@ func keypoolRefill(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 // createNewAccount handles a createnewaccount request by creating and
 // returning a new account. If the last account has no transaction history
 // as per BIP 0044 a new account cannot be created so an error will be returned.
-func createNewAccount(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.CreateNewAccountCmd)
-
-	// The wildcard * is reserved by the rpc server with the special meaning
-	// of "all accounts", so disallow naming accounts to this string.
-	if cmd.Account == "*" {
-		return nil, &ErrReservedAccountName
-	}
-
-	_, err := w.NextAccount(waddrmgr.KeyScopeBIP0044, cmd.Account)
-	if waddrmgr.IsError(err, waddrmgr.ErrLocked) {
-		return nil, &abejson.RPCError{
-			Code: abejson.ErrRPCWalletUnlockNeeded,
-			Message: "Creating an account requires the wallet to be unlocked. " +
-				"Enter the wallet passphrase with walletpassphrase to unlock",
-		}
-	}
-	return nil, err
-}
 
 // renameAccount handles a renameaccount request by renaming an account.
 // If the account does not exist an appropiate error will be returned.
-func renameAccount(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.RenameAccountCmd)
-
-	// The wildcard * is reserved by the rpc server with the special meaning
-	// of "all accounts", so disallow naming accounts to this string.
-	if cmd.NewAccount == "*" {
-		return nil, &ErrReservedAccountName
-	}
-
-	// Check that given account exists
-	account, err := w.AccountNumber(waddrmgr.KeyScopeBIP0044, cmd.OldAccount)
-	if err != nil {
-		return nil, err
-	}
-	return nil, w.RenameAccount(waddrmgr.KeyScopeBIP0044, account, cmd.NewAccount)
-}
 
 // getNewAddress handles a getnewaddress request by returning a new
 // address for an account.  If the account does not exist an appropiate
@@ -2299,82 +2127,84 @@ func signRawTransactionAbe(icmd interface{}, w *wallet.Wallet, chainClient *chai
 
 // validateAddress handles the validateaddress command.
 func validateAddress(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.ValidateAddressCmd)
+	_ = icmd.(*abejson.ValidateAddressCmd)
 
 	result := abejson.ValidateAddressWalletResult{}
-	addr, err := decodeAddress(cmd.Address, w.ChainParams())
-	if err != nil {
-		// Use result zero value (IsValid=false).
-		return result, nil
-	}
-
-	// We could put whether or not the address is a script here,
-	// by checking the type of "addr", however, the reference
-	// implementation only puts that information if the script is
-	// "ismine", and we follow that behaviour.
-	result.Address = addr.EncodeAddress()
-	result.IsValid = true
-
-	ainfo, err := w.AddressInfo(addr)
-	if err != nil {
-		if waddrmgr.IsError(err, waddrmgr.ErrAddressNotFound) {
-			// No additional information available about the address.
-			return result, nil
-		}
-		return nil, err
-	}
-
-	// The address lookup was successful which means there is further
-	// information about it available and it is "mine".
-	result.IsMine = true
-	acctName, err := w.AccountName(waddrmgr.KeyScopeBIP0044, ainfo.Account())
-	if err != nil {
-		return nil, &ErrAccountNameNotFound
-	}
-	result.Account = acctName
-
-	switch ma := ainfo.(type) {
-	case waddrmgr.ManagedPubKeyAddress:
-		result.IsCompressed = ma.Compressed()
-		result.PubKey = ma.ExportPubKey()
-
-	case waddrmgr.ManagedScriptAddress:
-		result.IsScript = true
-
-		// The script is only available if the manager is unlocked, so
-		// just break out now if there is an error.
-		script, err := ma.Script()
-		if err != nil {
-			break
-		}
-		result.Hex = hex.EncodeToString(script)
-
-		// This typically shouldn't fail unless an invalid script was
-		// imported.  However, if it fails for any reason, there is no
-		// further information available, so just set the script type
-		// a non-standard and break out now.
-		class, addrs, reqSigs, err := txscript.ExtractPkScriptAddrs(
-			script, w.ChainParams())
-		if err != nil {
-			result.Script = txscript.NonStandardTy.String()
-			break
-		}
-
-		addrStrings := make([]string, len(addrs))
-		for i, a := range addrs {
-			addrStrings[i] = a.EncodeAddress()
-		}
-		result.Addresses = addrStrings
-
-		// Multi-signature scripts also provide the number of required
-		// signatures.
-		result.Script = class.String()
-		if class == txscript.MultiSigTy {
-			result.SigsRequired = int32(reqSigs)
-		}
-	}
-
+	// TODO(abe)
 	return result, nil
+	//	addr, err := decodeAddress(cmd.Address, w.ChainParams())
+	//	if err != nil {
+	//		// Use result zero value (IsValid=false).
+	//		return result, nil
+	//	}
+	//
+	//	// We could put whether or not the address is a script here,
+	//	// by checking the type of "addr", however, the reference
+	//	// implementation only puts that information if the script is
+	//	// "ismine", and we follow that behaviour.
+	//	result.Address = addr.EncodeAddress()
+	//	result.IsValid = true
+	//
+	//	ainfo, err := w.AddressInfo(addr)
+	//	if err != nil {
+	//		if waddrmgr.IsError(err, waddrmgr.ErrAddressNotFound) {
+	//			// No additional information available about the address.
+	//			return result, nil
+	//		}
+	//		return nil, err
+	//	}
+	//
+	//	// The address lookup was successful which means there is further
+	//	// information about it available and it is "mine".
+	//	result.IsMine = true
+	//	acctName, err := w.AccountName(waddrmgr.KeyScopeBIP0044, ainfo.Account())
+	//	if err != nil {
+	//		return nil, &ErrAccountNameNotFound
+	//	}
+	//	result.Account = acctName
+	//
+	//	switch ma := ainfo.(type) {
+	//	case waddrmgr.ManagedPubKeyAddress:
+	//		result.IsCompressed = ma.Compressed()
+	//		result.PubKey = ma.ExportPubKey()
+	//
+	//	case waddrmgr.ManagedScriptAddress:
+	//		result.IsScript = true
+	//
+	//		// The script is only available if the manager is unlocked, so
+	//		// just break out now if there is an error.
+	//		script, err := ma.Script()
+	//		if err != nil {
+	//			break
+	//		}
+	//		result.Hex = hex.EncodeToString(script)
+	//
+	//		// This typically shouldn't fail unless an invalid script was
+	//		// imported.  However, if it fails for any reason, there is no
+	//		// further information available, so just set the script type
+	//		// a non-standard and break out now.
+	//		class, addrs, reqSigs, err := txscript.ExtractPkScriptAddrs(
+	//			script, w.ChainParams())
+	//		if err != nil {
+	//			result.Script = txscript.NonStandardTy.String()
+	//			break
+	//		}
+	//
+	//		addrStrings := make([]string, len(addrs))
+	//		for i, a := range addrs {
+	//			addrStrings[i] = a.EncodeAddress()
+	//		}
+	//		result.Addresses = addrStrings
+	//
+	//		// Multi-signature scripts also provide the number of required
+	//		// signatures.
+	//		result.Script = class.String()
+	//		if class == txscript.MultiSigTy {
+	//			result.SigsRequired = int32(reqSigs)
+	//		}
+	//	}
+	//
+	//	return result, nil
 }
 
 // verifyMessage handles the verifymessage command by verifying the provided

@@ -62,10 +62,9 @@ func NewRPCClient(chainParams *chaincfg.Params, connect, user, pass string, cert
 		quit:                make(chan struct{}),
 	}
 	ntfnCallbacks := &rpcclient.NotificationHandlers{
-		//	todo(ABE): some are not supported, and should be removed.
 		OnClientConnected:      client.onClientConnect,
-		OnBlockAbeConnected:    client.onBlockConnectedAbe,
-		OnBlockAbeDisconnected: client.onBlockDisconnectedAbe,
+		OnBlockAbeConnected:    client.onBlockConnected,
+		OnBlockAbeDisconnected: client.onBlockDisconnected,
 	}
 	rpcClient, err := rpcclient.New(client.connConfig, ntfnCallbacks)
 	if err != nil {
@@ -199,7 +198,7 @@ func (c *RPCClient) onClientConnect() {
 	}
 }
 
-func (c *RPCClient) onBlockConnectedAbe(hash *chainhash.Hash, height int32, time time.Time) {
+func (c *RPCClient) onBlockConnected(hash *chainhash.Hash, height int32, time time.Time) {
 	select {
 	case c.enqueueNotification <- BlockAbeConnected{
 		// TODO(abe):modify Block to BlockAbe
@@ -213,7 +212,7 @@ func (c *RPCClient) onBlockConnectedAbe(hash *chainhash.Hash, height int32, time
 	}
 }
 
-func (c *RPCClient) onBlockDisconnectedAbe(hash *chainhash.Hash, height int32, time time.Time) {
+func (c *RPCClient) onBlockDisconnected(hash *chainhash.Hash, height int32, time time.Time) {
 	select {
 	case c.enqueueNotification <- BlockAbeDisconnected{
 		// TODO(abe):modify Block to BlockAbe
