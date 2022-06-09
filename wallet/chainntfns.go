@@ -174,7 +174,6 @@ func (w *Wallet) handleChainNotifications() {
 				// wallet had synced to
 				birthdayStore := &walletBirthdayStore{
 					db:         w.db,
-					manager:    w.Manager,
 					managerAbe: w.ManagerAbe,
 				}
 				birthdayBlock, err := birthdaySanityCheck(
@@ -234,25 +233,6 @@ func (w *Wallet) handleChainNotifications() {
 // connectBlock handles a chain server notification by marking a wallet
 // that's currently in-sync with the chain server as being synced up to
 // the passed block.
-func (w *Wallet) connectBlock(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) error {
-	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
-
-	bs := waddrmgr.BlockStamp{
-		Height:    b.Height,
-		Hash:      b.Hash,
-		Timestamp: b.Time,
-	}
-	err := w.Manager.SetSyncedTo(addrmgrNs, &bs)
-	if err != nil {
-		return err
-	}
-
-	// Notify interested clients of the connected block.
-	//
-	// TODO: move all notifications outside of the database transaction.
-	w.NtfnServer.notifyAttachedBlock(dbtx, &b)
-	return nil
-}
 
 // TODO(abe): this function is used to notify the client
 func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) error {
@@ -371,57 +351,6 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 // disconnectBlock handles a chain server reorganize by rolling back all
 // block history from the reorged block for a wallet in-sync with the chain
 // server.
-func (w *Wallet) disconnectBlock(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) error {
-	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
-	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
-
-	if !w.ChainSynced() {
-		return nil
-	}
-
-	// Disconnect the removed block and all blocks after it if we know about
-	// the disconnected block. Otherwise, the block is in the future.
-	if b.Height <= w.Manager.SyncedTo().Height {
-		hash, err := w.Manager.BlockHash(addrmgrNs, b.Height)
-		if err != nil {
-			return err
-		}
-		if bytes.Equal(hash[:], b.Hash[:]) {
-			bs := waddrmgr.BlockStamp{
-				Height: b.Height - 1,
-			}
-			hash, err = w.Manager.BlockHash(addrmgrNs, bs.Height)
-			if err != nil {
-				return err
-			}
-			bs.Hash = *hash
-
-			client := w.ChainClient()
-			header, err := client.GetBlockHeader(hash)
-			if err != nil {
-				return err
-			}
-
-			bs.Timestamp = header.Timestamp
-			// roll back the synced status of database
-			err = w.Manager.SetSyncedTo(addrmgrNs, &bs)
-			if err != nil {
-				return err
-			}
-
-			// rollback to the assigned height
-			err = w.TxStore.Rollback(txmgrNs, bs.Height)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	// Notify interested clients of the disconnected block.
-	w.NtfnServer.notifyDetachedBlock(&b.Hash)
-
-	return nil
-}
 
 // TODO(abe): the logic of this function woule be redesigned.
 // TODO(abe): when the height meet the need, the utxo in the block shoule be modified
@@ -537,7 +466,6 @@ type birthdayStore interface {
 // manager that satisfies the birthdayStore interface.
 type walletBirthdayStore struct {
 	db         walletdb.DB
-	manager    *waddrmgr.Manager
 	managerAbe *waddrmgr.ManagerAbe
 }
 

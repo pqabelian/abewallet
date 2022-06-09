@@ -96,7 +96,7 @@ var rpcHandlers = map[string]struct {
 	"listlockunspent": {handler: listLockUnspent},
 	//"listreceivedbyaccount":  {handler: listReceivedByAccount},
 	//"listreceivedbyaddress":  {handler: listReceivedByAddress},
-	"listsinceblock": {handlerWithChain: listSinceBlock},
+	//"listsinceblock": {handlerWithChain: listSinceBlock},
 	//"listtransactions":       {handler: listTransactions},
 	//"listunspent":            {handler: listUnspent},
 	"listallutxoabe":         {handler: listAllUTXOAbe},
@@ -142,8 +142,8 @@ var rpcHandlers = map[string]struct {
 	// here because it hasn't been update to use the reference
 	// implemenation's API.
 	//"getunconfirmedbalance":   {handler: getUnconfirmedBalance},
-	"listaddresstransactions": {handler: listAddressTransactions},
-	"listalltransactions":     {handler: listAllTransactions},
+	//"listaddresstransactions": {handler: listAddressTransactions},
+	//"listalltransactions":     {handler: listAllTransactions},
 	//"renameaccount":           {handler: renameAccount},
 	"walletislocked": {handler: walletIsLocked},
 }
@@ -494,20 +494,6 @@ func keypoolRefill(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 
 // getReceivedByAddress handles a getreceivedbyaddress request by returning
 // the total amount received by a single address.
-func getReceivedByAddress(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.GetReceivedByAddressCmd)
-
-	addr, err := decodeAddress(cmd.Address, w.ChainParams())
-	if err != nil {
-		return nil, err
-	}
-	total, err := w.TotalReceivedForAddr(addr, int32(*cmd.MinConf))
-	if err != nil {
-		return nil, err
-	}
-
-	return total.ToABE(), nil
-}
 
 // getTransaction handles a gettransaction request by returning details about
 // a single transaction saved by wallet.
@@ -666,114 +652,20 @@ func listLockUnspent(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 
 // listSinceBlock handles a listsinceblock request by returning an array of maps
 // with details of sent and received wallet transactions since the given block.
-func listSinceBlock(icmd interface{}, w *wallet.Wallet, chainClient *chain.RPCClient) (interface{}, error) {
-	cmd := icmd.(*abejson.ListSinceBlockCmd)
-
-	syncBlock := w.Manager.SyncedTo()
-	targetConf := int64(*cmd.TargetConfirmations)
-
-	// For the result we need the block hash for the last block counted
-	// in the blockchain due to confirmations. We send this off now so that
-	// it can arrive asynchronously while we figure out the rest.
-	gbh := chainClient.GetBlockHashAsync(int64(syncBlock.Height) + 1 - targetConf)
-
-	var start int32
-	if cmd.BlockHash != nil {
-		hash, err := chainhash.NewHashFromStr(*cmd.BlockHash)
-		if err != nil {
-			return nil, DeserializationError{err}
-		}
-		block, err := chainClient.GetBlockVerboseTx(hash)
-		if err != nil {
-			return nil, err
-		}
-		start = int32(block.Height) + 1
-	}
-
-	txInfoList, err := w.ListSinceBlock(start, -1, syncBlock.Height)
-	if err != nil {
-		return nil, err
-	}
-
-	// Done with work, get the response.
-	blockHash, err := gbh.Receive()
-	if err != nil {
-		return nil, err
-	}
-
-	res := abejson.ListSinceBlockResult{
-		Transactions: txInfoList,
-		LastBlock:    blockHash.String(),
-	}
-	return res, nil
-}
 
 // listTransactions handles a listtransactions request by returning an
 // array of maps with details of sent and recevied wallet transactions.
-func listTransactions(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.ListTransactionsCmd)
-
-	// TODO: ListTransactions does not currently understand the difference
-	// between transactions pertaining to one account from another.  This
-	// will be resolved when wtxmgr is combined with the waddrmgr namespace.
-
-	if cmd.Account != nil && *cmd.Account != "*" {
-		// For now, don't bother trying to continue if the user
-		// specified an account, since this can't be (easily or
-		// efficiently) calculated.
-		return nil, &abejson.RPCError{
-			Code:    abejson.ErrRPCWallet,
-			Message: "Transactions are not yet grouped by account",
-		}
-	}
-
-	return w.ListTransactions(*cmd.From, *cmd.Count)
-}
 
 // listAddressTransactions handles a listaddresstransactions request by
 // returning an array of maps with details of spent and received wallet
 // transactions.  The form of the reply is identical to listtransactions,
 // but the array elements are limited to transaction details which are
 // about the addresess included in the request.
-func listAddressTransactions(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.ListAddressTransactionsCmd)
-
-	if cmd.Account != nil && *cmd.Account != "*" {
-		return nil, &abejson.RPCError{
-			Code:    abejson.ErrRPCInvalidParameter,
-			Message: "Listing transactions for addresses may only be done for all accounts",
-		}
-	}
-
-	// Decode addresses.
-	hash160Map := make(map[string]struct{})
-	for _, addrStr := range cmd.Addresses {
-		addr, err := decodeAddress(addrStr, w.ChainParams())
-		if err != nil {
-			return nil, err
-		}
-		hash160Map[string(addr.ScriptAddress())] = struct{}{}
-	}
-
-	return w.ListAddressTransactions(hash160Map)
-}
 
 // listAllTransactions handles a listalltransactions request by returning
 // a map with details of sent and recevied wallet transactions.  This is
 // similar to ListTransactions, except it takes only a single optional
 // argument for the account name and replies with all transactions.
-func listAllTransactions(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.ListAllTransactionsCmd)
-
-	if cmd.Account != nil && *cmd.Account != "*" {
-		return nil, &abejson.RPCError{
-			Code:    abejson.ErrRPCInvalidParameter,
-			Message: "Listing all transactions may only be done for all accounts",
-		}
-	}
-
-	return w.ListAllTransactions()
-}
 
 // listUnspent handles the listunspent command.
 

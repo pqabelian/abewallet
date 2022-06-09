@@ -80,8 +80,8 @@ type Wallet struct {
 	publicPassphrase []byte
 
 	// Data stores
-	db         walletdb.DB
-	Manager    *waddrmgr.Manager
+	db walletdb.DB
+	//Manager    *waddrmgr.Manager
 	ManagerAbe *waddrmgr.ManagerAbe
 	TxStore    *wtxmgr.Store
 
@@ -1203,17 +1203,7 @@ func (w *Wallet) AccountAddresses(account uint32) (addrs []abeutil.Address, err 
 // a UTXO must be in a block.  If confirmations is 1 or greater,
 // the balance will be calculated based on how many how many blocks
 // include a UTXO.
-func (w *Wallet) CalculateBalance(confirms int32) (abeutil.Amount, error) {
-	var balance abeutil.Amount
-	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
-		var err error
-		blk := w.Manager.SyncedTo()
-		balance, err = w.TxStore.Balance(txmgrNs, confirms, blk.Height)
-		return err
-	})
-	return balance, err
-}
+
 func (w *Wallet) CalculateBalanceAbe(confirms int32) ([]abeutil.Amount, error) {
 	var balances []abeutil.Amount
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
@@ -1452,7 +1442,7 @@ func RecvCategory(details *wtxmgr.TxDetails, syncHeight int32, net *chaincfg.Par
 // for a listtransactions RPC.
 //
 // TODO: This should be moved to the legacyrpc package.
-func listTransactions(tx walletdb.ReadTx, details *wtxmgr.TxDetails, addrMgr *waddrmgr.Manager,
+func listTransactions(tx walletdb.ReadTx, details *wtxmgr.TxDetails, addrMgr *waddrmgr.ManagerAbe,
 	syncHeight int32, net *chaincfg.Params) []abejson.ListTransactionsResult {
 
 	//addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
@@ -1582,7 +1572,7 @@ func (w *Wallet) ListSinceBlock(start, end, syncHeight int32) ([]abejson.ListTra
 		rangeFn := func(details []wtxmgr.TxDetails) (bool, error) {
 			for _, detail := range details {
 				jsonResults := listTransactions(tx, &detail,
-					w.Manager, syncHeight, w.chainParams)
+					w.ManagerAbe, syncHeight, w.chainParams)
 				txList = append(txList, jsonResults...)
 			}
 			return false, nil
@@ -1596,136 +1586,14 @@ func (w *Wallet) ListSinceBlock(start, end, syncHeight int32) ([]abejson.ListTra
 // ListTransactions returns a slice of objects with details about a recorded
 // transaction.  This is intended to be used for listtransactions RPC
 // replies.
-func (w *Wallet) ListTransactions(from, count int) ([]abejson.ListTransactionsResult, error) {
-	txList := []abejson.ListTransactionsResult{}
-
-	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
-
-		// Get current block.  The block height used for calculating
-		// the number of tx confirmations.
-		syncBlock := w.Manager.SyncedTo()
-
-		// Need to skip the first from transactions, and after those, only
-		// include the next count transactions.
-		skipped := 0
-		n := 0
-
-		rangeFn := func(details []wtxmgr.TxDetails) (bool, error) {
-			// Iterate over transactions at this height in reverse order.
-			// This does nothing for unmined transactions, which are
-			// unsorted, but it will process mined transactions in the
-			// reverse order they were marked mined.
-			for i := len(details) - 1; i >= 0; i-- {
-				if from > skipped {
-					skipped++
-					continue
-				}
-
-				n++
-				if n > count {
-					return true, nil
-				}
-
-				jsonResults := listTransactions(tx, &details[i],
-					w.Manager, syncBlock.Height, w.chainParams)
-				txList = append(txList, jsonResults...)
-
-				if len(jsonResults) > 0 {
-					n++
-				}
-			}
-
-			return false, nil
-		}
-
-		// Return newer results first by starting at mempool height and working
-		// down to the genesis block.
-		return w.TxStore.RangeTransactions(txmgrNs, -1, 0, rangeFn)
-	})
-	return txList, err
-}
 
 // ListAddressTransactions returns a slice of objects with details about
 // recorded transactions to or from any address belonging to a set.  This is
 // intended to be used for listaddresstransactions RPC replies.
-func (w *Wallet) ListAddressTransactions(pkHashes map[string]struct{}) ([]abejson.ListTransactionsResult, error) {
-	txList := []abejson.ListTransactionsResult{}
-	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
-
-		// Get current block.  The block height used for calculating
-		// the number of tx confirmations.
-		syncBlock := w.Manager.SyncedTo()
-		rangeFn := func(details []wtxmgr.TxDetails) (bool, error) {
-		loopDetails:
-			for i := range details {
-				detail := &details[i]
-
-				for _, cred := range detail.Credits {
-					pkScript := detail.MsgTx.TxOut[cred.Index].PkScript
-					_, addrs, _, err := txscript.ExtractPkScriptAddrs(
-						pkScript, w.chainParams)
-					if err != nil || len(addrs) != 1 {
-						continue
-					}
-					apkh, ok := addrs[0].(*abeutil.AddressPubKeyHash)
-					if !ok {
-						continue
-					}
-					_, ok = pkHashes[string(apkh.ScriptAddress())]
-					if !ok {
-						continue
-					}
-
-					jsonResults := listTransactions(tx, detail,
-						w.Manager, syncBlock.Height, w.chainParams)
-					if err != nil {
-						return false, err
-					}
-					txList = append(txList, jsonResults...)
-					continue loopDetails
-				}
-			}
-			return false, nil
-		}
-
-		return w.TxStore.RangeTransactions(txmgrNs, 0, -1, rangeFn)
-	})
-	return txList, err
-}
 
 // ListAllTransactions returns a slice of objects with details about a recorded
 // transaction.  This is intended to be used for listalltransactions RPC
 // replies.
-func (w *Wallet) ListAllTransactions() ([]abejson.ListTransactionsResult, error) {
-	txList := []abejson.ListTransactionsResult{}
-	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
-
-		// Get current block.  The block height used for calculating
-		// the number of tx confirmations.
-		syncBlock := w.Manager.SyncedTo()
-
-		rangeFn := func(details []wtxmgr.TxDetails) (bool, error) {
-			// Iterate over transactions at this height in reverse order.
-			// This does nothing for unmined transactions, which are
-			// unsorted, but it will process mined transactions in the
-			// reverse order they were marked mined.
-			for i := len(details) - 1; i >= 0; i-- {
-				jsonResults := listTransactions(tx, &details[i], w.Manager,
-					syncBlock.Height, w.chainParams)
-				txList = append(txList, jsonResults...)
-			}
-			return false, nil
-		}
-
-		// Return newer results first by starting at mempool height and
-		// working down to the genesis block.
-		return w.TxStore.RangeTransactions(txmgrNs, -1, 0, rangeFn)
-	})
-	return txList, err
-}
 
 // BlockIdentifier identifies a block by either a height or a hash.
 type BlockIdentifier struct {
@@ -2206,52 +2074,10 @@ type AccountTotalReceivedResult struct {
 // TotalReceivedForAddr iterates through a wallet's transaction history,
 // returning the total amount of bitcoins received for a single wallet
 // address.
-func (w *Wallet) TotalReceivedForAddr(addr abeutil.Address, minConf int32) (abeutil.Amount, error) {
-	var amount abeutil.Amount
-	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
-
-		syncBlock := w.Manager.SyncedTo()
-
-		var (
-			addrStr    = addr.EncodeAddress()
-			stopHeight int32
-		)
-
-		if minConf > 0 {
-			stopHeight = syncBlock.Height - minConf + 1
-		} else {
-			stopHeight = -1
-		}
-		rangeFn := func(details []wtxmgr.TxDetails) (bool, error) {
-			for i := range details {
-				detail := &details[i]
-				for _, cred := range detail.Credits {
-					pkScript := detail.MsgTx.TxOut[cred.Index].PkScript
-					_, addrs, _, err := txscript.ExtractPkScriptAddrs(pkScript,
-						w.chainParams)
-					// An error creating addresses from the output script only
-					// indicates a non-standard script, so ignore this credit.
-					if err != nil {
-						continue
-					}
-					for _, a := range addrs {
-						if addrStr == a.EncodeAddress() {
-							amount += cred.Amount
-							break
-						}
-					}
-				}
-			}
-			return false, nil
-		}
-		return w.TxStore.RangeTransactions(txmgrNs, 0, stopHeight, rangeFn)
-	})
-	return amount, err
-}
 
 // SendOutputs creates and sends payment transactions. It returns the
 // transaction upon success.
+
 func (w *Wallet) SendOutputsAbe(outputDescs []*abecrypto.AbeTxOutputDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, label string) (*wire.MsgTxAbe, error) {
 
 	// Ensure the outputs to be created adhere to the network's consensus
@@ -2689,7 +2515,6 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 	w := &Wallet{
 		publicPassphrase:    pubPass,
 		db:                  db,
-		Manager:             nil,
 		ManagerAbe:          addrMgrAbe,
 		TxStore:             txMgr,
 		lockedOutpoints:     map[wire.OutPoint]struct{}{},

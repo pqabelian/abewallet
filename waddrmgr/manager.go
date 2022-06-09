@@ -1,12 +1,9 @@
 package waddrmgr
 
 import (
-	"crypto/sha512"
 	"github.com/abesuite/abec/abeutil/hdkeychain"
-	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abewallet/snacl"
 	"sync"
-	"time"
 )
 
 const (
@@ -237,60 +234,6 @@ var newCryptoKey = defaultNewCryptoKey
 
 // Manager represents a concurrency safe crypto currency address manager and
 // key store.
-type Manager struct {
-	mtx sync.RWMutex
-
-	// scopedManager is a mapping of scope of scoped manager, the manager
-	// itself loaded into memory.
-	//scopedManagers map[KeyScope]*ScopedKeyManager
-
-	//externalAddrSchemas map[AddressType][]KeyScope
-	//internalAddrSchemas map[AddressType][]KeyScope
-
-	syncState    syncState
-	watchingOnly bool
-	birthday     time.Time
-	locked       bool
-	closed       bool
-	chainParams  *chaincfg.Params
-
-	// masterKeyPub is the secret key used to secure the cryptoKeyPub key
-	// and masterKeyPriv is the secret key used to secure the cryptoKeyPriv
-	// key.  This approach is used because it makes changing the passwords
-	// much simpler as it then becomes just changing these keys.  It also
-	// provides future flexibility.
-	//
-	// NOTE: This is not the same thing as BIP0032 master node extended
-	// key.
-	//
-	// The underlying master private key will be zeroed when the address
-	// manager is locked.
-	masterKeyPub  *snacl.SecretKey
-	masterKeyPriv *snacl.SecretKey
-
-	// cryptoKeyPub is the key used to encrypt public extended keys and
-	// addresses.
-	cryptoKeyPub EncryptorDecryptor
-
-	// cryptoKeyPriv is the key used to encrypt private data such as the
-	// master hierarchical deterministic extended key.
-	//
-	// This key will be zeroed when the address manager is locked.
-	cryptoKeyPrivEncrypted []byte
-	cryptoKeyPriv          EncryptorDecryptor
-
-	// cryptoKeyScript is the key used to encrypt script data.
-	//
-	// This key will be zeroed when the address manager is locked.
-	cryptoKeyScriptEncrypted []byte
-	cryptoKeyScript          EncryptorDecryptor
-
-	// privPassphraseSalt and hashedPrivPassphrase allow for the secure
-	// detection of a correct passphrase on manager unlock when the
-	// manager is already unlocked.  The hash is zeroed each lock.
-	privPassphraseSalt   [saltSize]byte //To not compare the private key directly
-	hashedPrivPassphrase [sha512.Size]byte
-}
 
 // WatchOnly returns true if the root manager is in watch only mode, and false
 // otherwise.
