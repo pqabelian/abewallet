@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/abesuite/abec/abecrypto"
 	"github.com/abesuite/abec/abecrypto/abecryptoparam"
+	"github.com/abesuite/abec/abeutil/hdkeychain"
 	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/txscript"
@@ -20,7 +21,231 @@ import (
 	"time"
 )
 
-// TODO(abe):the public parameter use the same in manager.go
+const (
+	// MaxAccountNum is the maximum allowed account number.  This value was
+	// chosen because accounts are hardened children and therefore must not
+	// exceed the hardened child range of extended keys and it provides a
+	// reserved account at the top of the range for supporting imported
+	// addresses.
+	MaxAccountNum = hdkeychain.HardenedKeyStart - 2 // 2^31 - 2
+
+	// MaxAddressesPerAccount is the maximum allowed number of addresses
+	// per account number.  This value is based on the limitation of the
+	// underlying hierarchical deterministic key derivation.
+	MaxAddressesPerAccount = hdkeychain.HardenedKeyStart - 1
+
+	// ImportedAddrAccount is the account number to use for all imported
+	// addresses.  This is useful since normal accounts are derived from
+	// the root hierarchical deterministic key and imported addresses do
+	// not fit into that model.
+	ImportedAddrAccount = MaxAccountNum + 1 // 2^31 - 1
+
+	// ImportedAddrAccountName is the name of the imported account.
+	ImportedAddrAccountName = "imported"
+
+	// DefaultAccountNum is the number of the default account.
+	DefaultAccountNum = 0
+
+	// defaultAccountName is the initial name of the default account.  Note
+	// that the default account may be renamed and is not a reserved name,
+	// so the default account might not be named "default" and non-default
+	// accounts may be named "default".
+	//
+	// Account numbers never change, so the DefaultAccountNum should be
+	// used to refer to (and only to) the default account.
+	defaultAccountName = "default"
+
+	// The hierarchy described by BIP0043 is:
+	//  m/<purpose>'/*
+	// This is further extended by BIP0044 to:
+	//  m/44'/<coin type>'/<account>'/<branch>/<address index>
+	//
+	// The branch is 0 for external addresses and 1 for internal addresses.
+
+	// maxCoinType is the maximum allowed coin type used when structuring
+	// the BIP0044 multi-account hierarchy.  This value is based on the
+	// limitation of the underlying hierarchical deterministic key
+	// derivation.
+	maxCoinType = hdkeychain.HardenedKeyStart - 1
+
+	// ExternalBranch is the child number to use when performing BIP0044
+	// style hierarchical deterministic key derivation for the external
+	// branch.
+	ExternalBranch uint32 = 0
+
+	// InternalBranch is the child number to use when performing BIP0044
+	// style hierarchical deterministic key derivation for the internal
+	// branch.
+	InternalBranch uint32 = 1
+
+	// saltSize is the number of bytes of the salt used when hashing
+	// private passphrases.
+	saltSize = 32
+)
+
+// isReservedAccountName returns true if the account name is reserved.
+// Reserved accounts may never be renamed, and other accounts may not be
+// renamed to a reserved name.
+func isReservedAccountName(name string) bool {
+	return name == ImportedAddrAccountName
+}
+
+// isReservedAccountNum returns true if the account number is reserved.
+// Reserved accounts may not be renamed.
+
+// ScryptOptions is used to hold the scrypt parameters needed when deriving new
+// passphrase keys.
+type ScryptOptions struct {
+	N, R, P int
+}
+
+// OpenCallbacks houses caller-provided callbacks that may be called when
+// opening an existing manager.  The open blocks on the execution of these
+// functions.
+type OpenCallbacks struct {
+	// ObtainSeed is a callback function that is potentially invoked during
+	// upgrades.  It is intended to be used to request the wallet seed
+	// from the user (or any other mechanism the caller deems fit).
+	ObtainSeed ObtainUserInputFunc
+
+	// ObtainPrivatePass is a callback function that is potentially invoked
+	// during upgrades.  It is intended to be used to request the wallet
+	// private passphrase from the user (or any other mechanism the caller
+	// deems fit).
+	ObtainPrivatePass ObtainUserInputFunc
+}
+
+// DefaultScryptOptions is the default options used with scrypt.
+var DefaultScryptOptions = ScryptOptions{
+	N: 262144, // 2^18
+	R: 8,
+	P: 1,
+}
+
+// FastScryptOptions are the scrypt options that should be used for testing
+// purposes only where speed is more important than security.
+var FastScryptOptions = ScryptOptions{
+	N: 16,
+	R: 8,
+	P: 1,
+}
+
+// addrKey is used to uniquely identify an address even when those addresses
+// would end up being the same bitcoin address (as is the case for
+// pay-to-pubkey and pay-to-pubkey-hash style of addresses).
+
+// accountInfo houses the current state of the internal and external branches
+// of an account along with the extended keys needed to derive new keys.  It
+// also handles locking by keeping an encrypted version of the serialized
+// private extended key so the unencrypted versions can be cleared from memory
+// when the address manager is locked.
+
+// AccountProperties contains properties associated with each account, such as
+// the account name, number, and the nubmer of derived and imported keys.
+
+// unlockDeriveInfo houses the information needed to derive a private key for a
+// managed address when the address manager is unlocked.  See the
+// deriveOnUnlock field in the Manager struct for more details on how this is
+// used.
+
+// SecretKeyGenerator is the function signature of a method that can generate
+// secret keys for the address manager.
+type SecretKeyGenerator func(
+	passphrase *[]byte, config *ScryptOptions) (*snacl.SecretKey, error)
+
+// defaultNewSecretKey returns a new secret key.  See newSecretKey.
+func defaultNewSecretKey(passphrase *[]byte,
+	config *ScryptOptions) (*snacl.SecretKey, error) {
+	return snacl.NewSecretKey(passphrase, config.N, config.R, config.P)
+}
+
+var (
+	// secretKeyGen is the inner method that is executed when calling
+	// newSecretKey.
+	secretKeyGen = defaultNewSecretKey
+
+	// secretKeyGenMtx protects access to secretKeyGen, so that it can be
+	// replaced in testing.
+	secretKeyGenMtx sync.RWMutex
+)
+
+// SetSecretKeyGen replaces the existing secret key generator, and returns the
+// previous generator.
+func SetSecretKeyGen(keyGen SecretKeyGenerator) SecretKeyGenerator {
+	secretKeyGenMtx.Lock()
+	oldKeyGen := secretKeyGen
+	secretKeyGen = keyGen
+	secretKeyGenMtx.Unlock()
+
+	return oldKeyGen
+}
+
+// newSecretKey generates a new secret key using the active secretKeyGen.
+func newSecretKey(passphrase *[]byte, config *ScryptOptions) (*snacl.SecretKey, error) {
+
+	secretKeyGenMtx.RLock()
+	defer secretKeyGenMtx.RUnlock()
+	return secretKeyGen(passphrase, config)
+}
+
+// EncryptorDecryptor provides an abstraction on top of snacl.CryptoKey so that
+// our tests can use dependency injection to force the behaviour they need.
+type EncryptorDecryptor interface {
+	Encrypt(in []byte) ([]byte, error)
+	Decrypt(in []byte) ([]byte, error)
+	Bytes() []byte
+	CopyBytes([]byte)
+	Zero()
+}
+
+// cryptoKey extends snacl.CryptoKey to implement EncryptorDecryptor.
+type cryptoKey struct {
+	snacl.CryptoKey
+}
+
+// Bytes returns a copy of this crypto key's byte slice.
+func (ck *cryptoKey) Bytes() []byte {
+	return ck.CryptoKey[:]
+}
+
+// CopyBytes copies the bytes from the given slice into this CryptoKey.
+func (ck *cryptoKey) CopyBytes(from []byte) {
+	copy(ck.CryptoKey[:], from)
+}
+
+// defaultNewCryptoKey returns a new CryptoKey.  See newCryptoKey.
+func defaultNewCryptoKey() (EncryptorDecryptor, error) {
+	key, err := snacl.GenerateCryptoKey()
+	if err != nil {
+		return nil, err
+	}
+	return &cryptoKey{*key}, nil
+}
+
+// CryptoKeyType is used to differentiate between different kinds of
+// crypto keys.
+type CryptoKeyType byte
+
+// Crypto key types.
+const (
+	// CKTPrivate specifies the key that is used for encryption of private
+	// key material such as derived extended private keys and imported
+	// private keys.
+	CKTPrivate CryptoKeyType = iota
+	CKTSeed
+	// CKTScript specifies the key that is used for encryption of scripts.
+	CKTScript
+
+	// CKTPublic specifies the key that is used for encryption of public
+	// key material such as dervied extended public keys and imported public
+	// keys.
+	CKTPublic
+)
+
+// newCryptoKey is used as a way to replace the new crypto key generation
+// function used so tests can provide a version that fails for testing error
+// paths.
+var newCryptoKey = defaultNewCryptoKey
 
 type ManagerAbe struct {
 	mtx sync.RWMutex
