@@ -129,10 +129,6 @@ var FastScryptOptions = ScryptOptions{
 	P: 1,
 }
 
-// addrKey is used to uniquely identify an address even when those addresses
-// would end up being the same bitcoin address (as is the case for
-// pay-to-pubkey and pay-to-pubkey-hash style of addresses).
-
 // accountInfo houses the current state of the internal and external branches
 // of an account along with the extended keys needed to derive new keys.  It
 // also handles locking by keeping an encrypted version of the serialized

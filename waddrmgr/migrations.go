@@ -13,7 +13,7 @@ import (
 // reflect the latest database state. If the database happens to be at a version
 // number lower than the latest, migrations will be performed in order to catch
 // it up.
-// TODO re-define the version, currently there is just a version
+// TODO 20220610 re-define the version, currently there is just a version
 var versions = []migration.Version{
 	{
 		Number:    6,
