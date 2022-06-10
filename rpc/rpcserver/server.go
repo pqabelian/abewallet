@@ -2,7 +2,6 @@ package rpcserver
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -11,7 +10,6 @@ import (
 	"github.com/abesuite/abec/abeutil/hdkeychain"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/rpcclient"
-	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abec/wire"
 	"github.com/abesuite/abewallet/chain"
 	"github.com/abesuite/abewallet/internal/cfgutil"
@@ -247,52 +245,52 @@ func confirms(txHeight, curHeight int32) int32 {
 
 func (s *walletServer) FundTransaction(ctx context.Context, req *pb.FundTransactionRequest) (
 	*pb.FundTransactionResponse, error) {
-
-	policy := wallet.OutputSelectionPolicy{
-		Account:               req.Account,
-		RequiredConfirmations: req.RequiredConfirmations,
-	}
-	unspentOutputs, err := s.wallet.UnspentOutputs(policy)
-	if err != nil {
-		return nil, translateError(err)
-	}
-
-	selectedOutputs := make([]*pb.FundTransactionResponse_PreviousOutput, 0, len(unspentOutputs))
-	var totalAmount abeutil.Amount
-	for _, output := range unspentOutputs {
-		selectedOutputs = append(selectedOutputs, &pb.FundTransactionResponse_PreviousOutput{
-			TransactionHash: output.OutPoint.Hash[:],
-			OutputIndex:     output.OutPoint.Index,
-			Amount:          output.Output.Value,
-			PkScript:        output.Output.PkScript,
-			ReceiveTime:     output.ReceiveTime.Unix(),
-			FromCoinbase:    output.OutputKind == wallet.OutputKindCoinbase,
-		})
-		totalAmount += abeutil.Amount(output.Output.Value)
-
-		if req.TargetAmount != 0 && totalAmount > abeutil.Amount(req.TargetAmount) {
-			break
-		}
-	}
-
-	var changeScript []byte
-	if req.IncludeChangeScript && totalAmount > abeutil.Amount(req.TargetAmount) {
-		// TODO: this method is not support by abelian
-		var changeAddr abeutil.Address
-		if err != nil {
-			return nil, translateError(err)
-		}
-		changeScript, err = txscript.PayToAddrScript(changeAddr)
-		if err != nil {
-			return nil, translateError(err)
-		}
-	}
-
-	return &pb.FundTransactionResponse{
-		SelectedOutputs: selectedOutputs,
-		TotalAmount:     int64(totalAmount),
-		ChangePkScript:  changeScript,
-	}, nil
+	return nil, fmt.Errorf("unsupport")
+	//policy := wallet.OutputSelectionPolicy{
+	//	Account:               req.Account,
+	//	RequiredConfirmations: req.RequiredConfirmations,
+	//}
+	//unspentOutputs, err := s.wallet.UnspentOutputs(policy)
+	//if err != nil {
+	//	return nil, translateError(err)
+	//}
+	//
+	//selectedOutputs := make([]*pb.FundTransactionResponse_PreviousOutput, 0, len(unspentOutputs))
+	//var totalAmount abeutil.Amount
+	//for _, output := range unspentOutputs {
+	//	selectedOutputs = append(selectedOutputs, &pb.FundTransactionResponse_PreviousOutput{
+	//		TransactionHash: output.OutPoint.Hash[:],
+	//		OutputIndex:     output.OutPoint.Index,
+	//		Amount:          output.Output.Value,
+	//		PkScript:        output.Output.PkScript,
+	//		ReceiveTime:     output.ReceiveTime.Unix(),
+	//		FromCoinbase:    output.OutputKind == wallet.OutputKindCoinbase,
+	//	})
+	//	totalAmount += abeutil.Amount(output.Output.Value)
+	//
+	//	if req.TargetAmount != 0 && totalAmount > abeutil.Amount(req.TargetAmount) {
+	//		break
+	//	}
+	//}
+	//
+	//var changeScript []byte
+	//if req.IncludeChangeScript && totalAmount > abeutil.Amount(req.TargetAmount) {
+	//	// TODO: this method is not support by abelian
+	//	var changeAddr abeutil.Address
+	//	if err != nil {
+	//		return nil, translateError(err)
+	//	}
+	//	changeScript, err = txscript.PayToAddrScript(changeAddr)
+	//	if err != nil {
+	//		return nil, translateError(err)
+	//	}
+	//}
+	//
+	//return &pb.FundTransactionResponse{
+	//	SelectedOutputs: selectedOutputs,
+	//	TotalAmount:     int64(totalAmount),
+	//	ChangePkScript:  changeScript,
+	//}, nil
 }
 
 func marshalGetTransactionsResult(wresp *wallet.GetTransactionsResult) (
@@ -310,55 +308,55 @@ func marshalGetTransactionsResult(wresp *wallet.GetTransactionsResult) (
 // - Wrong error codes when a block height or hash is not recognized
 func (s *walletServer) GetTransactions(ctx context.Context, req *pb.GetTransactionsRequest) (
 	resp *pb.GetTransactionsResponse, err error) {
-
-	var startBlock, endBlock *wallet.BlockIdentifier
-	if req.StartingBlockHash != nil && req.StartingBlockHeight != 0 {
-		return nil, errors.New(
-			"starting block hash and height may not be specified simultaneously")
-	} else if req.StartingBlockHash != nil {
-		startBlockHash, err := chainhash.NewHash(req.StartingBlockHash)
-		if err != nil {
-			return nil, grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
-		}
-		startBlock = wallet.NewBlockIdentifierFromHash(startBlockHash)
-	} else if req.StartingBlockHeight != 0 {
-		startBlock = wallet.NewBlockIdentifierFromHeight(req.StartingBlockHeight)
-	}
-
-	if req.EndingBlockHash != nil && req.EndingBlockHeight != 0 {
-		return nil, grpc.Errorf(codes.InvalidArgument,
-			"ending block hash and height may not be specified simultaneously")
-	} else if req.EndingBlockHash != nil {
-		endBlockHash, err := chainhash.NewHash(req.EndingBlockHash)
-		if err != nil {
-			return nil, grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
-		}
-		endBlock = wallet.NewBlockIdentifierFromHash(endBlockHash)
-	} else if req.EndingBlockHeight != 0 {
-		endBlock = wallet.NewBlockIdentifierFromHeight(req.EndingBlockHeight)
-	}
-
-	var minRecentTxs int
-	if req.MinimumRecentTransactions != 0 {
-		if endBlock != nil {
-			return nil, grpc.Errorf(codes.InvalidArgument,
-				"ending block and minimum number of recent transactions "+
-					"may not be specified simultaneously")
-		}
-		minRecentTxs = int(req.MinimumRecentTransactions)
-		if minRecentTxs < 0 {
-			return nil, grpc.Errorf(codes.InvalidArgument,
-				"minimum number of recent transactions may not be negative")
-		}
-	}
-
-	_ = minRecentTxs
-
-	gtr, err := s.wallet.GetTransactions(startBlock, endBlock, ctx.Done())
-	if err != nil {
-		return nil, translateError(err)
-	}
-	return marshalGetTransactionsResult(gtr)
+	return nil, fmt.Errorf("unsupport")
+	//var startBlock, endBlock *wallet.BlockIdentifier
+	//if req.StartingBlockHash != nil && req.StartingBlockHeight != 0 {
+	//	return nil, errors.New(
+	//		"starting block hash and height may not be specified simultaneously")
+	//} else if req.StartingBlockHash != nil {
+	//	startBlockHash, err := chainhash.NewHash(req.StartingBlockHash)
+	//	if err != nil {
+	//		return nil, grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
+	//	}
+	//	startBlock = wallet.NewBlockIdentifierFromHash(startBlockHash)
+	//} else if req.StartingBlockHeight != 0 {
+	//	startBlock = wallet.NewBlockIdentifierFromHeight(req.StartingBlockHeight)
+	//}
+	//
+	//if req.EndingBlockHash != nil && req.EndingBlockHeight != 0 {
+	//	return nil, grpc.Errorf(codes.InvalidArgument,
+	//		"ending block hash and height may not be specified simultaneously")
+	//} else if req.EndingBlockHash != nil {
+	//	endBlockHash, err := chainhash.NewHash(req.EndingBlockHash)
+	//	if err != nil {
+	//		return nil, grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
+	//	}
+	//	endBlock = wallet.NewBlockIdentifierFromHash(endBlockHash)
+	//} else if req.EndingBlockHeight != 0 {
+	//	endBlock = wallet.NewBlockIdentifierFromHeight(req.EndingBlockHeight)
+	//}
+	//
+	//var minRecentTxs int
+	//if req.MinimumRecentTransactions != 0 {
+	//	if endBlock != nil {
+	//		return nil, grpc.Errorf(codes.InvalidArgument,
+	//			"ending block and minimum number of recent transactions "+
+	//				"may not be specified simultaneously")
+	//	}
+	//	minRecentTxs = int(req.MinimumRecentTransactions)
+	//	if minRecentTxs < 0 {
+	//		return nil, grpc.Errorf(codes.InvalidArgument,
+	//			"minimum number of recent transactions may not be negative")
+	//	}
+	//}
+	//
+	//_ = minRecentTxs
+	//
+	//gtr, err := s.wallet.GetTransactions(startBlock, endBlock, ctx.Done())
+	//if err != nil {
+	//	return nil, translateError(err)
+	//}
+	//return marshalGetTransactionsResult(gtr)
 }
 
 func (s *walletServer) ChangePassphrase(ctx context.Context, req *pb.ChangePassphraseRequest) (

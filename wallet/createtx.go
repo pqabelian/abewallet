@@ -27,7 +27,7 @@ const (
 
 // byAmount defines the methods needed to satisify sort.Interface to
 // sort credits by their output amount.
-type byAmount []wtxmgr.Credit
+type byAmount []wtxmgr.UnspentUTXO
 
 func (s byAmount) Len() int           { return len(s) }
 func (s byAmount) Less(i, j int) bool { return s[i].Amount < s[j].Amount }
@@ -46,33 +46,6 @@ func (s byAmountAbe) Less(i, j int) bool {
 	}
 }
 func (s byAmountAbe) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
-func makeInputSource(eligible []wtxmgr.Credit) txauthor.InputSource {
-	// Pick largest outputs first.  This is only done for compatibility with
-	// previous tx creation code, not because it's a good idea.
-	sort.Sort(sort.Reverse(byAmount(eligible)))
-
-	// Current inputs and their total value.  These are closed over by the
-	// returned input source and reused across multiple calls.
-	currentTotal := abeutil.Amount(0)
-	currentInputs := make([]*wire.TxIn, 0, len(eligible))
-	currentScripts := make([][]byte, 0, len(eligible))
-	currentInputValues := make([]abeutil.Amount, 0, len(eligible))
-
-	return func(target abeutil.Amount) (abeutil.Amount, []*wire.TxIn,
-		[]abeutil.Amount, [][]byte, error) {
-
-		for currentTotal < target && len(eligible) != 0 {
-			nextCredit := &eligible[0]
-			eligible = eligible[1:]
-			nextInput := wire.NewTxIn(&nextCredit.OutPoint, nil, nil)
-			currentTotal += nextCredit.Amount
-			currentInputs = append(currentInputs, nextInput)
-			currentScripts = append(currentScripts, nextCredit.PkScript)
-			currentInputValues = append(currentInputValues, nextCredit.Amount)
-		}
-		return currentTotal, currentInputs, currentInputValues, currentScripts, nil
-	}
-}
 
 /*func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO, rings map[chainhash.Hash]*wtxmgr.Ring) txauthor.InputSourceAbe {
 	// Pick largest outputs first.  This is only done for compatibility with

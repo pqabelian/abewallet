@@ -9,10 +9,8 @@ import (
 	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abec/abejson"
 	"github.com/abesuite/abec/abeutil"
-	"github.com/abesuite/abec/blockchain"
 	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abec/chainhash"
-	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abec/wire"
 	"github.com/abesuite/abewallet/chain"
 	"github.com/abesuite/abewallet/internal/prompt"
@@ -311,24 +309,6 @@ func (w *Wallet) SetChainSynced(synced bool) {
 // activeData returns the currently-active receiving addresses and all unspent
 // outputs.  This is primarely intended to provide the parameters for a
 // rescan request.
-func (w *Wallet) activeData(dbtx walletdb.ReadWriteTx) ([]abeutil.Address, []wtxmgr.Credit, error) {
-
-	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
-
-	var addrs []abeutil.Address
-
-	// Before requesting the list of spendable UTXOs, we'll delete any
-	// expired output locks.
-	err := w.TxStore.DeleteExpiredLockedOutputs(
-		dbtx.ReadWriteBucket(wtxmgrNamespaceKey),
-	)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	unspent, err := w.TxStore.UnspentOutputs(txmgrNs)
-	return addrs, unspent, err
-}
 
 //TODO(abe):we just provide unspent txo
 func (w *Wallet) activeDataAbe(dbtx walletdb.ReadWriteTx) ([]wtxmgr.UnspentUTXO, error) {
@@ -1314,54 +1294,6 @@ type Balances struct {
 // LabelTransaction adds a label to the transaction with the hash provided. The
 // call will fail if the label is too long, or if the transaction already has
 // a label and the overwrite boolean is not set.
-func (w *Wallet) LabelTransaction(hash chainhash.Hash, label string,
-	overwrite bool) error {
-
-	// Check that the transaction is known to the wallet, and fail if it is
-	// unknown. If the transaction is known, check whether it already has
-	// a label.
-	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
-
-		dbTx, err := w.TxStore.TxDetails(txmgrNs, &hash)
-		if err != nil {
-			return err
-		}
-
-		// If the transaction looked up is nil, it was not found. We
-		// do not allow labelling of unknown transactions so we fail.
-		if dbTx == nil {
-			return ErrUnknownTransaction
-		}
-
-		_, err = wtxmgr.FetchTxLabel(txmgrNs, hash)
-		return err
-	})
-
-	switch err {
-	// If no labels have been written yet, we can silence the error.
-	// Likewise if there is no label, we do not need to do any overwrite
-	// checks.
-	case wtxmgr.ErrNoLabelBucket:
-	case wtxmgr.ErrTxLabelNotFound:
-
-	// If we successfully looked up a label, fail if the overwrite param
-	// is not set.
-	case nil:
-		if !overwrite {
-			return ErrTxLabelExists
-		}
-
-	// In another unrelated error occurred, return it.
-	default:
-		return err
-	}
-
-	return walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-		return w.TxStore.PutTxLabel(txmgrNs, hash, label)
-	})
-}
 
 // PrivKeyForAddress looks up the associated private key for a P2PKH or P2PK
 // address.
@@ -1395,193 +1327,20 @@ const maxEmptyAccounts = 100
 // of "sent transactions" (debits) is always "send", and is not expressed by
 // this type.
 //
-// TODO: This is a requirement of the RPC server and should be moved.
-type CreditCategory byte
-
-// These constants define the possible credit categories.
-const (
-	CreditReceive CreditCategory = iota
-	CreditGenerate
-	CreditImmature
-)
-
-// String returns the category as a string.  This string may be used as the
-// JSON string for categories as part of listtransactions and gettransaction
-// RPC responses.
-func (c CreditCategory) String() string {
-	switch c {
-	case CreditReceive:
-		return "receive"
-	case CreditGenerate:
-		return "generate"
-	case CreditImmature:
-		return "immature"
-	default:
-		return "unknown"
-	}
-}
-
 // RecvCategory returns the category of received credit outputs from a
 // transaction record.  The passed block chain height is used to distinguish
 // immature from mature coinbase outputs.
 //
 // TODO: This is intended for use by the RPC server and should be moved out of
 // this package at a later time.
-func RecvCategory(details *wtxmgr.TxDetails, syncHeight int32, net *chaincfg.Params) CreditCategory {
-	if blockchain.IsCoinBaseTx(&details.MsgTx) {
-		if confirmed(int32(net.CoinbaseMaturity), details.Block.Height,
-			syncHeight) {
-			return CreditGenerate
-		}
-		return CreditImmature
-	}
-	return CreditReceive
-}
 
 // listTransactions creates a object that may be marshalled to a response result
 // for a listtransactions RPC.
 //
-// TODO: This should be moved to the legacyrpc package.
-func listTransactions(tx walletdb.ReadTx, details *wtxmgr.TxDetails, addrMgr *waddrmgr.Manager,
-	syncHeight int32, net *chaincfg.Params) []abejson.ListTransactionsResult {
-
-	//addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-
-	var (
-		blockHashStr  string
-		blockTime     int64
-		confirmations int64
-	)
-	if details.Block.Height != -1 {
-		blockHashStr = details.Block.Hash.String()
-		blockTime = details.Block.Time.Unix()
-		confirmations = int64(confirms(details.Block.Height, syncHeight))
-	}
-
-	results := []abejson.ListTransactionsResult{}
-	txHashStr := details.Hash.String()
-	received := details.Received.Unix()
-	generated := blockchain.IsCoinBaseTx(&details.MsgTx)
-	recvCat := RecvCategory(details, syncHeight, net).String()
-
-	send := len(details.Debits) != 0
-
-	// Fee can only be determined if every input is a debit.
-	var feeF64 float64
-	if len(details.Debits) == len(details.MsgTx.TxIn) {
-		var debitTotal abeutil.Amount
-		for _, deb := range details.Debits {
-			debitTotal += deb.Amount
-		}
-		var outputTotal abeutil.Amount
-		for _, output := range details.MsgTx.TxOut {
-			outputTotal += abeutil.Amount(output.Value)
-		}
-		// Note: The actual fee is debitTotal - outputTotal.  However,
-		// this RPC reports negative numbers for fees, so the inverse
-		// is calculated.
-		feeF64 = (outputTotal - debitTotal).ToABE()
-	}
-
-outputs:
-	for i, output := range details.MsgTx.TxOut {
-		// Determine if this output is a credit, and if so, determine
-		// its spentness.
-		var isCredit bool
-		var spentCredit bool
-		for _, cred := range details.Credits {
-			if cred.Index == uint32(i) {
-				// Change outputs are ignored.
-				if cred.Change {
-					continue outputs
-				}
-
-				isCredit = true
-				spentCredit = cred.Spent
-				break
-			}
-		}
-
-		var address string
-		var accountName string
-		_, addrs, _, _ := txscript.ExtractPkScriptAddrs(output.PkScript, net)
-		if len(addrs) == 1 {
-			addr := addrs[0]
-			address = addr.EncodeAddress()
-			accountName = ""
-		}
-
-		amountF64 := abeutil.Amount(output.Value).ToABE()
-		result := abejson.ListTransactionsResult{
-			// Fields left zeroed:
-			//   InvolvesWatchOnly
-			//   BlockIndex
-			//
-			// Fields set below:
-			//   Account (only for non-"send" categories)
-			//   Category
-			//   Amount
-			//   Fee
-			Address:         address,
-			Vout:            uint32(i),
-			Confirmations:   confirmations,
-			Generated:       generated,
-			BlockHash:       blockHashStr,
-			BlockTime:       blockTime,
-			TxID:            txHashStr,
-			WalletConflicts: []string{},
-			Time:            received,
-			TimeReceived:    received,
-		}
-
-		// Add a received/generated/immature result if this is a credit.
-		// If the output was spent, create a second result under the
-		// send category with the inverse of the output amount.  It is
-		// therefore possible that a single output may be included in
-		// the results set zero, one, or two times.
-		//
-		// Since credits are not saved for outputs that are not
-		// controlled by this wallet, all non-credits from transactions
-		// with debits are grouped under the send category.
-
-		if send || spentCredit {
-			result.Category = "send"
-			result.Amount = -amountF64
-			result.Fee = &feeF64
-			results = append(results, result)
-		}
-		if isCredit {
-			result.Account = accountName
-			result.Category = recvCat
-			result.Amount = amountF64
-			result.Fee = nil
-			results = append(results, result)
-		}
-	}
-	return results
-}
 
 // ListSinceBlock returns a slice of objects with details about transactions
 // since the given block. If the block is -1 then all transactions are included.
 // This is intended to be used for listsinceblock RPC replies.
-func (w *Wallet) ListSinceBlock(start, end, syncHeight int32) ([]abejson.ListTransactionsResult, error) {
-	txList := []abejson.ListTransactionsResult{}
-	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
-
-		rangeFn := func(details []wtxmgr.TxDetails) (bool, error) {
-			for _, detail := range details {
-				jsonResults := listTransactions(tx, &detail,
-					w.ManagerAbe, syncHeight, w.chainParams)
-				txList = append(txList, jsonResults...)
-			}
-			return false, nil
-		}
-
-		return w.TxStore.RangeTransactions(txmgrNs, start, end, rangeFn)
-	})
-	return txList, err
-}
 
 // ListTransactions returns a slice of objects with details about a recorded
 // transaction.  This is intended to be used for listtransactions RPC
@@ -1629,121 +1388,6 @@ type GetTransactionsResult struct {
 // Transaction results are organized by blocks in ascending order and unmined
 // transactions in an unspecified order.  Mined transactions are saved in a
 // Block structure which records properties about the block.
-func (w *Wallet) GetTransactions(startBlock, endBlock *BlockIdentifier, cancel <-chan struct{}) (*GetTransactionsResult, error) {
-	var start, end int32 = 0, -1
-
-	w.chainClientLock.Lock()
-	chainClient := w.chainClient
-	w.chainClientLock.Unlock()
-
-	// TODO: Fetching block heights by their hashes is inherently racy
-	// because not all block headers are saved but when they are for SPV the
-	// db can be queried directly without this.
-	if startBlock != nil {
-		if startBlock.hash == nil {
-			start = startBlock.height
-		} else {
-			if chainClient == nil {
-				return nil, errors.New("no chain server client")
-			}
-			switch client := chainClient.(type) {
-			case *chain.RPCClient:
-				startHeader, err := client.GetBlockHeaderVerbose(
-					startBlock.hash,
-				)
-				if err != nil {
-					return nil, err
-				}
-				start = startHeader.Height
-				//todo(ABE): ABE does not support BitcoinDClient or NeutrinoClient
-				//case *chain.BitcoindClient:
-				//	var err error
-				//	start, err = client.GetBlockHeight(startBlock.hash)
-				//	if err != nil {
-				//		return nil, err
-				//	}
-				//case *chain.NeutrinoClient:
-				//	var err error
-				//	start, err = client.GetBlockHeight(startBlock.hash)
-				//	if err != nil {
-				//		return nil, err
-				//	}
-			}
-		}
-	}
-	if endBlock != nil {
-		if endBlock.hash == nil {
-			end = endBlock.height
-		} else {
-			if chainClient == nil {
-				return nil, errors.New("no chain server client")
-			}
-			switch client := chainClient.(type) {
-			case *chain.RPCClient:
-				endHeader, err := client.GetBlockHeaderVerbose(
-					endBlock.hash,
-				)
-				if err != nil {
-					return nil, err
-				}
-				end = endHeader.Height
-				//todo(ABE): ABE does not support BitcoinDClient or NeutrinoClient
-				//case *chain.BitcoindClient:
-				//	var err error
-				//	start, err = client.GetBlockHeight(endBlock.hash)
-				//	if err != nil {
-				//		return nil, err
-				//	}
-				//case *chain.NeutrinoClient:
-				//	var err error
-				//	end, err = client.GetBlockHeight(endBlock.hash)
-				//	if err != nil {
-				//		return nil, err
-				//	}
-			}
-		}
-	}
-
-	var res GetTransactionsResult
-	err := walletdb.View(w.db, func(dbtx walletdb.ReadTx) error {
-		txmgrNs := dbtx.ReadBucket(wtxmgrNamespaceKey)
-
-		rangeFn := func(details []wtxmgr.TxDetails) (bool, error) {
-			// TODO: probably should make RangeTransactions not reuse the
-			// details backing array memory.
-			dets := make([]wtxmgr.TxDetails, len(details))
-			copy(dets, details)
-			details = dets
-
-			txs := make([]TransactionSummary, 0, len(details))
-			for i := range details {
-				txs = append(txs, makeTxSummary(dbtx, w, &details[i]))
-			}
-
-			if details[0].Block.Height != -1 {
-				blockHash := details[0].Block.Hash
-				res.MinedTransactions = append(res.MinedTransactions, Block{
-					Hash:         &blockHash,
-					Height:       details[0].Block.Height,
-					Timestamp:    details[0].Block.Time.Unix(),
-					Transactions: txs,
-				})
-			} else {
-				res.UnminedTransactions = txs
-			}
-
-			select {
-			case <-cancel:
-				return true, nil
-			default:
-				return false, nil
-			}
-		}
-
-		return w.TxStore.RangeTransactions(txmgrNs, start, end, rangeFn)
-	})
-	return &res, err
-}
 
 // AccountResult is a single account result for the AccountsResult type.
 
@@ -1770,36 +1414,10 @@ type AccountBalanceResult struct {
 // time and mined in the same block are not guaranteed to be sorted by the order
 // they appear in the block.  Credits from the same transaction are sorted by
 // output index.
-type creditSlice []wtxmgr.Credit
 type unspentUTXOSlice []wtxmgr.UnspentUTXO
-
-func (s creditSlice) Len() int {
-	return len(s)
-}
 
 func (u unspentUTXOSlice) Len() int {
 	return len(u)
-}
-func (s creditSlice) Less(i, j int) bool {
-	switch {
-	// If both credits are from the same tx, sort by output index.
-	case s[i].OutPoint.Hash == s[j].OutPoint.Hash:
-		return s[i].OutPoint.Index < s[j].OutPoint.Index
-
-	// If both transactions are unmined, sort by their received date.
-	case s[i].Height == -1 && s[j].Height == -1:
-		return s[i].Received.Before(s[j].Received)
-
-	// Unmined (newer) txs always come last.
-	case s[i].Height == -1:
-		return false
-	case s[j].Height == -1:
-		return true
-
-	// If both txs are mined in different blocks, sort by block height.
-	default:
-		return s[i].Height < s[j].Height
-	}
 }
 func (u unspentUTXOSlice) Less(i, j int) bool {
 	switch {
@@ -1823,9 +1441,6 @@ func (u unspentUTXOSlice) Less(i, j int) bool {
 	}
 }
 
-func (s creditSlice) Swap(i, j int) {
-	s[i], s[j] = s[j], s[i]
-}
 func (u unspentUTXOSlice) Swap(i, j int) {
 	u[i], u[j] = u[j], u[i]
 }
@@ -2061,12 +1676,6 @@ func confirms(txHeight, curHeight int32) int32 {
 
 // AccountTotalReceivedResult is a single result for the
 // Wallet.TotalReceivedForAccounts method.
-type AccountTotalReceivedResult struct {
-	AccountNumber    uint32
-	AccountName      string
-	TotalReceived    abeutil.Amount
-	LastConfirmation int32
-}
 
 // TotalReceivedForAccounts iterates through a wallet's transaction history,
 // returning the total amount of Bitcoin received for all accounts.
@@ -2193,7 +1802,7 @@ func (w *Wallet) reliablyPublishTransaction(tx *wire.MsgTxAbe,
 		// failed
 		return nil, err
 	}
-	txRec, err := wtxmgr.NewTxRecordAbeFromMsgTxAbe(tx, time.Now())
+	txRec, err := wtxmgr.NewTxRecordFromMsgTx(tx, time.Now())
 	if err != nil {
 		return nil, err
 	}

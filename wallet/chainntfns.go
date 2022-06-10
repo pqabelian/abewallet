@@ -411,7 +411,7 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 }
 
 //	todo(ABE): Wallet adds transactions to wallet db.
-func (w *Wallet) addRelevantTxAbe(dbtx walletdb.ReadWriteTx, rec *wtxmgr.TxRecordAbe, block *wtxmgr.BlockAbeMeta) error {
+func (w *Wallet) addRelevantTxAbe(dbtx walletdb.ReadWriteTx, rec *wtxmgr.TxRecord, block *wtxmgr.BlockAbeMeta) error {
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
 	//addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
 	// At the moment all notified transactions are assumed to actually be

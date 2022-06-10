@@ -1,12 +1,10 @@
 package wallet
 
 import (
-	"bytes"
 	"sync"
 
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/chainhash"
-	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abec/wire"
 	"github.com/abesuite/abewallet/walletdb"
 	"github.com/abesuite/abewallet/wtxmgr"
@@ -43,85 +41,8 @@ func newNotificationServer(wallet *Wallet) *NotificationServer {
 }
 
 // lookupInputAccount look up the account which contain the address in the output the debit pointing to
-func lookupInputAccount(dbtx walletdb.ReadTx, w *Wallet, details *wtxmgr.TxDetails, deb wtxmgr.DebitRecord) uint32 {
-	//addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
-	txmgrNs := dbtx.ReadBucket(wtxmgrNamespaceKey)
-
-	// TODO: Debits should record which account(s?) they
-	// debit from so this doesn't need to be looked up.
-	prevOP := &details.MsgTx.TxIn[deb.Index].PreviousOutPoint
-	prev, err := w.TxStore.TxDetails(txmgrNs, &prevOP.Hash)
-	if err != nil {
-		log.Errorf("Cannot query previous transaction details for %v: %v", prevOP.Hash, err)
-		return 0
-	}
-	if prev == nil {
-		log.Errorf("Missing previous transaction %v", prevOP.Hash)
-		return 0
-	}
-	prevOut := prev.MsgTx.TxOut[prevOP.Index]
-	_, _, _, err = txscript.ExtractPkScriptAddrs(prevOut.PkScript, w.chainParams)
-	var inputAcct uint32
-	// TODO delete it
-	return inputAcct
-}
 
 //lookupOutputChain look up the address chain which idetifies the address which is contained in the credit
-
-func makeTxSummary(dbtx walletdb.ReadTx, w *Wallet, details *wtxmgr.TxDetails) TransactionSummary {
-	serializedTx := details.SerializedTx
-	if serializedTx == nil {
-		var buf bytes.Buffer
-		err := details.MsgTx.Serialize(&buf)
-		if err != nil {
-			log.Errorf("Transaction serialization: %v", err)
-		}
-		serializedTx = buf.Bytes()
-	}
-	var fee abeutil.Amount
-	if len(details.Debits) == len(details.MsgTx.TxIn) {
-		for _, deb := range details.Debits {
-			fee += deb.Amount
-		}
-		for _, txOut := range details.MsgTx.TxOut {
-			fee -= abeutil.Amount(txOut.Value)
-		}
-	}
-	var inputs []TransactionSummaryInput
-	if len(details.Debits) != 0 {
-		inputs = make([]TransactionSummaryInput, len(details.Debits))
-		for i, d := range details.Debits {
-			inputs[i] = TransactionSummaryInput{
-				Index:           d.Index,
-				PreviousAccount: lookupInputAccount(dbtx, w, details, d),
-				PreviousAmount:  d.Amount,
-			}
-		}
-	}
-	outputs := make([]TransactionSummaryOutput, 0, len(details.MsgTx.TxOut))
-	for i := range details.MsgTx.TxOut {
-		credIndex := len(outputs)
-		mine := len(details.Credits) > credIndex && details.Credits[credIndex].Index == uint32(i)
-		if !mine {
-			continue
-		}
-		output := TransactionSummaryOutput{
-			Index:    uint32(i),
-			Account:  ^uint32(0),
-			Internal: false,
-		}
-		outputs = append(outputs, output)
-	}
-	return TransactionSummary{
-		Hash:        &details.Hash,
-		Transaction: serializedTx,
-		MyInputs:    inputs,
-		MyOutputs:   outputs,
-		Fee:         fee,
-		Timestamp:   details.Received.Unix(),
-		Label:       details.Label,
-	}
-}
 
 func totalBalances(dbtx walletdb.ReadTx, w *Wallet, m map[uint32]abeutil.Amount) error {
 	return nil
@@ -146,43 +67,43 @@ func relevantAccounts(w *Wallet, m map[uint32]abeutil.Amount, txs []TransactionS
 	}
 }
 
-func (s *NotificationServer) notifyUnminedTransaction(dbtx walletdb.ReadTx, details *wtxmgr.TxDetails) {
-	// Sanity check: should not be currently coalescing a notification for
-	// mined transactions at the same time that an unmined tx is notified.
-	if s.currentTxNtfn != nil {
-		log.Errorf("Notifying unmined tx notification (%s) while creating notification for blocks",
-			details.Hash)
-	}
-
-	defer s.mu.Unlock()
-	s.mu.Lock()
-	clients := s.transactions
-	if len(clients) == 0 {
-		return
-	}
-
-	unminedTxs := []TransactionSummary{makeTxSummary(dbtx, s.wallet, details)}
-	unminedHashes, err := s.wallet.TxStore.UnminedTxHashes(dbtx.ReadBucket(wtxmgrNamespaceKey))
-	if err != nil {
-		log.Errorf("Cannot fetch unmined transaction hashes: %v", err)
-		return
-	}
-	bals := make(map[uint32]abeutil.Amount)
-	relevantAccounts(s.wallet, bals, unminedTxs)
-	err = totalBalances(dbtx, s.wallet, bals)
-	if err != nil {
-		log.Errorf("Cannot determine balances for relevant accounts: %v", err)
-		return
-	}
-	n := &TransactionNotifications{
-		UnminedTransactions:      unminedTxs,
-		UnminedTransactionHashes: unminedHashes,
-		NewBalances:              flattenBalanceMap(bals),
-	}
-	for _, c := range clients {
-		c <- n
-	}
-}
+//func (s *NotificationServer) notifyUnminedTransaction(dbtx walletdb.ReadTx, details *wtxmgr.TxDetails) {
+//	// Sanity check: should not be currently coalescing a notification for
+//	// mined transactions at the same time that an unmined tx is notified.
+//	if s.currentTxNtfn != nil {
+//		log.Errorf("Notifying unmined tx notification (%s) while creating notification for blocks",
+//			details.Hash)
+//	}
+//
+//	defer s.mu.Unlock()
+//	s.mu.Lock()
+//	clients := s.transactions
+//	if len(clients) == 0 {
+//		return
+//	}
+//
+//	unminedTxs := []TransactionSummary{makeTxSummary(dbtx, s.wallet, details)}
+//	unminedHashes, err := s.wallet.TxStore.UnminedTxHashes(dbtx.ReadBucket(wtxmgrNamespaceKey))
+//	if err != nil {
+//		log.Errorf("Cannot fetch unmined transaction hashes: %v", err)
+//		return
+//	}
+//	bals := make(map[uint32]abeutil.Amount)
+//	relevantAccounts(s.wallet, bals, unminedTxs)
+//	err = totalBalances(dbtx, s.wallet, bals)
+//	if err != nil {
+//		log.Errorf("Cannot determine balances for relevant accounts: %v", err)
+//		return
+//	}
+//	n := &TransactionNotifications{
+//		UnminedTransactions:      unminedTxs,
+//		UnminedTransactionHashes: unminedHashes,
+//		NewBalances:              flattenBalanceMap(bals),
+//	}
+//	for _, c := range clients {
+//		c <- n
+//	}
+//}
 
 func (s *NotificationServer) notifyDetachedBlock(hash *chainhash.Hash) {
 	if s.currentTxNtfn == nil {
@@ -191,23 +112,23 @@ func (s *NotificationServer) notifyDetachedBlock(hash *chainhash.Hash) {
 	s.currentTxNtfn.DetachedBlocks = append(s.currentTxNtfn.DetachedBlocks, hash)
 }
 
-func (s *NotificationServer) notifyMinedTransaction(dbtx walletdb.ReadTx, details *wtxmgr.TxDetails, block *wtxmgr.BlockMeta) {
-	if s.currentTxNtfn == nil {
-		s.currentTxNtfn = &TransactionNotifications{}
-	}
-	n := len(s.currentTxNtfn.AttachedBlocks)
-	if n == 0 || *s.currentTxNtfn.AttachedBlocks[n-1].Hash != block.Hash {
-		s.currentTxNtfn.AttachedBlocks = append(s.currentTxNtfn.AttachedBlocks, Block{
-			Hash:      &block.Hash,
-			Height:    block.Height,
-			Timestamp: block.Time.Unix(),
-		})
-		n++
-	}
-	txs := s.currentTxNtfn.AttachedBlocks[n-1].Transactions
-	s.currentTxNtfn.AttachedBlocks[n-1].Transactions =
-		append(txs, makeTxSummary(dbtx, s.wallet, details))
-}
+//func (s *NotificationServer) notifyMinedTransaction(dbtx walletdb.ReadTx, details *wtxmgr.TxDetails, block *wtxmgr.BlockMeta) {
+//	if s.currentTxNtfn == nil {
+//		s.currentTxNtfn = &TransactionNotifications{}
+//	}
+//	n := len(s.currentTxNtfn.AttachedBlocks)
+//	if n == 0 || *s.currentTxNtfn.AttachedBlocks[n-1].Hash != block.Hash {
+//		s.currentTxNtfn.AttachedBlocks = append(s.currentTxNtfn.AttachedBlocks, Block{
+//			Hash:      &block.Hash,
+//			Height:    block.Height,
+//			Timestamp: block.Time.Unix(),
+//		})
+//		n++
+//	}
+//	txs := s.currentTxNtfn.AttachedBlocks[n-1].Transactions
+//	s.currentTxNtfn.AttachedBlocks[n-1].Transactions =
+//		append(txs, makeTxSummary(dbtx, s.wallet, details))
+//}
 
 func (s *NotificationServer) notifyAttachedBlock(dbtx walletdb.ReadTx, block *wtxmgr.BlockMeta) {
 	if s.currentTxNtfn == nil {
