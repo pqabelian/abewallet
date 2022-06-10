@@ -204,7 +204,7 @@ func makeInputSource(eligible []wtxmgr.Credit) txauthor.InputSource {
 // address manager.
 
 //type secretSourceAbe struct {
-//	*waddrmgr.ManagerAbe
+//	*waddrmgr.Manager
 //	addrmgrNs walletdb.ReadBucket
 //}
 //func (s secretSourceAbe) GetKey(addr abeutil.Address) (*btcec.PrivateKey, bool, error) {
@@ -276,7 +276,7 @@ func makeInputSource(eligible []wtxmgr.Credit) txauthor.InputSource {
 //			// scope responsible for P2WPKH addresses to do so. As a hack to
 //			// allow spending from the imported account, change addresses
 //			// are created from account 0.
-//			return w.ManagerAbe.NewChangeAddress(addrmgrNs)
+//			return w.Manager.NewChangeAddress(addrmgrNs)
 //		}
 //		unsignedTx, err = txauthor.NewUnsignedTransactionAbe(txOutDescs, feeSatPerKb,
 //			inputSource, changeSource)
@@ -289,7 +289,7 @@ func makeInputSource(eligible []wtxmgr.Credit) txauthor.InputSource {
 //		return nil, err
 //	}
 //	// Get current block's height and hash.
-//	//bs:=w.ManagerAbe.SyncedTo()
+//	//bs:=w.Manager.SyncedTo()
 //
 //	// use db.View to spent coins, if successful, use db.Update to update the database
 //
@@ -317,7 +317,7 @@ func makeInputSource(eligible []wtxmgr.Credit) txauthor.InputSource {
 //		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
 //		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
 //		// TODO 20210520: the signed message will be the hash of the transaction information without signature
-//		err = unsignedTx.AddAllInputScripts([]byte("this is a test"), w.ManagerAbe, addrmgrNs, txmgrNs)
+//		err = unsignedTx.AddAllInputScripts([]byte("this is a test"), w.Manager, addrmgrNs, txmgrNs)
 //		if err != nil {
 //			return nil
 //		}
@@ -740,7 +740,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 		return nil, err
 	}
 	// Get current block's height and hash.
-	//bs:=w.ManagerAbe.SyncedTo()
+	//bs:=w.Manager.SyncedTo()
 
 	// use db.View to spent coins, if successful, use db.Update to update the database
 
@@ -768,7 +768,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 			if err != nil {
 				return err
 			}
-			serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, err = w.ManagerAbe.FetchAddressKeyEncAbe(addrmgrNs, coinAddr)
+			serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, err = w.ManagerAbe.FetchAddressKeyEnc(addrmgrNs, coinAddr)
 			if err != nil {
 				return err
 			}
@@ -893,7 +893,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 	//	addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
 	//	txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
 	//	// TODO 20210520: the signed message will be the hash of the transaction information without signature
-	//	err = unsignedTx.AddAllInputScripts([]byte("this is a test"), w.ManagerAbe, addrmgrNs, txmgrNs)
+	//	err = unsignedTx.AddAllInputScripts([]byte("this is a test"), w.Manager, addrmgrNs, txmgrNs)
 	//	if err != nil {
 	//		return nil
 	//	}

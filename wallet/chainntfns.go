@@ -91,7 +91,7 @@ func (w *Wallet) handleChainNotifications() {
 						if _, ok := coinAddrToVSK[addrKey]; ok {
 							continue
 						}
-						addrBytesEnc, _, addressSecretSnEnc, vskBytesEnc, err := w.ManagerAbe.FetchAddressKeyEncAbe(addrmgrNs, coinAddr)
+						addrBytesEnc, _, addressSecretSnEnc, vskBytesEnc, err := w.ManagerAbe.FetchAddressKeyEnc(addrmgrNs, coinAddr)
 						if err != nil {
 							return err
 						}
@@ -277,7 +277,7 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 			if _, ok := coinAddrToVSK[addrKey]; ok {
 				continue
 			}
-			addrBytesEnc, _, addressSecretSnEnc, vskBytesEnc, err := w.ManagerAbe.FetchAddressKeyEncAbe(addrmgrNs, coinAddr)
+			addrBytesEnc, _, addressSecretSnEnc, vskBytesEnc, err := w.ManagerAbe.FetchAddressKeyEnc(addrmgrNs, coinAddr)
 			if err != nil {
 				return err
 			}
@@ -466,7 +466,7 @@ type birthdayStore interface {
 // manager that satisfies the birthdayStore interface.
 type walletBirthdayStore struct {
 	db         walletdb.DB
-	managerAbe *waddrmgr.ManagerAbe
+	managerAbe *waddrmgr.Manager
 }
 
 var _ birthdayStore = (*walletBirthdayStore)(nil)

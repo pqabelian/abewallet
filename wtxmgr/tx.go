@@ -774,7 +774,7 @@ type LockID [32]byte
 // Store implements a transaction store for storing and managing wallet
 // transactions.
 type Store struct {
-	manager *waddrmgr.ManagerAbe
+	manager *waddrmgr.Manager
 
 	chainParams *chaincfg.Params
 
@@ -789,7 +789,7 @@ type Store struct {
 // Open opens the wallet transaction store from a walletdb namespace.  If the
 // store does not exist, ErrNoExist is returned. `lockDuration` represents how
 // long outputs are locked for.
-func Open(addrMgr *waddrmgr.ManagerAbe, ns walletdb.ReadBucket, chainParams *chaincfg.Params) (*Store, error) {
+func Open(addrMgr *waddrmgr.Manager, ns walletdb.ReadBucket, chainParams *chaincfg.Params) (*Store, error) {
 
 	// Open the store.
 	err := openStore(ns)
@@ -1782,7 +1782,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, addrMgrNs wa
 		if err != nil {
 			return err
 		}
-		addressEnc, _, _, valueSecretKeyEnc, err := s.manager.FetchAddressKeyEncAbe(addrMgrNs, coinAddr)
+		addressEnc, _, _, valueSecretKeyEnc, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
 		if err != nil {
 			return err
 		}
@@ -1961,7 +1961,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, addrMgrNs wa
 			if err != nil {
 				return err
 			}
-			addressEnc, _, _, valueSecretKeyEnc, err := s.manager.FetchAddressKeyEncAbe(addrMgrNs, coinAddr)
+			addressEnc, _, _, valueSecretKeyEnc, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
 			if err != nil {
 				return err
 			}
@@ -2314,7 +2314,7 @@ func (s *Store) InsertBlockAbeNew(txMgrNs walletdb.ReadWriteBucket, addrMgrNs wa
 					if err != nil {
 						return err
 					}
-					_, _, addressSecretSnEnc, _, err := s.manager.FetchAddressKeyEncAbe(addrMgrNs, coinAddr)
+					_, _, addressSecretSnEnc, _, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
 					if err != nil {
 						return err
 					}
@@ -2817,7 +2817,7 @@ func (s *Store) Rollback(ns walletdb.ReadWriteBucket, height int32) error {
 	return s.rollback(ns, height)
 }
 
-func (s *Store) RollbackAbe(managerAbe *waddrmgr.ManagerAbe, waddrmgr walletdb.ReadWriteBucket, wtxmgr walletdb.ReadWriteBucket, height int32) error {
+func (s *Store) RollbackAbe(managerAbe *waddrmgr.Manager, waddrmgr walletdb.ReadWriteBucket, wtxmgr walletdb.ReadWriteBucket, height int32) error {
 	return s.rollbackAbeNew(managerAbe, waddrmgr, wtxmgr, height)
 }
 
@@ -3397,7 +3397,7 @@ func (s *Store) rollbackAbe(ns walletdb.ReadWriteBucket, height int32) error {
 	return putMinedBalance(ns, balance)
 }
 
-func (s *Store) rollbackAbeNew(manager *waddrmgr.ManagerAbe, waddrmgrNs walletdb.ReadWriteBucket, wtxmgrNs walletdb.ReadWriteBucket, height int32) error {
+func (s *Store) rollbackAbeNew(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWriteBucket, wtxmgrNs walletdb.ReadWriteBucket, height int32) error {
 	balance, err := fetchMinedBalance(wtxmgrNs)
 	if err != nil {
 		return err

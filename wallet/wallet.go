@@ -82,7 +82,7 @@ type Wallet struct {
 	// Data stores
 	db walletdb.DB
 	//Manager    *waddrmgr.Manager
-	ManagerAbe *waddrmgr.ManagerAbe
+	ManagerAbe *waddrmgr.Manager
 	TxStore    *wtxmgr.Store
 
 	chainClient        chain.Interface
@@ -715,7 +715,7 @@ func (w *Wallet) recoveryAbe(chainClient chain.Interface,
 	// that a wallet rescan will be performed from the wallet's tip, which
 	// will be of bestHeight after completing the recovery process.
 	//var blocks []*waddrmgr.BlockStamp
-	//startHeight := w.ManagerAbe.SyncedTo().Height + 1
+	//startHeight := w.Manager.SyncedTo().Height + 1
 	//for height := startHeight; height <= bestHeight; height++ {
 	//	hash, err := chainClient.GetBlockHash(int64(height))
 	//	if err != nil {
@@ -1243,7 +1243,7 @@ func (w *Wallet) FetchUnspentUTXOSet() ([]wtxmgr.UnspentUTXO, error) {
 func (w *Wallet) FetchSpentButUnminedTXOSet() ([]wtxmgr.SpentButUnminedTXO, error) {
 	var utxos []wtxmgr.SpentButUnminedTXO
 	var err error
-	//bs := w.ManagerAbe.SyncedTo()
+	//bs := w.Manager.SyncedTo()
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
@@ -1255,7 +1255,7 @@ func (w *Wallet) FetchSpentButUnminedTXOSet() ([]wtxmgr.SpentButUnminedTXO, erro
 func (w *Wallet) FetchSpentAndConfirmedTXOSet() ([]wtxmgr.SpentConfirmedTXO, error) {
 	var utxos []wtxmgr.SpentConfirmedTXO
 	var err error
-	//bs := w.ManagerAbe.SyncedTo()
+	//bs := w.Manager.SyncedTo()
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
@@ -1442,7 +1442,7 @@ func RecvCategory(details *wtxmgr.TxDetails, syncHeight int32, net *chaincfg.Par
 // for a listtransactions RPC.
 //
 // TODO: This should be moved to the legacyrpc package.
-func listTransactions(tx walletdb.ReadTx, details *wtxmgr.TxDetails, addrMgr *waddrmgr.ManagerAbe,
+func listTransactions(tx walletdb.ReadTx, details *wtxmgr.TxDetails, addrMgr *waddrmgr.Manager,
 	syncHeight int32, net *chaincfg.Params) []abejson.ListTransactionsResult {
 
 	//addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
@@ -1985,7 +1985,7 @@ func (w *Wallet) NewAddressKeyAbe() (uint64, []byte, error) {
 	err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 		addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 		var err error
-		seedEnc, err := w.ManagerAbe.FetchSeedEncAbe(addrmgrNs)
+		seedEnc, err := w.ManagerAbe.FetchSeedEnc(addrmgrNs)
 		if err != nil {
 			return err
 		}
@@ -1994,7 +1994,7 @@ func (w *Wallet) NewAddressKeyAbe() (uint64, []byte, error) {
 			return err
 		}
 		var serializedASksp, serializedASksn, serializedVSk []byte
-		numberOrder, addr, serializedASksp, serializedASksn, serializedVSk, err = w.ManagerAbe.GenerateAddressKeysAbe(addrmgrNs, seed)
+		numberOrder, addr, serializedASksp, serializedASksn, serializedVSk, err = w.ManagerAbe.GenerateAddressKeys(addrmgrNs, seed)
 		if err != nil {
 			return err
 		}
@@ -2021,7 +2021,7 @@ func (w *Wallet) NewAddressKeyAbe() (uint64, []byte, error) {
 
 		addKey := chainhash.DoubleHashB(addr[4 : 4+abecryptoparam.PQRingCTPP.AddressPublicKeySerializeSize()])
 
-		err = w.ManagerAbe.PutAddressKeysEncAbe(addrmgrNs, addKey[:], valueSecretKeyEnc,
+		err = w.ManagerAbe.PutAddressKeysEnc(addrmgrNs, addKey[:], valueSecretKeyEnc,
 			addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
 		if err != nil {
 			return err
@@ -2451,7 +2451,7 @@ func createAbe(db walletdb.DB, pubPass, privPass, seed []byte, end uint64,
 			return err
 		}
 
-		err = waddrmgr.CreateAbe(
+		err = waddrmgr.Create(
 			addrmgrNs, seed, pubPass, privPass, end, params, nil, birthday,
 		)
 		if err != nil {
@@ -2467,7 +2467,7 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 
 	var (
 		//addrMgr *waddrmgr.Manager
-		addrMgrAbe *waddrmgr.ManagerAbe
+		addrMgrAbe *waddrmgr.Manager
 		txMgr      *wtxmgr.Store
 	)
 
@@ -2495,7 +2495,7 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 
 		//TODO(abe):disable old manager
 		//addrMgr, err = waddrmgr.Open(addrMgrBucket, pubPass, params)
-		addrMgrAbe, err = waddrmgr.OpenAbe(addrMgrBucket, pubPass, params)
+		addrMgrAbe, err = waddrmgr.Open(addrMgrBucket, pubPass, params)
 		if err != nil {
 			return err
 		}

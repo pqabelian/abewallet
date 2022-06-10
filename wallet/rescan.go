@@ -141,7 +141,7 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 						if _, ok := coinAddrToVSK[addrKey]; ok {
 							continue
 						}
-						addrBytesEnc, _, addressSecretSnEnc, vskBytesEnc, err := w.ManagerAbe.FetchAddressKeyEncAbe(addrmgrNs, coinAddr)
+						addrBytesEnc, _, addressSecretSnEnc, vskBytesEnc, err := w.ManagerAbe.FetchAddressKeyEnc(addrmgrNs, coinAddr)
 						if addrBytesEnc != nil && vskBytesEnc != nil {
 							addrBytes, _, addressSecretSnBytes, vskBytes, err := w.ManagerAbe.DecryptAddressKey(addrBytesEnc, nil, addressSecretSnEnc, vskBytesEnc)
 							if err != nil {

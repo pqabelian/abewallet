@@ -11,7 +11,6 @@ import (
 	"github.com/abesuite/abec/abeutil/hdkeychain"
 	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abec/chainhash"
-	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abewallet/internal/prompt"
 	"github.com/abesuite/abewallet/internal/zero"
 	"github.com/abesuite/abewallet/snacl"
@@ -247,15 +246,14 @@ const (
 // paths.
 var newCryptoKey = defaultNewCryptoKey
 
-type ManagerAbe struct {
+type Manager struct {
 	mtx sync.RWMutex
 
 	// scopedManager is a mapping of scope of scoped manager, the manager
 	// itself loaded into memory.
-	//scopedManagers map[KeyScope]*ScopedKeyManager  //TODO(abe): we do not need scope manager, the account is we need,each account means a master publick key
+	//scopedManagers map[KeyScope]*ScopedKeyManager
 	//payeeManagers []*PayeeManager
-	// TODO(abe): we do not need branch due to we can not identify which is a change address or a normal address
-	//  if we need change we just derived a key and form it into an address scipt as a our coin
+
 	//externalAddrSchemas map[AddressType][]KeyScope
 	//internalAddrSchemas map[AddressType][]KeyScope
 	gcnt         uint64 // global count for generate address and information for spending
@@ -308,7 +306,7 @@ type ManagerAbe struct {
 
 // WatchOnly returns true if the root manager is in watch only mode, and false
 // otherwise.
-func (m *ManagerAbe) WatchOnly() bool {
+func (m *Manager) WatchOnly() bool {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
@@ -319,7 +317,7 @@ func (m *ManagerAbe) WatchOnly() bool {
 // otherwise.
 //
 // NOTE: This method requires the Manager's lock to be held.
-func (m *ManagerAbe) watchOnly() bool {
+func (m *Manager) watchOnly() bool {
 	return m.watchingOnly
 }
 
@@ -327,8 +325,7 @@ func (m *ManagerAbe) watchOnly() bool {
 // with the address manager.
 //
 // This function MUST be called with the manager lock held for writes.
-func (m *ManagerAbe) lock() {
-	//   TODO(abe): in payeemanger, we have no private key to zero
+func (m *Manager) lock() {
 	// Remove clear text private master and crypto keys from memory.
 	m.cryptoKeyScript.Zero()
 	m.cryptoKeyPriv.Zero()
@@ -349,7 +346,7 @@ func (m *ManagerAbe) lock() {
 // Close cleanly shuts down the manager.  It makes a best try effort to remove
 // and zero all private key and sensitive public key material associated with
 // the address manager from memory.
-func (m *ManagerAbe) Close() {
+func (m *Manager) Close() {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -379,20 +376,8 @@ func (m *ManagerAbe) Close() {
 // its registered scope. If the manger is found, then a nil error is returned
 // along with the active scoped manager. Otherwise, a nil manager and a non-nil
 // error will be returned.
-//func (m *Manager) FetchScopedKeyManager(scope KeyScope) (*ScopedKeyManager, error) {
-//	m.mtx.RLock()
-//	defer m.mtx.RUnlock()
-//
-//	sm, ok := m.scopedManagers[scope]
-//	if !ok {
-//		str := fmt.Sprintf("scope %v not found", scope)
-//		return nil, managerError(ErrScopeNotFound, str, nil)
-//	}
-//
-//	return sm, nil
-//}
 
-func (m *ManagerAbe) DecryptAddressKey(addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc []byte) ([]byte, []byte, []byte, []byte, error) {
+func (m *Manager) DecryptAddressKey(addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc []byte) ([]byte, []byte, []byte, []byte, error) {
 	var addressBytes, valueSecretKeyBytes []byte
 	var err error
 
@@ -430,32 +415,27 @@ func (m *ManagerAbe) DecryptAddressKey(addressEnc, addressSecretSpEnc, addressSe
 	return addressBytes, addressSecretSpBytes, addressSecretSnBytes, valueSecretKeyBytes, nil
 }
 
-// FetchAddressKeyEncAbe got addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc,
-func (m *ManagerAbe) FetchAddressKeyEncAbe(ns walletdb.ReadBucket, coinAddrBytes []byte) ([]byte, []byte, []byte, []byte, error) {
+// FetchAddressKeyEnc got addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc,
+func (m *Manager) FetchAddressKeyEnc(ns walletdb.ReadBucket, coinAddrBytes []byte) ([]byte, []byte, []byte, []byte, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	addrKey := chainhash.DoubleHashB(coinAddrBytes)
 	return fetchAddressKeyEnc(ns, addrKey)
 }
 
-//func (m *ManagerAbe) FetchAddressKeyEncAbe(ns walletdb.ReadBucket, serializedAddress []byte) ([]byte, []byte, []byte, []byte, error) {
-//	m.mtx.Lock()
-//	defer m.mtx.Unlock()
-//	return fetchAddressKeyEncAbe(ns, serializedAddress)
-//}
-func (m *ManagerAbe) FetchSeedEncAbe(ns walletdb.ReadBucket) ([]byte, error) {
+func (m *Manager) FetchSeedEnc(ns walletdb.ReadBucket) ([]byte, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	return fetchSeedEnc(ns)
 }
-func (m *ManagerAbe) PutAddressKeysEncAbe(ns walletdb.ReadWriteBucket, addrKey []byte, valueSecretKeyEnc,
+func (m *Manager) PutAddressKeysEnc(ns walletdb.ReadWriteBucket, addrKey []byte, valueSecretKeyEnc,
 	addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc []byte) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	return putAddressKeysEnc(ns, addrKey, valueSecretKeyEnc, addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
 
 }
-func (m *ManagerAbe) GenerateAddressKeysAbe(ns walletdb.ReadWriteBucket, seed []byte) (uint64, []byte, []byte, []byte, []byte, error) {
+func (m *Manager) GenerateAddressKeys(ns walletdb.ReadWriteBucket, seed []byte) (uint64, []byte, []byte, []byte, []byte, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	// fetch the seed status
@@ -478,42 +458,8 @@ func (m *ManagerAbe) GenerateAddressKeysAbe(ns walletdb.ReadWriteBucket, seed []
 	return cnt + 1, serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, nil
 }
 
-// TODO(osy) 20200608 use txoReceive "replace" the IsMyAddress OR discard this function
-//  Which means that the ManagerAbe just store the master key pair
-//func (m *ManagerAbe) IsMyAddress(ns walletdb.ReadBucket,
-//	dpk *abepqringct.DerivedPubKey) (bool, error) {
-//	/// TODO(abe): we should design error type tp help handle a address
-//	m.mtx.RLock()
-//	defer m.mtx.RUnlock()
-//	mpkEnc, msvkEnc, _, err := fetchMasterKeyEncsAbe(ns)
-//	if err != nil {
-//		return false, err
-//	}
-//	serializedMPK, err := m.Decrypt(CKTPublic, mpkEnc)
-//	if err != nil {
-//		return false, err
-//	}
-//
-//	serializedMSVK, err := m.Decrypt(CKTPublic, msvkEnc)
-//	if err != nil {
-//		return false, err
-//	}
-//	mpk, err := abesalrs.DeseralizeMasterPubKey(serializedMPK)
-//	if err != nil {
-//		return false, err
-//	}
-//	msvk, err := abesalrs.DeseralizeMasterSecretViewKey(serializedMSVK)
-//	if err != nil {
-//		return false, err
-//	}
-//
-//	// We'll iterate through each of the known scoped managers, and see if
-//	// any of them now of the target address.
-//	return abesalrs.CheckDerivedPubKeyAttribute(dpk, mpk, msvk)
-//}
-
 // ChainParams returns the chain parameters for this address manager.
-func (m *ManagerAbe) ChainParams() *chaincfg.Params {
+func (m *Manager) ChainParams() *chaincfg.Params {
 	// NOTE: No need for mutex here since the net field does not change
 	// after the manager instance is created.
 
@@ -526,7 +472,7 @@ func (m *ManagerAbe) ChainParams() *chaincfg.Params {
 // passphrase keys are derived using the scrypt parameters in the options, so
 // changing the passphrase may be used to bump the computational difficulty
 // needed to brute force the passphrase.
-func (m *ManagerAbe) ChangePassphrase(ns walletdb.ReadWriteBucket, oldPassphrase,
+func (m *Manager) ChangePassphrase(ns walletdb.ReadWriteBucket, oldPassphrase,
 	newPassphrase []byte, private bool, config *ScryptOptions) error {
 
 	// No private passphrase to change for a watching-only address manager.
@@ -707,7 +653,7 @@ func (m *ManagerAbe) ChangePassphrase(ns walletdb.ReadWriteBucket, oldPassphrase
 //
 // Executing this function on a manager that is already watching-only will have
 // no effect.
-func (m *ManagerAbe) ConvertToWatchingOnly(ns walletdb.ReadWriteBucket) error {
+func (m *Manager) ConvertToWatchingOnly(ns walletdb.ReadWriteBucket) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -757,24 +703,10 @@ func (m *ManagerAbe) ConvertToWatchingOnly(ns walletdb.ReadWriteBucket) error {
 
 }
 
-func (m *ManagerAbe) NewChangeAddress(ns walletdb.ReadBucket) ([]byte, error) {
-	// TODO: this function would be delete, the addrKey = nil is wrong code.
-	addressEnc, _, _, _, err := fetchAddressKeyEnc(ns, nil)
-	if err != nil {
-		return nil, err
-	}
-	_, err = m.cryptoKeyPub.Decrypt(addressEnc)
-	if err != nil {
-		return nil, err
-	}
-	panic("unexpected call NewChangeAddress()")
-	return txscript.PayToAddressScriptAbe(nil)
-}
-
 // IsLocked returns whether or not the address managed is locked.  When it is
 // unlocked, the decryption key needed to decrypt private keys used for signing
 // is in memory.
-func (m *ManagerAbe) IsLocked() bool {
+func (m *Manager) IsLocked() bool {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
@@ -786,7 +718,7 @@ func (m *ManagerAbe) IsLocked() bool {
 //
 // NOTE: The caller *MUST* acquire the Manager's mutex before invocation to
 // avoid data races.
-func (m *ManagerAbe) isLocked() bool {
+func (m *Manager) isLocked() bool {
 	return m.locked
 }
 
@@ -795,7 +727,7 @@ func (m *ManagerAbe) isLocked() bool {
 //
 // This function will return an error if invoked on a watching-only address
 // manager.
-func (m *ManagerAbe) Lock() error {
+func (m *Manager) Lock() error {
 	// A watching-only address manager can't be locked.
 	if m.watchingOnly {
 		return managerError(ErrWatchingOnly, errWatchingOnly, nil)
@@ -821,8 +753,7 @@ func (m *ManagerAbe) Lock() error {
 //
 // This function will return an error if invoked on a watching-only address
 // manager.
-// TODO(abe):when unlock the manager, it must refresh the serial number
-func (m *ManagerAbe) Unlock(ns walletdb.ReadBucket, passphrase []byte) error {
+func (m *Manager) Unlock(ns walletdb.ReadBucket, passphrase []byte) error {
 	// A watching-only address manager can't be unlocked.
 	if m.watchingOnly {
 		return managerError(ErrWatchingOnly, errWatchingOnly, nil)
@@ -890,7 +821,7 @@ func (m *ManagerAbe) Unlock(ns walletdb.ReadBucket, passphrase []byte) error {
 // requires the manager to be unlocked when it isn't.
 //
 // This function MUST be called with the manager lock held for reads.
-func (m *ManagerAbe) selectCryptoKey(keyType CryptoKeyType) (EncryptorDecryptor, error) {
+func (m *Manager) selectCryptoKey(keyType CryptoKeyType) (EncryptorDecryptor, error) {
 	if keyType == CKTPrivate || keyType == CKTSeed || keyType == CKTScript {
 		// The manager must be unlocked to work with the private keys.
 		if m.locked || m.watchingOnly {
@@ -917,7 +848,7 @@ func (m *ManagerAbe) selectCryptoKey(keyType CryptoKeyType) (EncryptorDecryptor,
 }
 
 // Encrypt in using the crypto key type specified by keyType.
-func (m *ManagerAbe) Encrypt(keyType CryptoKeyType, in []byte) ([]byte, error) {
+func (m *Manager) Encrypt(keyType CryptoKeyType, in []byte) ([]byte, error) {
 	// Encryption must be performed under the manager mutex since the
 	// keys are cleared when the manager is locked.
 	m.mtx.Lock()
@@ -936,7 +867,7 @@ func (m *ManagerAbe) Encrypt(keyType CryptoKeyType, in []byte) ([]byte, error) {
 }
 
 // Decrypt in using the crypto key type specified by keyType.
-func (m *ManagerAbe) Decrypt(keyType CryptoKeyType, in []byte) ([]byte, error) {
+func (m *Manager) Decrypt(keyType CryptoKeyType, in []byte) ([]byte, error) {
 	// Decryption must be performed under the manager mutex since the keys
 	// are cleared when the manager is locked.
 	m.mtx.Lock()
@@ -955,12 +886,13 @@ func (m *ManagerAbe) Decrypt(keyType CryptoKeyType, in []byte) ([]byte, error) {
 }
 
 // newManager returns a new locked address manager with the given parameters.
-func newManagerAbe(chainParams *chaincfg.Params, masterKeyPub *snacl.SecretKey,
+func newManager(chainParams *chaincfg.Params, masterKeyPub,
 	masterKeyPriv *snacl.SecretKey, cryptoKeyPub EncryptorDecryptor,
-	cryptoKeySeedEncrypted, cryptoKeyPrivEncrypted, cryptoKeyScriptEncrypted []byte, syncInfo *syncState,
-	birthday time.Time, privPassphraseSalt [saltSize]byte, watchingOnly bool) *ManagerAbe {
-
-	m := &ManagerAbe{
+	cryptoKeySeedEncrypted, cryptoKeyPrivEncrypted,
+	cryptoKeyScriptEncrypted []byte, syncInfo *syncState,
+	birthday time.Time, privPassphraseSalt [32]byte,
+	watchingOnly bool) *Manager {
+	m := &Manager{
 		chainParams:              chainParams,
 		syncState:                *syncInfo,
 		locked:                   true,
@@ -996,8 +928,8 @@ func newManagerAbe(chainParams *chaincfg.Params, masterKeyPub *snacl.SecretKey,
 
 	return m
 }
-func loadManagerAbe(ns walletdb.ReadBucket, pubPassphrase []byte,
-	chainParams *chaincfg.Params) (*ManagerAbe, error) {
+func loadManager(ns walletdb.ReadBucket, pubPassphrase []byte,
+	chainParams *chaincfg.Params) (*Manager, error) {
 	// Verify the version is neither too old or too new.
 	version, err := fetchManagerVersion(ns)
 	if err != nil {
@@ -1116,7 +1048,7 @@ func loadManagerAbe(ns walletdb.ReadBucket, pubPassphrase []byte,
 	// override the defaults for the additional fields which are not
 	// specified in the call to new with the values loaded from the
 	// database.
-	mgr := newManagerAbe(
+	mgr := newManager(
 		chainParams, &masterKeyPub, &masterKeyPriv,
 		cryptoKeyPub, cryptoKeySeedEnc, cryptoKeyPrivEnc, cryptoKeyScriptEnc, syncInfo,
 		birthday, privPassphraseSalt, watchingOnly,
@@ -1135,8 +1067,8 @@ func loadManagerAbe(ns walletdb.ReadBucket, pubPassphrase []byte,
 //
 // A ManagerError with an error code of ErrNoExist will be returned if the
 // passed manager does not exist in the specified namespace.
-func OpenAbe(ns walletdb.ReadBucket, pubPassphrase []byte,
-	chainParams *chaincfg.Params) (*ManagerAbe, error) {
+func Open(ns walletdb.ReadBucket, pubPassphrase []byte,
+	chainParams *chaincfg.Params) (*Manager, error) {
 
 	// Return an error if the manager has NOT already been created in the
 	// given database namespace.
@@ -1146,7 +1078,7 @@ func OpenAbe(ns walletdb.ReadBucket, pubPassphrase []byte,
 		return nil, managerError(ErrNoExist, str, nil)
 	}
 
-	return loadManagerAbe(ns, pubPassphrase, chainParams)
+	return loadManager(ns, pubPassphrase, chainParams)
 }
 
 // Create creates a new address manager in the given namespace.
@@ -1175,7 +1107,6 @@ func OpenAbe(ns walletdb.ReadBucket, pubPassphrase []byte,
 // A ManagerError with an error code of ErrAlreadyExists will be
 // returned the address manager already exists in the specified
 // namespace.
-//	todo(ABE.1):
 
 // 																		        (add,asksp,asksn,vsk)
 // 																		           ^          ^
@@ -1188,7 +1119,7 @@ func OpenAbe(ns walletdb.ReadBucket, pubPassphrase []byte,
 //                       	         |
 // pubpassphrase -> masterkeypub     | [cryptoKeyPub -> 				 masterPubKey]
 
-func CreateAbe(ns walletdb.ReadWriteBucket,
+func Create(ns walletdb.ReadWriteBucket,
 	seed, pubPassphrase, privPassphrase []byte, end uint64,
 	chainParams *chaincfg.Params, config *ScryptOptions,
 	birthday time.Time) error {

@@ -186,7 +186,7 @@ func (l *Loader) createNewWalletAbe(pubPassphrase, privPassphrase,
 				if _, ok := addrToVSK[addrKey]; ok {
 					continue
 				}
-				addrBytesEnc, _, _, vskBytesEnc, err := w.ManagerAbe.FetchAddressKeyEncAbe(addrmgrNs, coinAddr)
+				addrBytesEnc, _, _, vskBytesEnc, err := w.ManagerAbe.FetchAddressKeyEnc(addrmgrNs, coinAddr)
 				if addrBytesEnc != nil && vskBytesEnc != nil {
 					addrBytes, _, _, vskBytes, err := w.ManagerAbe.DecryptAddressKey(addrBytesEnc, nil, nil, vskBytesEnc)
 					if err != nil {
