@@ -129,8 +129,6 @@ type dbScriptAddressRow struct {
 	encryptedScript []byte
 }
 
-// TODO(abe):actually we just used the addrmgrNS to manage the sync state,
-//  other content will be deleted
 // Key names for various database fields.
 var (
 	// nullVall is null byte used as a flag value in a bucket entry
@@ -141,7 +139,7 @@ var (
 	// scopeSchemaBucket is the name of the bucket that maps a particular
 	// manager scope to the type of addresses that should be derived for
 	// particular branches during key derivation.
-	scopeSchemaBucketName = []byte("scope-schema") //TODO(abe):will be deleted
+	//scopeSchemaBucketName = []byte("scope-schema")
 
 	// scopeBucketNme is the name of the top-level bucket within the
 	// hierarchy. It maps: purpose || coinType to a new sub-bucket that
@@ -158,27 +156,25 @@ var (
 	// scopeBucket -> scope -> metaBucket -> lastAccountNameKey
 	// scopeBucket -> scope -> coinTypePrivKey
 	// scopeBucket -> scope -> coinTypePubKey
-	scopeBucketName = []byte("scope") //TODO(abe): this bucket will be deleted
-	payeeBucketName = []byte("payee") //TODO(abe): use the bucket to store the payee addresses,key is a string which identify the payee,and the value is a master public key or a master public key
+	//scopeBucketName = []byte("scope")
 	// coinTypePrivKeyName is the name of the key within a particular scope
 	// bucket that stores the encrypted cointype private keys. Each scope
 	// within the database will have its own set of coin type keys.
-	coinTypePrivKeyName = []byte("ctpriv") //TODO(abe):will be deleted
 
 	// coinTypePrivKeyName is the name of the key within a particular scope
 	// bucket that stores the encrypted cointype public keys. Each scope
 	// will have its own set of coin type public keys.
-	coinTypePubKeyName = []byte("ctpub") //TODO(abe):will be deleted
+	//coinTypePubKeyName = []byte("ctpub")
 
 	// acctBucketName is the bucket directly below the scope bucket in the
 	// hierarchy. This bucket stores all the information and indexes
 	// relevant to an account.
-	acctBucketName = []byte("acct") //TODO(abe):will be deleted
+	//acctBucketName = []byte("acct")
 
 	// addrBucketName is the name of the bucket that stores a mapping of
 	// pubkey hash to address type. This will be used to quickly determine
 	// if a given address is under our control.
-	addrBucketName = []byte("addr") //TODO(abe):will be deleted
+	//addrBucketName = []byte("addr")
 
 	// addrAcctIdxBucketName is used to index account addresses Entries in
 	// this index may map:
@@ -194,33 +190,33 @@ var (
 	//
 	// The index needs to be updated whenever an address is created e.g.
 	// NewAddress
-	addrAcctIdxBucketName = []byte("addracctidx") //TODO(abe):will be deleted
+	//addrAcctIdxBucketName = []byte("addracctidx")
 
 	// acctNameIdxBucketName is used to create an index mapping an account
 	// name string to the corresponding account id.  The index needs to be
 	// updated whenever the account name and id changes e.g. RenameAccount
 	//
 	// string => account_id
-	acctNameIdxBucketName = []byte("acctnameidx") //TODO(abe):will be deleted
+	//acctNameIdxBucketName = []byte("acctnameidx")
 
 	// acctIDIdxBucketName is used to create an index mapping an account id
 	// to the corresponding account name string.  The index needs to be
 	// updated whenever the account name and id changes e.g. RenameAccount
 	//
 	// account_id => string
-	acctIDIdxBucketName = []byte("acctididx") //TODO(abe):will be deleted
+	//acctIDIdxBucketName = []byte("acctididx")
 
 	// usedAddrBucketName is the name of the bucket that stores an
 	// addresses hash if the address has been used or not.
-	usedAddrBucketName = []byte("usedaddrs") //TODO(abe):will be deleted
+	//usedAddrBucketName = []byte("usedaddrs")
 
 	// meta is used to store meta-data about the address manager
 	// e.g. last account number
-	metaBucketName = []byte("meta") //TODO(abe):will be deleted
+	//metaBucketName = []byte("meta")
 
 	// lastAccountName is used to store the metadata - last account
 	// in the manager
-	lastAccountName = []byte("lastaccount") //TODO(abe):will be deleted
+	//lastAccountName = []byte("lastaccount")
 
 	// mainBucketName is the name of the bucket that stores the encrypted
 	// crypto keys that encrypt all other generated keys, the watch only
@@ -234,7 +230,7 @@ var (
 	// masterHDPrivName is the name of the key that stores the master HD
 	// private key. This key is encrypted with the master private crypto
 	// encryption key. This resides under the main bucket.
-	masterHDPrivName = []byte("mhdpriv") //TODO(abe):will be deleted, this is the master root private key
+	//masterHDPrivName = []byte("mhdpriv")
 
 	// derived seed and its used status
 	seedKeyName    = []byte("seed")
@@ -243,9 +239,9 @@ var (
 	// masterHDPubName is the name of the key that stores the master HD
 	// public key. This key is encrypted with the master public crypto
 	// encryption key. This reside under the main bucket.
-	masterHDPubName      = []byte("mhdpub") //TODO(abe):will be deleted, this is the master root public key
-	masterSecretViewName = []byte("msvk")
-	masterPubName        = []byte("mpk")
+	//masterHDPubName      = []byte("mhdpub")
+	//masterSecretViewName = []byte("msvk")
+	//masterPubName        = []byte("mpk")
 
 	//addressKeyName = []byte("address")
 	// syncBucketName is the name of the bucket that stores the current
@@ -417,33 +413,7 @@ func putMasterKeyParams(ns walletdb.ReadWriteBucket, pubParams, privParams []byt
 // putMasterHDKeys stores the encrypted master HD keys in the top level main
 // bucket. These are required in order to create any new manager scopes, as
 // those are created via hardened derivation of the children of this key.
-func putMasterHDKeys(ns walletdb.ReadWriteBucket, masterHDPrivEnc, masterHDPubEnc []byte) error {
-	// As this is the key for the root manager, we don't need to fetch any
-	// particular scope, and can insert directly within the main bucket.
-	bucket := ns.NestedReadWriteBucket(mainBucketName)
-
-	// Now that we have the main bucket, we can directly store each of the
-	// relevant keys. If we're in watch only mode, then some or all of
-	// these keys might not be available.
-	if masterHDPrivEnc != nil {
-		err := bucket.Put(masterHDPrivName, masterHDPrivEnc)
-		if err != nil {
-			str := "failed to store encrypted master HD private key"
-			return managerError(ErrDatabase, str, err)
-		}
-	}
-
-	if masterHDPubEnc != nil {
-		err := bucket.Put(masterHDPubName, masterHDPubEnc)
-		if err != nil {
-			str := "failed to store encrypted master HD public key"
-			return managerError(ErrDatabase, str, err)
-		}
-	}
-
-	return nil
-}
-func fetchSeedStatusAbe(ns walletdb.ReadBucket) (uint64, error) {
+func fetchSeedStatus(ns walletdb.ReadBucket) (uint64, error) {
 	// As this is the key for the root manager, we don't need to fetch any
 	// particular scope, and can insert directly within the main bucket.
 	bucket := ns.NestedReadBucket(mainBucketName)
@@ -455,7 +425,7 @@ func fetchSeedStatusAbe(ns walletdb.ReadBucket) (uint64, error) {
 	cnt := binary.LittleEndian.Uint64(status)
 	return cnt, nil
 }
-func putSeedStatusAbe(ns walletdb.ReadWriteBucket, cnt uint64) error {
+func putSeedStatus(ns walletdb.ReadWriteBucket, cnt uint64) error {
 	// As this is the key for the root manager, we don't need to fetch any
 	// particular scope, and can insert directly within the main bucket.
 	bucket := ns.NestedReadWriteBucket(mainBucketName)
@@ -469,8 +439,8 @@ func putSeedStatusAbe(ns walletdb.ReadWriteBucket, cnt uint64) error {
 	return nil
 }
 
-//TODO(abe):
-func putAddressKeysEncAbe(ns walletdb.ReadWriteBucket, addrKey []byte, valueSecretKeyEnc,
+//putAddressKeysEnc TODO 20220610: check the internal logic of function
+func putAddressKeysEnc(ns walletdb.ReadWriteBucket, addrKey []byte, valueSecretKeyEnc,
 	addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc []byte) error {
 	// As this is the key for the root manager, we don't need to fetch any
 	// particular scope, and can insert directly within the main bucket.
@@ -517,57 +487,7 @@ func putAddressKeysEncAbe(ns walletdb.ReadWriteBucket, addrKey []byte, valueSecr
 
 	return nil
 }
-
-// fetchMasterHDKeys attempts to fetch both the master HD private and public
-// keys from the database. If this is a watch only wallet, then it's possible
-// that the master private key isn't stored.
-func fetchMasterHDKeys(ns walletdb.ReadBucket) ([]byte, []byte, error) {
-	bucket := ns.NestedReadBucket(mainBucketName)
-
-	var masterHDPrivEnc, masterHDPubEnc []byte
-
-	// First, we'll try to fetch the master private key. If this database
-	// is watch only, or the master has been neutered, then this won't be
-	// found on disk.
-	key := bucket.Get(masterHDPrivName)
-	if key != nil {
-		masterHDPrivEnc = make([]byte, len(key))
-		copy(masterHDPrivEnc[:], key)
-	}
-
-	key = bucket.Get(masterHDPubName)
-	if key != nil {
-		masterHDPubEnc = make([]byte, len(key))
-		copy(masterHDPubEnc[:], key)
-	}
-
-	return masterHDPrivEnc, masterHDPubEnc, nil
-}
-
-func putSeedAbe(ns walletdb.ReadWriteBucket, seedEnc []byte) error {
-	bucket := ns.NestedReadWriteBucket(mainBucketName)
-
-	if seedEnc != nil {
-		err := bucket.Put(seedKeyName, seedEnc)
-		if err != nil {
-			str := "failed to store encrypted seed"
-			return managerError(ErrDatabase, str, err)
-		}
-	}
-	return nil
-}
-func fetchSeedEncAbe(ns walletdb.ReadBucket) ([]byte, error) {
-	bucket := ns.NestedReadBucket(mainBucketName)
-	var seedEnc []byte
-
-	key := bucket.Get(seedKeyName)
-	if key != nil {
-		seedEnc = make([]byte, len(key))
-		copy(seedEnc[:], key)
-	}
-	return seedEnc, nil
-}
-func fetchAddressKeyEncAbe(ns walletdb.ReadBucket, addrKey []byte) ([]byte, []byte, []byte, []byte, error) {
+func fetchAddressKeyEnc(ns walletdb.ReadBucket, addrKey []byte) ([]byte, []byte, []byte, []byte, error) {
 	mainBucket := ns.NestedReadBucket(mainBucketName)
 
 	addrBucket := mainBucket.NestedReadBucket(addrBukcetName)
@@ -582,41 +502,33 @@ func fetchAddressKeyEncAbe(ns walletdb.ReadBucket, addrKey []byte) ([]byte, []by
 	return addrEnc, askspEnc, asksnEnc, vskEnc, nil
 }
 
-//func fetchAddressKeysAbe(ns walletdb.ReadBucket, addrKey []byte) ([]byte, []byte, []byte, []byte, error) {
-//	mainBucket := ns.NestedReadBucket(mainBucketName)
-//
-//	var addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc []byte
-//
-//	// First, we'll try to fetch the master private key. If this database
-//	// is watch only, or the master has been neutered, then this won't be
-//	// found on disk.
-//	addrBukcet := mainBucket.NestedReadBucket(addrBukcetName)
-//	key := addrBukcet.Get(addrKey)
-//	if key != nil {
-//		addressEnc = make([]byte, len(key))
-//		copy(addressEnc[:], key)
-//	}
-//	askspBukcet := mainBucket.NestedReadBucket(askspBukcetName)
-//	key = askspBukcet.Get(addrKey)
-//	if key != nil {
-//		addressSecretSpEnc = make([]byte, len(key))
-//		copy(addressSecretSpEnc[:], key)
-//	}
-//	asksnBukcet := mainBucket.NestedReadBucket(asksnBukcetName)
-//	key = asksnBukcet.Get(addrKey)
-//	if key != nil {
-//		addressSecretSnEnc = make([]byte, len(key))
-//		copy(addressSecretSnEnc[:], key)
-//	}
-//	vskBukcet := mainBucket.NestedReadBucket(vskBukcetName)
-//	key = vskBukcet.Get(vskBukcetName)
-//	if key != nil {
-//		valueSecretKeyEnc = make([]byte, len(key))
-//		copy(valueSecretKeyEnc[:], key)
-//	}
-//
-//	return addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc, nil
-//}
+// fetchMasterHDKeys attempts to fetch both the master HD private and public
+// keys from the database. If this is a watch only wallet, then it's possible
+// that the master private key isn't stored.
+
+func putSeedEnc(ns walletdb.ReadWriteBucket, seedEnc []byte) error {
+	bucket := ns.NestedReadWriteBucket(mainBucketName)
+
+	if seedEnc != nil {
+		err := bucket.Put(seedKeyName, seedEnc)
+		if err != nil {
+			str := "failed to store encrypted seed"
+			return managerError(ErrDatabase, str, err)
+		}
+	}
+	return nil
+}
+func fetchSeedEnc(ns walletdb.ReadBucket) ([]byte, error) {
+	bucket := ns.NestedReadBucket(mainBucketName)
+	var seedEnc []byte
+
+	key := bucket.Get(seedKeyName)
+	if key != nil {
+		seedEnc = make([]byte, len(key))
+		copy(seedEnc[:], key)
+	}
+	return seedEnc, nil
+}
 
 // fetchCryptoKeys loads the encrypted crypto keys which are in turn used to
 // protect the extended keys, imported keys, and scripts.  Any of the returned
@@ -665,38 +577,6 @@ func fetchCryptoKeys(ns walletdb.ReadBucket) ([]byte, []byte, []byte, []byte, er
 // protect the extended and imported keys.  Either parameter can be nil in
 // which case no value is written for the parameter.
 func putCryptoKeys(ns walletdb.ReadWriteBucket, pubKeyEncrypted, privKeyEncrypted,
-	scriptKeyEncrypted []byte) error {
-
-	bucket := ns.NestedReadWriteBucket(mainBucketName)
-
-	if pubKeyEncrypted != nil {
-		err := bucket.Put(cryptoPubKeyName, pubKeyEncrypted)
-		if err != nil {
-			str := "failed to store encrypted crypto public key"
-			return managerError(ErrDatabase, str, err)
-		}
-	}
-
-	if privKeyEncrypted != nil {
-		err := bucket.Put(cryptoPrivKeyName, privKeyEncrypted)
-		if err != nil {
-			str := "failed to store encrypted crypto private key"
-			return managerError(ErrDatabase, str, err)
-		}
-	}
-
-	if scriptKeyEncrypted != nil {
-		err := bucket.Put(cryptoScriptKeyName, scriptKeyEncrypted)
-		if err != nil {
-			str := "failed to store encrypted crypto script key"
-			return managerError(ErrDatabase, str, err)
-		}
-	}
-
-	return nil
-}
-
-func putCryptoKeysAbe(ns walletdb.ReadWriteBucket, pubKeyEncrypted, privKeyEncrypted,
 	scriptKeyEncrypted, cryptoKeySeedEnc []byte) error {
 
 	bucket := ns.NestedReadWriteBucket(mainBucketName)
@@ -768,118 +648,14 @@ func putWatchingOnly(ns walletdb.ReadWriteBucket, watchingOnly bool) error {
 // deserializeAccountRow deserializes the passed serialized account information.
 // This is used as a common base for the various account types to deserialize
 // the common parts.
-func deserializeAccountRow(accountID []byte, serializedAccount []byte) (*dbAccountRow, error) {
-	// The serialized account format is:
-	//   <acctType><rdlen><rawdata>
-	//
-	// 1 byte acctType + 4 bytes raw data length + raw data
-
-	// Given the above, the length of the entry must be at a minimum
-	// the constant value sizes.
-	if len(serializedAccount) < 5 {
-		str := fmt.Sprintf("malformed serialized account for key %x",
-			accountID)
-		return nil, managerError(ErrDatabase, str, nil)
-	}
-
-	row := dbAccountRow{}
-	row.acctType = accountType(serializedAccount[0])
-	rdlen := binary.LittleEndian.Uint32(serializedAccount[1:5])
-	row.rawData = make([]byte, rdlen)
-	copy(row.rawData, serializedAccount[5:5+rdlen])
-
-	return &row, nil
-}
 
 // serializeAccountRow returns the serialization of the passed account row.
-func serializeAccountRow(row *dbAccountRow) []byte {
-	// The serialized account format is:
-	//   <acctType><rdlen><rawdata>
-	//
-	// 1 byte acctType + 4 bytes raw data length + raw data
-	rdlen := len(row.rawData)
-	buf := make([]byte, 5+rdlen)
-	buf[0] = byte(row.acctType)
-	binary.LittleEndian.PutUint32(buf[1:5], uint32(rdlen))
-	copy(buf[5:5+rdlen], row.rawData)
-	return buf
-}
 
 // deserializeDefaultAccountRow deserializes the raw data from the passed
 // account row as a BIP0044-like account.
-func deserializeDefaultAccountRow(accountID []byte, row *dbAccountRow) (*dbDefaultAccountRow, error) {
-	// The serialized BIP0044 account raw data format is:
-	//   <encpubkeylen><encpubkey><encprivkeylen><encprivkey><nextextidx>
-	//   <nextintidx><namelen><name>
-	//
-	// 4 bytes encrypted pubkey len + encrypted pubkey + 4 bytes encrypted
-	// privkey len + encrypted privkey + 4 bytes next external index +
-	// 4 bytes next internal index + 4 bytes name len + name
-
-	// Given the above, the length of the entry must be at a minimum
-	// the constant value sizes.
-	if len(row.rawData) < 20 {
-		str := fmt.Sprintf("malformed serialized bip0044 account for "+
-			"key %x", accountID)
-		return nil, managerError(ErrDatabase, str, nil)
-	}
-
-	retRow := dbDefaultAccountRow{
-		dbAccountRow: *row,
-	}
-
-	pubLen := binary.LittleEndian.Uint32(row.rawData[0:4])
-	retRow.pubKeyEncrypted = make([]byte, pubLen)
-	copy(retRow.pubKeyEncrypted, row.rawData[4:4+pubLen])
-	offset := 4 + pubLen
-	privLen := binary.LittleEndian.Uint32(row.rawData[offset : offset+4])
-	offset += 4
-	retRow.privKeyEncrypted = make([]byte, privLen)
-	copy(retRow.privKeyEncrypted, row.rawData[offset:offset+privLen])
-	offset += privLen
-	retRow.nextExternalIndex = binary.LittleEndian.Uint32(row.rawData[offset : offset+4])
-	offset += 4
-	retRow.nextInternalIndex = binary.LittleEndian.Uint32(row.rawData[offset : offset+4])
-	offset += 4
-	nameLen := binary.LittleEndian.Uint32(row.rawData[offset : offset+4])
-	offset += 4
-	retRow.name = string(row.rawData[offset : offset+nameLen])
-
-	return &retRow, nil
-}
 
 // serializeDefaultAccountRow returns the serialization of the raw data field
 // for a BIP0044-like account.
-func serializeDefaultAccountRow(encryptedPubKey, encryptedPrivKey []byte,
-	nextExternalIndex, nextInternalIndex uint32, name string) []byte {
-
-	// The serialized BIP0044 account raw data format is:
-	//   <encpubkeylen><encpubkey><encprivkeylen><encprivkey><nextextidx>
-	//   <nextintidx><namelen><name>
-	//
-	// 4 bytes encrypted pubkey len + encrypted pubkey + 4 bytes encrypted
-	// privkey len + encrypted privkey + 4 bytes next external index +
-	// 4 bytes next internal index + 4 bytes name len + name
-	pubLen := uint32(len(encryptedPubKey))
-	privLen := uint32(len(encryptedPrivKey))
-	nameLen := uint32(len(name))
-	rawData := make([]byte, 20+pubLen+privLen+nameLen)
-	binary.LittleEndian.PutUint32(rawData[0:4], pubLen)
-	copy(rawData[4:4+pubLen], encryptedPubKey)
-	offset := 4 + pubLen
-	binary.LittleEndian.PutUint32(rawData[offset:offset+4], privLen)
-	offset += 4
-	copy(rawData[offset:offset+privLen], encryptedPrivKey)
-	offset += privLen
-	binary.LittleEndian.PutUint32(rawData[offset:offset+4], nextExternalIndex)
-	offset += 4
-	binary.LittleEndian.PutUint32(rawData[offset:offset+4], nextInternalIndex)
-	offset += 4
-	binary.LittleEndian.PutUint32(rawData[offset:offset+4], nameLen)
-	offset += 4
-	copy(rawData[offset:offset+nameLen], name)
-	return rawData
-}
 
 // forEachKeyScope calls the given function for each known manager scope
 // within the set of scopes known by the root manager.
@@ -922,190 +698,26 @@ func serializeDefaultAccountRow(encryptedPubKey, encryptedPrivKey []byte,
 // deserializeAddressRow deserializes the passed serialized address
 // information.  This is used as a common base for the various address types to
 // deserialize the common parts.
-func deserializeAddressRow(serializedAddress []byte) (*dbAddressRow, error) {
-	// The serialized address format is:
-	//   <addrType><account><addedTime><syncStatus><rawdata>
-	//
-	// 1 byte addrType + 4 bytes account + 8 bytes addTime + 1 byte
-	// syncStatus + 4 bytes raw data length + raw data
-
-	// Given the above, the length of the entry must be at a minimum
-	// the constant value sizes.
-	if len(serializedAddress) < 18 {
-		str := "malformed serialized address"
-		return nil, managerError(ErrDatabase, str, nil)
-	}
-
-	row := dbAddressRow{}
-	row.addrType = addressType(serializedAddress[0])
-	row.account = binary.LittleEndian.Uint32(serializedAddress[1:5])
-	row.addTime = binary.LittleEndian.Uint64(serializedAddress[5:13])
-	row.syncStatus = syncStatus(serializedAddress[13])
-	rdlen := binary.LittleEndian.Uint32(serializedAddress[14:18])
-	row.rawData = make([]byte, rdlen)
-	copy(row.rawData, serializedAddress[18:18+rdlen])
-
-	return &row, nil
-}
 
 // serializeAddressRow returns the serialization of the passed address row.
-func serializeAddressRow(row *dbAddressRow) []byte {
-	// The serialized address format is:
-	//   <addrType><account><addedTime><syncStatus><commentlen><comment>
-	//   <rawdata>
-	//
-	// 1 byte addrType + 4 bytes account + 8 bytes addTime + 1 byte
-	// syncStatus + 4 bytes raw data length + raw data
-	rdlen := len(row.rawData)
-	buf := make([]byte, 18+rdlen)
-	buf[0] = byte(row.addrType)
-	binary.LittleEndian.PutUint32(buf[1:5], row.account)
-	binary.LittleEndian.PutUint64(buf[5:13], row.addTime)
-	buf[13] = byte(row.syncStatus)
-	binary.LittleEndian.PutUint32(buf[14:18], uint32(rdlen))
-	copy(buf[18:18+rdlen], row.rawData)
-	return buf
-}
 
 // deserializeChainedAddress deserializes the raw data from the passed address
 // row as a chained address.
-func deserializeChainedAddress(row *dbAddressRow) (*dbChainAddressRow, error) {
-	// The serialized chain address raw data format is:
-	//   <branch><index>
-	//
-	// 4 bytes branch + 4 bytes address index
-	if len(row.rawData) != 8 {
-		str := "malformed serialized chained address"
-		return nil, managerError(ErrDatabase, str, nil)
-	}
-
-	retRow := dbChainAddressRow{
-		dbAddressRow: *row,
-	}
-
-	retRow.branch = binary.LittleEndian.Uint32(row.rawData[0:4])
-	retRow.index = binary.LittleEndian.Uint32(row.rawData[4:8])
-
-	return &retRow, nil
-}
 
 // serializeChainedAddress returns the serialization of the raw data field for
 // a chained address.
-func serializeChainedAddress(branch, index uint32) []byte {
-	// The serialized chain address raw data format is:
-	//   <branch><index>
-	//
-	// 4 bytes branch + 4 bytes address index
-	rawData := make([]byte, 8)
-	binary.LittleEndian.PutUint32(rawData[0:4], branch)
-	binary.LittleEndian.PutUint32(rawData[4:8], index)
-	return rawData
-}
 
 // deserializeImportedAddress deserializes the raw data from the passed address
 // row as an imported address.
-func deserializeImportedAddress(row *dbAddressRow) (*dbImportedAddressRow, error) {
-	// The serialized imported address raw data format is:
-	//   <encpubkeylen><encpubkey><encprivkeylen><encprivkey>
-	//
-	// 4 bytes encrypted pubkey len + encrypted pubkey + 4 bytes encrypted
-	// privkey len + encrypted privkey
-
-	// Given the above, the length of the entry must be at a minimum
-	// the constant value sizes.
-	if len(row.rawData) < 8 {
-		str := "malformed serialized imported address"
-		return nil, managerError(ErrDatabase, str, nil)
-	}
-
-	retRow := dbImportedAddressRow{
-		dbAddressRow: *row,
-	}
-
-	pubLen := binary.LittleEndian.Uint32(row.rawData[0:4])
-	retRow.encryptedPubKey = make([]byte, pubLen)
-	copy(retRow.encryptedPubKey, row.rawData[4:4+pubLen])
-	offset := 4 + pubLen
-	privLen := binary.LittleEndian.Uint32(row.rawData[offset : offset+4])
-	offset += 4
-	retRow.encryptedPrivKey = make([]byte, privLen)
-	copy(retRow.encryptedPrivKey, row.rawData[offset:offset+privLen])
-
-	return &retRow, nil
-}
 
 // serializeImportedAddress returns the serialization of the raw data field for
 // an imported address.
-func serializeImportedAddress(encryptedPubKey, encryptedPrivKey []byte) []byte {
-	// The serialized imported address raw data format is:
-	//   <encpubkeylen><encpubkey><encprivkeylen><encprivkey>
-	//
-	// 4 bytes encrypted pubkey len + encrypted pubkey + 4 bytes encrypted
-	// privkey len + encrypted privkey
-	pubLen := uint32(len(encryptedPubKey))
-	privLen := uint32(len(encryptedPrivKey))
-	rawData := make([]byte, 8+pubLen+privLen)
-	binary.LittleEndian.PutUint32(rawData[0:4], pubLen)
-	copy(rawData[4:4+pubLen], encryptedPubKey)
-	offset := 4 + pubLen
-	binary.LittleEndian.PutUint32(rawData[offset:offset+4], privLen)
-	offset += 4
-	copy(rawData[offset:offset+privLen], encryptedPrivKey)
-	return rawData
-}
 
 // deserializeScriptAddress deserializes the raw data from the passed address
 // row as a script address.
-func deserializeScriptAddress(row *dbAddressRow) (*dbScriptAddressRow, error) {
-	// The serialized script address raw data format is:
-	//   <encscripthashlen><encscripthash><encscriptlen><encscript>
-	//
-	// 4 bytes encrypted script hash len + encrypted script hash + 4 bytes
-	// encrypted script len + encrypted script
-
-	// Given the above, the length of the entry must be at a minimum
-	// the constant value sizes.
-	if len(row.rawData) < 8 {
-		str := "malformed serialized script address"
-		return nil, managerError(ErrDatabase, str, nil)
-	}
-
-	retRow := dbScriptAddressRow{
-		dbAddressRow: *row,
-	}
-
-	hashLen := binary.LittleEndian.Uint32(row.rawData[0:4])
-	retRow.encryptedHash = make([]byte, hashLen)
-	copy(retRow.encryptedHash, row.rawData[4:4+hashLen])
-	offset := 4 + hashLen
-	scriptLen := binary.LittleEndian.Uint32(row.rawData[offset : offset+4])
-	offset += 4
-	retRow.encryptedScript = make([]byte, scriptLen)
-	copy(retRow.encryptedScript, row.rawData[offset:offset+scriptLen])
-
-	return &retRow, nil
-}
 
 // serializeScriptAddress returns the serialization of the raw data field for
 // a script address.
-func serializeScriptAddress(encryptedHash, encryptedScript []byte) []byte {
-	// The serialized script address raw data format is:
-	//   <encscripthashlen><encscripthash><encscriptlen><encscript>
-	//
-	// 4 bytes encrypted script hash len + encrypted script hash + 4 bytes
-	// encrypted script len + encrypted script
-
-	hashLen := uint32(len(encryptedHash))
-	scriptLen := uint32(len(encryptedScript))
-	rawData := make([]byte, 8+hashLen+scriptLen)
-	binary.LittleEndian.PutUint32(rawData[0:4], hashLen)
-	copy(rawData[4:4+hashLen], encryptedHash)
-	offset := 4 + hashLen
-	binary.LittleEndian.PutUint32(rawData[offset:offset+4], scriptLen)
-	offset += 4
-	copy(rawData[offset:offset+scriptLen], encryptedScript)
-	return rawData
-}
 
 // fetchAddressByHash loads address information for the provided address hash
 // from the database.  The returned value is one of the address rows for the
@@ -1155,147 +767,6 @@ func serializeScriptAddress(encryptedHash, encryptedScript []byte) []byte {
 // in an unusable database.  It will also make any imported scripts and private
 // keys unrecoverable unless there is a backup copy available.
 func deletePrivateKeys(ns walletdb.ReadWriteBucket) error {
-	bucket := ns.NestedReadWriteBucket(mainBucketName)
-
-	// Delete the master private key params and the crypto private and
-	// script keys.
-	if err := bucket.Delete(masterPrivKeyName); err != nil {
-		str := "failed to delete master private key parameters"
-		return managerError(ErrDatabase, str, err)
-	}
-	if err := bucket.Delete(cryptoPrivKeyName); err != nil {
-		str := "failed to delete crypto private key"
-		return managerError(ErrDatabase, str, err)
-	}
-	if err := bucket.Delete(cryptoScriptKeyName); err != nil {
-		str := "failed to delete crypto script key"
-		return managerError(ErrDatabase, str, err)
-	}
-	if err := bucket.Delete(masterHDPrivName); err != nil {
-		str := "failed to delete master HD priv key"
-		return managerError(ErrDatabase, str, err)
-	}
-
-	// With the master key and meta encryption keys deleted, we'll need to
-	// delete the keys for all known scopes as well.
-	scopeBucket := ns.NestedReadWriteBucket(scopeBucketName)
-	err := scopeBucket.ForEach(func(scopeKey, _ []byte) error {
-		if len(scopeKey) != 8 {
-			return nil
-		}
-
-		managerScopeBucket := scopeBucket.NestedReadWriteBucket(scopeKey)
-
-		if err := managerScopeBucket.Delete(coinTypePrivKeyName); err != nil {
-			str := "failed to delete cointype private key"
-			return managerError(ErrDatabase, str, err)
-		}
-
-		// Delete the account extended private key for all accounts.
-		bucket = managerScopeBucket.NestedReadWriteBucket(acctBucketName)
-		err := bucket.ForEach(func(k, v []byte) error {
-			// Skip buckets.
-			if v == nil {
-				return nil
-			}
-
-			// Deserialize the account row first to determine the type.
-			row, err := deserializeAccountRow(k, v)
-			if err != nil {
-				return err
-			}
-
-			switch row.acctType {
-			case accountDefault:
-				arow, err := deserializeDefaultAccountRow(k, row)
-				if err != nil {
-					return err
-				}
-
-				// Reserialize the account without the private key and
-				// store it.
-				row.rawData = serializeDefaultAccountRow(
-					arow.pubKeyEncrypted, nil,
-					arow.nextExternalIndex, arow.nextInternalIndex,
-					arow.name,
-				)
-				err = bucket.Put(k, serializeAccountRow(row))
-				if err != nil {
-					str := "failed to delete account private key"
-					return managerError(ErrDatabase, str, err)
-				}
-			}
-
-			return nil
-		})
-		if err != nil {
-			return maybeConvertDbError(err)
-		}
-
-		// Delete the private key for all imported addresses.
-		bucket = managerScopeBucket.NestedReadWriteBucket(addrBucketName)
-		err = bucket.ForEach(func(k, v []byte) error {
-			// Skip buckets.
-			if v == nil {
-				return nil
-			}
-
-			// Deserialize the address row first to determine the field
-			// values.
-			row, err := deserializeAddressRow(v)
-			if err != nil {
-				return err
-			}
-
-			switch row.addrType {
-			case adtImport:
-				irow, err := deserializeImportedAddress(row)
-				if err != nil {
-					return err
-				}
-
-				// Reserialize the imported address without the private
-				// key and store it.
-				row.rawData = serializeImportedAddress(
-					irow.encryptedPubKey, nil)
-				err = bucket.Put(k, serializeAddressRow(row))
-				if err != nil {
-					str := "failed to delete imported private key"
-					return managerError(ErrDatabase, str, err)
-				}
-
-			case adtScript:
-				srow, err := deserializeScriptAddress(row)
-				if err != nil {
-					return err
-				}
-
-				// Reserialize the script address without the script
-				// and store it.
-				row.rawData = serializeScriptAddress(srow.encryptedHash,
-					nil)
-				err = bucket.Put(k, serializeAddressRow(row))
-				if err != nil {
-					str := "failed to delete imported script"
-					return managerError(ErrDatabase, str, err)
-				}
-			}
-
-			return nil
-		})
-		if err != nil {
-			return maybeConvertDbError(err)
-		}
-
-		return nil
-	})
-	if err != nil {
-		return maybeConvertDbError(err)
-	}
-
-	return nil
-}
-func deletePrivateKeysAbe(ns walletdb.ReadWriteBucket) error {
 	bucket := ns.NestedReadWriteBucket(mainBucketName)
 
 	// Delete the master private key params and the crypto private and
@@ -1665,7 +1136,7 @@ func managerExists(ns walletdb.ReadBucket) bool {
 // as the version and creation date. In addition to creating the key space for
 // the root address manager, we'll also create internal scopes for all the
 // default manager scope types.
-func createManagerNSAbe(ns walletdb.ReadWriteBucket) error {
+func createManagerNS(ns walletdb.ReadWriteBucket) error {
 
 	// First, we'll create a main bucket
 	mainBucket, err := ns.CreateBucket(mainBucketName)

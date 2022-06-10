@@ -13,11 +13,8 @@ import (
 // reflect the latest database state. If the database happens to be at a version
 // number lower than the latest, migrations will be performed in order to catch
 // it up.
+// TODO re-define the version, currently there is just a version
 var versions = []migration.Version{
-	{
-		Number:    2,
-		Migration: upgradeToVersion2,
-	},
 	{
 		Number:    6,
 		Migration: populateBirthdayBlock,
@@ -101,17 +98,6 @@ func (m *MigrationManager) Versions() []migration.Version {
 // upgradeToVersion2 upgrades the database from version 1 to version 2
 // 'usedAddrBucketName' a bucket for storing addrs flagged as marked is
 // initialized and it will be updated on the next rescan.
-func upgradeToVersion2(ns walletdb.ReadWriteBucket) error {
-	currentMgrVersion := uint32(2)
-
-	_, err := ns.CreateBucketIfNotExists(usedAddrBucketName)
-	if err != nil {
-		str := "failed to create used addresses bucket"
-		return managerError(ErrDatabase, str, err)
-	}
-
-	return putManagerVersion(ns, currentMgrVersion)
-}
 
 // upgradeToVersion5 upgrades the database from version 4 to version 5. After
 // this update, the new ScopedKeyManager features cannot be used. This is due

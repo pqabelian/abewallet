@@ -435,7 +435,7 @@ func (m *ManagerAbe) FetchAddressKeyEncAbe(ns walletdb.ReadBucket, coinAddrBytes
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	addrKey := chainhash.DoubleHashB(coinAddrBytes)
-	return fetchAddressKeyEncAbe(ns, addrKey)
+	return fetchAddressKeyEnc(ns, addrKey)
 }
 
 //func (m *ManagerAbe) FetchAddressKeyEncAbe(ns walletdb.ReadBucket, serializedAddress []byte) ([]byte, []byte, []byte, []byte, error) {
@@ -446,25 +446,25 @@ func (m *ManagerAbe) FetchAddressKeyEncAbe(ns walletdb.ReadBucket, coinAddrBytes
 func (m *ManagerAbe) FetchSeedEncAbe(ns walletdb.ReadBucket) ([]byte, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
-	return fetchSeedEncAbe(ns)
+	return fetchSeedEnc(ns)
 }
 func (m *ManagerAbe) PutAddressKeysEncAbe(ns walletdb.ReadWriteBucket, addrKey []byte, valueSecretKeyEnc,
 	addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc []byte) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
-	return putAddressKeysEncAbe(ns, addrKey, valueSecretKeyEnc, addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
+	return putAddressKeysEnc(ns, addrKey, valueSecretKeyEnc, addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
 
 }
 func (m *ManagerAbe) GenerateAddressKeysAbe(ns walletdb.ReadWriteBucket, seed []byte) (uint64, []byte, []byte, []byte, []byte, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	// fetch the seed status
-	cnt, err := fetchSeedStatusAbe(ns)
+	cnt, err := fetchSeedStatus(ns)
 	if err != nil {
 		return 0, nil, nil, nil, nil, err
 	}
 	// update the seedStatus
-	err = putSeedStatusAbe(ns, cnt+1)
+	err = putSeedStatus(ns, cnt+1)
 	if err != nil {
 		return 0, nil, nil, nil, nil, err
 	}
@@ -646,7 +646,8 @@ func (m *ManagerAbe) ChangePassphrase(ns walletdb.ReadWriteBucket, oldPassphrase
 
 		// Save the new keys and params to the db in a single
 		// transaction.
-		err = putCryptoKeys(ns, nil, encPriv, encScript)
+		// TODO 20220610 the public encrypt and the crypto key
+		err = putCryptoKeys(ns, nil, encPriv, encScript, nil)
 		if err != nil {
 			return maybeConvertDbError(err)
 		}
@@ -676,7 +677,8 @@ func (m *ManagerAbe) ChangePassphrase(ns walletdb.ReadWriteBucket, oldPassphrase
 
 		// Save the new keys and params to the the db in a single
 		// transaction.
-		err = putCryptoKeys(ns, encryptedPub, nil, nil)
+		// TODO 20220610 the private key, script key, crypto key
+		err = putCryptoKeys(ns, encryptedPub, nil, nil, nil)
 		if err != nil {
 			return maybeConvertDbError(err)
 		}
@@ -718,7 +720,7 @@ func (m *ManagerAbe) ConvertToWatchingOnly(ns walletdb.ReadWriteBucket) error {
 
 	// Remove all private key material and mark the new database as
 	// watching only.
-	if err := deletePrivateKeysAbe(ns); err != nil {
+	if err := deletePrivateKeys(ns); err != nil {
 		return maybeConvertDbError(err)
 	}
 
@@ -757,7 +759,7 @@ func (m *ManagerAbe) ConvertToWatchingOnly(ns walletdb.ReadWriteBucket) error {
 
 func (m *ManagerAbe) NewChangeAddress(ns walletdb.ReadBucket) ([]byte, error) {
 	// TODO: this function would be delete, the addrKey = nil is wrong code.
-	addressEnc, _, _, _, err := fetchAddressKeyEncAbe(ns, nil)
+	addressEnc, _, _, _, err := fetchAddressKeyEnc(ns, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1207,7 +1209,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 		return managerError(ErrEmptyPassphrase, str, nil)
 	}
 
-	if err := createManagerNSAbe(ns); err != nil {
+	if err := createManagerNS(ns); err != nil {
 		return maybeConvertDbError(err)
 	}
 
@@ -1365,7 +1367,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 				return maybeConvertDbError(err)
 			}
 
-			err = putAddressKeysEncAbe(ns, addKey, valueSecretKeyEnc,
+			err = putAddressKeysEnc(ns, addKey, valueSecretKeyEnc,
 				addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
 			if err != nil {
 				return maybeConvertDbError(err)
@@ -1411,7 +1413,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 					return maybeConvertDbError(err)
 				}
 
-				err = putAddressKeysEncAbe(ns, addKey, valueSecretKeyEnc,
+				err = putAddressKeysEnc(ns, addKey, valueSecretKeyEnc,
 					addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
 				if err != nil {
 					return maybeConvertDbError(err)
@@ -1422,11 +1424,11 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 
 		startSeedStatus := end
 
-		err = putSeedAbe(ns, seedEnc)
+		err = putSeedEnc(ns, seedEnc)
 		if err != nil {
 			return maybeConvertDbError(err)
 		}
-		err = putSeedStatusAbe(ns, startSeedStatus)
+		err = putSeedStatus(ns, startSeedStatus)
 		if err != nil {
 			return maybeConvertDbError(err)
 		}
@@ -1441,7 +1443,7 @@ func CreateAbe(ns walletdb.ReadWriteBucket,
 	}
 
 	// Save the encrypted crypto keys to the database.
-	err = putCryptoKeysAbe(ns, cryptoKeyPubEnc, cryptoKeyPrivEnc,
+	err = putCryptoKeys(ns, cryptoKeyPubEnc, cryptoKeyPrivEnc,
 		cryptoKeyScriptEnc, cryptoKeySeedEnc)
 	if err != nil {
 		return maybeConvertDbError(err)
