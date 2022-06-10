@@ -56,8 +56,6 @@ const NUMBERBLOCKABE = 24 //TODO(abe):this value need to think about
 //	todo(ABE): wallet buckets
 // Bucket names
 var (
-	bucketBlocks        = []byte("b")
-	bucketTxRecords     = []byte("t")  // store transaction
 	bucketTxLabels      = []byte("l")  // not support now, but it may be supported
 	bucketLockedOutputs = []byte("lo") // not support now, but it may be supported
 
@@ -460,7 +458,7 @@ func valueTxRecordAbe(rec *TxRecord) ([]byte, error) {
 func readRawTxRecordAbe(txHash *chainhash.Hash, v []byte, rec *TxRecord) error {
 	if len(v) < 8 {
 		str := fmt.Sprintf("%s: short read (expected %d bytes, read %d)",
-			bucketTxRecords, 8, len(v))
+			bucketUnminedAbe, 8, len(v))
 		return storeError(ErrData, str, nil)
 	}
 	rec.Hash = *txHash
@@ -468,20 +466,9 @@ func readRawTxRecordAbe(txHash *chainhash.Hash, v []byte, rec *TxRecord) error {
 	err := rec.MsgTx.Deserialize(bytes.NewReader(v[8:]))
 	if err != nil {
 		str := fmt.Sprintf("%s: failed to deserialize transaction %v",
-			bucketTxRecords, txHash)
+			bucketUnminedAbe, txHash)
 		return storeError(ErrData, str, err)
 	}
-	return nil
-}
-
-func readRawTxRecordBlock(k []byte, block *Block) error {
-	if len(k) < 68 {
-		str := fmt.Sprintf("%s: short key (expected %d bytes, read %d)",
-			bucketTxRecords, 68, len(k))
-		return storeError(ErrData, str, nil)
-	}
-	block.Height = int32(byteOrder.Uint32(k[32:36]))
-	copy(block.Hash[:], k[36:68])
 	return nil
 }
 
@@ -1784,14 +1771,6 @@ func createStore(ns walletdb.ReadWriteBucket) error {
 // createBuckets creates all of the descendants buckets required for the
 // transaction store to properly carry its duties.
 func createBuckets(ns walletdb.ReadWriteBucket) error {
-	if _, err := ns.CreateBucket(bucketBlocks); err != nil {
-		str := "failed to create blocks bucket"
-		return storeError(ErrDatabase, str, err)
-	}
-	if _, err := ns.CreateBucket(bucketTxRecords); err != nil {
-		str := "failed to create tx records bucket"
-		return storeError(ErrDatabase, str, err)
-	}
 	if _, err := ns.CreateBucket(bucketLockedOutputs); err != nil {
 		str := "failed to create locked outputs bucket"
 		return storeError(ErrDatabase, str, err)
@@ -1849,14 +1828,6 @@ func createBuckets(ns walletdb.ReadWriteBucket) error {
 // deleteBuckets deletes all of the descendants buckets required for the
 // transaction store to properly carry its duties.
 func deleteBuckets(ns walletdb.ReadWriteBucket) error {
-	if err := ns.DeleteNestedBucket(bucketBlocks); err != nil {
-		str := "failed to delete blocks bucket"
-		return storeError(ErrDatabase, str, err)
-	}
-	if err := ns.DeleteNestedBucket(bucketTxRecords); err != nil {
-		str := "failed to delete tx records bucket"
-		return storeError(ErrDatabase, str, err)
-	}
 	if err := ns.DeleteNestedBucket(bucketLockedOutputs); err != nil {
 		str := "failed to delete locked outputs bucket"
 		return storeError(ErrDatabase, str, err)
