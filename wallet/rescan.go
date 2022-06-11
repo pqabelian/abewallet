@@ -1,9 +1,6 @@
 package wallet
 
 import (
-	"encoding/hex"
-	"github.com/abesuite/abec/abecrypto"
-	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/wire"
 	"github.com/abesuite/abewallet/chain"
@@ -63,26 +60,15 @@ import (
 func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 	if startStamp == nil {
 		startStamp = &waddrmgr.BlockStamp{}
-		*startStamp = w.ManagerAbe.SyncedTo()
+		*startStamp = w.Manager.SyncedTo()
 	}
 	catchUpHashes := func(w *Wallet, client chain.Interface, height int32) error {
-		// TODO(aakselrod): There's a race conditon here, which
-		// happens when a reorg occurs between the
-		// rescanProgress notification and the last GetBlockHash
-		// call. The solution when using btcd is to make btcd
-		// send blockconnected notifications with each block
-		// the way Neutrino does, and get rid of the loop. The
-		// other alternative is to check the final hash and,
-		// if it doesn't match the original hash returned by
-		// the notification, to roll back and restart the
-		// rescan.
 		log.Infof("Catching up block hashes to height %d, this"+
 			" might take a while", height)
 		err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 			addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 			txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-			//startBlock := w.Manager.SyncedTo()
-			startBlock := w.ManagerAbe.SyncedTo()
+			startBlock := w.Manager.SyncedTo()
 
 			for i := startBlock.Height + 1; i <= height; i++ {
 				hash, err := client.GetBlockHash(int64(i))
@@ -101,7 +87,7 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 						Hash:      *hash,
 						Timestamp: blockHeader.Timestamp,
 					}
-					err = w.ManagerAbe.SetSyncedTo(addrmgrNs, &bs)
+					err = w.Manager.SetSyncedTo(addrmgrNs, &bs)
 					if err != nil {
 						return err
 					}
@@ -124,59 +110,32 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 				if err != nil {
 					return err
 				}
-				blockAbeDetail, err := wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(b)
+				blockAbeDetail, err := wtxmgr.NewBlockRecordFromMsgBlock(b)
 				if err != nil {
 					return err
 				}
-				coinAddrToVSK := map[string][]byte{}
-				coinAddrToSnSk := map[string][]byte{}
-				coinAddrToInstanceAddr := map[string][]byte{}
-				for j := 0; j < len(b.Transactions); j++ {
-					for k := 0; k < len(b.Transactions[j].TxOuts); k++ {
-						coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(b.Transactions[j].TxOuts[k].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
-						if err != nil {
-							return err
-						}
-						addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
-						if _, ok := coinAddrToVSK[addrKey]; ok {
-							continue
-						}
-						addrBytesEnc, _, addressSecretSnEnc, vskBytesEnc, err := w.ManagerAbe.FetchAddressKeyEnc(addrmgrNs, coinAddr)
-						if addrBytesEnc != nil && vskBytesEnc != nil {
-							addrBytes, _, addressSecretSnBytes, vskBytes, err := w.ManagerAbe.DecryptAddressKey(addrBytesEnc, nil, addressSecretSnEnc, vskBytesEnc)
-							if err != nil {
-								return err
-							}
-							coinAddrToVSK[addrKey] = vskBytes
-							coinAddrToSnSk[addrKey] = addressSecretSnBytes
-							coinAddrToInstanceAddr[addrKey] = addrBytes
-						}
-
-					}
-				}
-				extraBlockAbeDetails := make(map[uint32]*wtxmgr.BlockAbeRecord, 2)
+				extraBlockAbeDetails := make(map[uint32]*wtxmgr.BlockRecord, 2)
 				if blockAbeDetail.Height%blockNum == blockNum-1 {
-					b1, err := w.chainClient.GetBlockAbe(&blockAbeDetail.MsgBlockAbe.Header.PrevBlock)
+					b1, err := w.chainClient.GetBlockAbe(&blockAbeDetail.MsgBlock.Header.PrevBlock)
 					if err != nil {
 						return err
 					}
-					extraBlockAbeDetails[uint32(blockAbeDetail.Height-1)], err = wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(b1)
+					extraBlockAbeDetails[uint32(blockAbeDetail.Height-1)], err = wtxmgr.NewBlockRecordFromMsgBlock(b1)
 					if err != nil {
 						return err
 					}
 
-					b2, err := w.chainClient.GetBlockAbe(&extraBlockAbeDetails[uint32(blockAbeDetail.Height-1)].MsgBlockAbe.Header.PrevBlock)
+					b2, err := w.chainClient.GetBlockAbe(&extraBlockAbeDetails[uint32(blockAbeDetail.Height-1)].MsgBlock.Header.PrevBlock)
 					if err != nil {
 						return err
 					}
-					extraBlockAbeDetails[uint32(blockAbeDetail.Height-2)], err = wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(b2)
+					extraBlockAbeDetails[uint32(blockAbeDetail.Height-2)], err = wtxmgr.NewBlockRecordFromMsgBlock(b2)
 					if err != nil {
 						return err
 					}
 				}
 
-				//err = w.TxStore.InsertBlockAbe(txmgrNs,blockAbeDetail,*maturedBlockHashs, mpk,msvk)
-				err = w.TxStore.InsertBlockAbeNew(txmgrNs, addrmgrNs, blockAbeDetail, extraBlockAbeDetails, maturedBlockHashs, coinAddrToSnSk, coinAddrToVSK, coinAddrToInstanceAddr)
+				err = w.TxStore.InsertBlock(txmgrNs, addrmgrNs, blockAbeDetail, extraBlockAbeDetails, maturedBlockHashs)
 				if err != nil {
 					return err
 				}
@@ -185,8 +144,7 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 					Hash:      *hash,
 					Timestamp: blockAbeDetail.RecvTime,
 				}
-				//err = w.Manager.SetSyncedTo(ns, &bs)
-				err = w.ManagerAbe.SetSyncedTo(addrmgrNs, &bs)
+				err = w.Manager.SetSyncedTo(addrmgrNs, &bs)
 				if err != nil {
 					return err
 				}
@@ -208,19 +166,5 @@ func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
 	if err := catchUpHashes(w, w.chainClient, bestBlockHeight); err != nil {
 		return err
 	}
-	//job := &RescanJob{
-	//	InitialSync: true,
-	//	Addrs:       nil,
-	//	OutPoints:   nil,
-	//	BlockStamp:  *startStamp,
-	//}
-	//
-	//// Submit merged job and block until rescan completes.
-	//select {
-	//case err := <-w.SubmitRescan(job):
-	//	return err
-	//case <-w.quitChan():
-	//	return ErrWalletShuttingDown
-	//}
 	return nil
 }

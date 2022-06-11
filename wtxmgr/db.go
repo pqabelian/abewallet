@@ -202,13 +202,13 @@ func readCanonicalOutPointAbe(k []byte, op *wire.OutPointAbe) error {
 	op.Index = k[32]
 	return nil
 }
-func canonicalBlockAbe(blockHeight int32, blockHash chainhash.Hash) []byte {
+func canonicalBlock(blockHeight int32, blockHash chainhash.Hash) []byte {
 	var k [36]byte
 	byteOrder.PutUint32(k[0:4], uint32(blockHeight))
 	copy(k[4:], blockHash[:])
 	return k[:]
 }
-func readCanonicalBlockAbe(k []byte, b *BlockAbe) error {
+func readCanonicalBlock(k []byte, b *BlockAbe) error {
 	if len(k) < 36 {
 		str := "short canonical block"
 		return storeError(ErrData, str, nil)
@@ -236,7 +236,7 @@ func readCanonicalBlockAbe(k []byte, b *BlockAbe) error {
 //	 [0:80] Header(80 bytes)
 //   [80:84]Number of transaction (32 bytes)
 //   [84:] transactions?
-func valueBlockAbe(block wire.MsgBlockAbe) []byte {
+func valueBlock(block wire.MsgBlockAbe) []byte {
 	buf := bytes.NewBuffer(make([]byte, 0, block.SerializeSize()))
 	err := block.Serialize(buf)
 	if err != nil {
@@ -244,7 +244,7 @@ func valueBlockAbe(block wire.MsgBlockAbe) []byte {
 	}
 	return buf.Bytes()
 }
-func readBlockAbeBlockAbeRecord(k, v []byte, block *BlockAbeRecord) error {
+func readBlockBlockRecord(k, v []byte, block *BlockRecord) error {
 	if len(k) < 36 {
 		str := fmt.Sprintf("%s: short key (expected %d bytes, read %d)",
 			bucketBlockAbes, 4, len(k))
@@ -257,7 +257,7 @@ func readBlockAbeBlockAbeRecord(k, v []byte, block *BlockAbeRecord) error {
 	return nil
 }
 
-func putRawBlockAbe(ns walletdb.ReadWriteBucket, k, v []byte) error {
+func putRawBlock(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	err := ns.NestedReadWriteBucket(bucketBlockAbes).Put(k, v)
 	if err != nil {
 		str := "failed to store block"
@@ -265,9 +265,9 @@ func putRawBlockAbe(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	}
 	return nil
 }
-func putBlockAbeRecord(ns walletdb.ReadWriteBucket, block *BlockAbeRecord) error {
-	k := canonicalBlockAbe(block.Height, block.Hash)
-	v := block.SerializedBlockAbe
+func putBlockRecord(ns walletdb.ReadWriteBucket, block *BlockRecord) error {
+	k := canonicalBlock(block.Height, block.Hash)
+	v := block.SerializedBlock
 	err := ns.NestedReadWriteBucket(bucketBlockAbes).Put(k, v)
 	if err != nil {
 		str := "failed to store block"
@@ -275,28 +275,28 @@ func putBlockAbeRecord(ns walletdb.ReadWriteBucket, block *BlockAbeRecord) error
 	}
 	return nil
 }
-func fetchRawBlockAbe(ns walletdb.ReadBucket, height int32, hash chainhash.Hash) (k, v []byte) {
-	k = canonicalBlockAbe(height, hash)
+func fetchRawBlock(ns walletdb.ReadBucket, height int32, hash chainhash.Hash) (k, v []byte) {
+	k = canonicalBlock(height, hash)
 	v = ns.NestedReadBucket(bucketBlockAbes).Get(k)
 	return
 }
 func existsRawBlock(ns walletdb.ReadBucket, height int32, hash chainhash.Hash) (k, v []byte) {
-	k = canonicalBlockAbe(height, hash)
+	k = canonicalBlock(height, hash)
 	v = ns.NestedReadBucket(bucketBlockAbes).Get(k)
 	return
 }
-func deleteRawBlockAbe(ns walletdb.ReadWriteBucket, height int32, hash chainhash.Hash) error {
-	k := canonicalBlockAbe(height, hash)
+func deleteRawBlock(ns walletdb.ReadWriteBucket, height int32, hash chainhash.Hash) error {
+	k := canonicalBlock(height, hash)
 	return ns.NestedReadWriteBucket(bucketBlockAbes).Delete(k)
 }
-func deleteRawBlockAbeWithBlockHeight(ns walletdb.ReadWriteBucket, height int32) (*BlockAbeRecord, error) {
+func deleteRawBlockWithBlockHeight(ns walletdb.ReadWriteBucket, height int32) (*BlockRecord, error) {
 	// iterator the blockabe bucket
-	var block *BlockAbeRecord
+	var block *BlockRecord
 	err := ns.NestedReadBucket(bucketBlockAbes).ForEach(func(k, v []byte) error {
 
 		if height == int32(byteOrder.Uint32(k[0:4])) {
-			block = new(BlockAbeRecord)
-			err := readBlockAbeBlockAbeRecord(k, v, block)
+			block = new(BlockRecord)
+			err := readBlockBlockRecord(k, v, block)
 			if err != nil {
 				return err
 			}
@@ -316,7 +316,7 @@ type blockAbeIterator struct {
 	prefix []byte // height
 	ck     []byte // height || hash
 	cv     []byte
-	elem   *BlockAbeRecord
+	elem   *BlockRecord
 	err    error
 }
 
@@ -436,7 +436,7 @@ func (it *blockAbeIterator) readElem() error {
 //   [0:8]   Received time (8 bytes)
 //   [8:]    Serialized transaction (varies)
 
-func valueTxRecordAbe(rec *TxRecord) ([]byte, error) {
+func valueTxRecord(rec *TxRecord) ([]byte, error) {
 	var v []byte
 	if rec.SerializedTx == nil {
 		txSize := rec.MsgTx.SerializeSize()
@@ -592,7 +592,7 @@ func putBlockAbeOutput(ns walletdb.ReadWriteBucket, k, v []byte) error {
 }
 
 //TODO(abe):integrated function
-func fetchBlockAbeOutputWithHeight(ns walletdb.ReadBucket, height int32) ([]byte, []*wire.OutPointAbe, error) {
+func fetchBlockOutputWithHeight(ns walletdb.ReadBucket, height int32) ([]byte, []*wire.OutPointAbe, error) {
 	k := make([]byte, 36)
 	var v []byte
 	err := ns.NestedReadBucket(bucketBlockOutputs).ForEach(func(key, value []byte) error {
@@ -628,7 +628,7 @@ func fetchBlockAbeOutputWithHeight(ns walletdb.ReadBucket, height int32) ([]byte
 	return k, res, nil
 }
 func fetchBlockAbeOutput(ns walletdb.ReadBucket, blockHeight int32, blockHash chainhash.Hash) ([]*wire.OutPointAbe, error) {
-	k := canonicalBlockAbe(blockHeight, blockHash)
+	k := canonicalBlock(blockHeight, blockHash)
 	v := ns.NestedReadBucket(bucketBlockOutputs).Get(k)
 	if v == nil {
 		return nil, fmt.Errorf("the entry is empty")
@@ -684,7 +684,7 @@ func deleteBlockAbeOutput(ns walletdb.ReadWriteBucket, k []byte) error {
 //BlockInputs: block height||block hash => [](utxoRing ||[]serialNumbers)
 // For the utxoRing, it is before processing the block, and the serialNumber slice
 // is the releavant Ring which contains at least one relevant output in this Ring
-func valueBlockAbeInput(blockInputs *RingHashSerialNumbers) []byte {
+func valueBlockInput(blockInputs *RingHashSerialNumbers) []byte {
 	res := make([]byte, 6)
 	totalSize := 6
 	// total size(4 bytes) + utxo ring number(2 bytes)
@@ -724,7 +724,7 @@ func valueBlockAbeInput(blockInputs *RingHashSerialNumbers) []byte {
 	byteOrder.PutUint32(res[0:4], uint32(totalSize))
 	return res
 }
-func putRawBlockAbeInput(ns walletdb.ReadWriteBucket, k, v []byte) error {
+func putRawBlockInput(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	err := ns.NestedReadWriteBucket(bucketBlockInputs).Put(k, v)
 	if err != nil {
 		str := "failed to put block input"
@@ -733,7 +733,7 @@ func putRawBlockAbeInput(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	return nil
 }
 
-func fetchBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) ([]*UTXORingAbe, [][][]byte, error) {
+func fetchBlockInput(ns walletdb.ReadWriteBucket, k []byte) ([]*UTXORing, [][][]byte, error) {
 	if len(k) < 32 {
 		str := fmt.Sprintf("%s: short read (expected %d bytes, read %d)",
 			bucketBlockInputs, 32, len(k))
@@ -747,11 +747,11 @@ func fetchBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) ([]*UTXORingAbe, 
 	_ = byteOrder.Uint32(v[offset : offset+4])
 	offset += 4
 	utxoRingN := int(byteOrder.Uint16(v[offset : offset+2]))
-	utxoRings := make([]*UTXORingAbe, utxoRingN)
+	utxoRings := make([]*UTXORing, utxoRingN)
 	serialNs := make([][][]byte, utxoRingN)
 	offset += 2
 	for i := 0; i < utxoRingN; i++ {
-		utxoRings[i] = new(UTXORingAbe)
+		utxoRings[i] = new(UTXORing)
 		_ = int(byteOrder.Uint16(v[offset : offset+2])) //total size
 		offset += 2
 		uSize := int(byteOrder.Uint16(v[offset : offset+2]))
@@ -777,7 +777,7 @@ func fetchBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) ([]*UTXORingAbe, 
 	}
 	return utxoRings, serialNs, nil
 }
-func deleteBlockAbeInput(ns walletdb.ReadWriteBucket, k []byte) error {
+func deleteBlockInput(ns walletdb.ReadWriteBucket, k []byte) error {
 	err := ns.NestedReadWriteBucket(bucketBlockInputs).Delete(k)
 	if err != nil {
 		str := "failed to delete block input"
@@ -823,7 +823,7 @@ func putRawImmaturedCoinbaseOutput(ns walletdb.ReadWriteBucket, k, v []byte) err
 }
 func fetchImmaturedCoinbaseOutput(ns walletdb.ReadBucket, height int32, hash chainhash.Hash) (map[wire.OutPointAbe]*UnspentUTXO, error) {
 
-	k := canonicalBlockAbe(height, hash)
+	k := canonicalBlock(height, hash)
 	v := ns.NestedReadBucket(bucketImmaturedCoinbaseOutput).Get(k)
 	op := make(map[wire.OutPointAbe]*UnspentUTXO)
 	offset := 0
@@ -906,7 +906,7 @@ func putRawImmaturedOutput(ns walletdb.ReadWriteBucket, k, v []byte) error {
 }
 func fetchImmaturedOutput(ns walletdb.ReadBucket, height int32, hash chainhash.Hash) (map[wire.OutPointAbe]*UnspentUTXO, error) {
 
-	k := canonicalBlockAbe(height, hash)
+	k := canonicalBlock(height, hash)
 	v := ns.NestedReadBucket(bucketImmaturedOutput).Get(k)
 	op := make(map[wire.OutPointAbe]*UnspentUTXO)
 	offset := 0
@@ -1270,7 +1270,7 @@ func ConfirmSpentTXO(ns walletdb.ReadWriteBucket, txHash chainhash.Hash, index u
 	return putMinedBalance(ns, balance)
 }
 
-//All the relevant UTXORingAbe are keyed as such:
+//All the relevant UTXORing are keyed as such:
 //
 //    [0:32] RingHash(32 bytes)
 //    value see the serialize method of Ring
@@ -1331,7 +1331,7 @@ func updateDeletedHeightRingDetails(ns walletdb.ReadWriteBucket, k []byte, heigh
 //
 //    [0:32] RingHash(32 bytes)
 //    value see the serialize method of UTXORing
-func valueUTXORing(u *UTXORingAbe) []byte {
+func valueUTXORing(u *UTXORing) []byte {
 	return u.Serialize()[:]
 }
 func existsUTXORing(ns walletdb.ReadBucket, hash chainhash.Hash) (k, v []byte) {
@@ -1340,7 +1340,7 @@ func existsUTXORing(ns walletdb.ReadBucket, hash chainhash.Hash) (k, v []byte) {
 	v = ns.NestedReadBucket(bucketUTXORing).Get(k)
 	return
 }
-func PutUTXORing(ns walletdb.ReadWriteBucket, k []byte, utxoring *UTXORingAbe) error {
+func PutUTXORing(ns walletdb.ReadWriteBucket, k []byte, utxoring *UTXORing) error {
 	v := valueUTXORing(utxoring)
 	return putRawUTXORing(ns, k, v)
 }
@@ -1352,15 +1352,15 @@ func putRawUTXORing(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	}
 	return nil
 }
-func FetchUTXORing(ns walletdb.ReadBucket, k []byte) (*UTXORingAbe, error) {
+func FetchUTXORing(ns walletdb.ReadBucket, k []byte) (*UTXORing, error) {
 	return fetchUTXORing(ns, k)
 }
-func fetchUTXORing(ns walletdb.ReadBucket, k []byte) (*UTXORingAbe, error) {
+func fetchUTXORing(ns walletdb.ReadBucket, k []byte) (*UTXORing, error) {
 	v := ns.NestedReadBucket(bucketUTXORing).Get(k)
 	if v == nil {
 		return nil, fmt.Errorf("the pair is not exist")
 	}
-	res := new(UTXORingAbe)
+	res := new(UTXORing)
 	res.Deserialize(v)
 	return res, nil
 }
@@ -1448,7 +1448,7 @@ func readUnspentBlockAbe(v []byte, block *BlockAbe) error {
 //   [0:8]   Received time (8 bytes)
 //   [8:]    Serialized transaction (varies)
 
-func putRawUnminedAbe(ns walletdb.ReadWriteBucket, k, v []byte) error {
+func putRawUnmined(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	err := ns.NestedReadWriteBucket(bucketUnminedAbe).Put(k, v)
 	if err != nil {
 		str := "failt to put unmined transaction"
@@ -1467,11 +1467,11 @@ func readRawUnminedHash(k []byte, txHash *chainhash.Hash) error {
 	return nil
 }
 
-func existsRawUnminedAbe(ns walletdb.ReadBucket, k []byte) (v []byte) {
+func existsRawUnmined(ns walletdb.ReadBucket, k []byte) (v []byte) {
 	return ns.NestedReadBucket(bucketUnminedAbe).Get(k)
 }
 
-func DeleteRawUnminedAbe(ns walletdb.ReadWriteBucket, tx *wire.MsgTxAbe) error {
+func DeleteRawUnmined(ns walletdb.ReadWriteBucket, tx *wire.MsgTxAbe) error {
 	for _, input := range tx.TxIns {
 		ringHash := input.PreviousOutPointRing.Hash()
 
@@ -1488,12 +1488,12 @@ func DeleteRawUnminedAbe(ns walletdb.ReadWriteBucket, tx *wire.MsgTxAbe) error {
 		}
 	}
 	txHash := tx.TxHash()
-	return deleteRawUnminedAbe(ns, txHash[:])
+	return deleteRawUnmined(ns, txHash[:])
 }
 
 // TODO(abe):when delete the entry in unminedAbe, it must explicit where the corresponding entry in spent but unmined into
 //  SpentAndConfirm or UnspentTXO bucket?
-func deleteRawUnminedAbe(ns walletdb.ReadWriteBucket, k []byte) error {
+func deleteRawUnmined(ns walletdb.ReadWriteBucket, k []byte) error {
 	err := ns.NestedReadWriteBucket(bucketUnminedAbe).Delete(k)
 	if err != nil {
 		str := "failed to delete unmined record"

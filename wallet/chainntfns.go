@@ -2,10 +2,7 @@ package wallet
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto"
-	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/wire"
 	"github.com/abesuite/abewallet/chain"
@@ -49,7 +46,7 @@ func (w *Wallet) handleChainNotifications() {
 			addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 			txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
 
-			syncedHeight := w.ManagerAbe.SyncedTo().Height
+			syncedHeight := w.Manager.SyncedTo().Height
 
 			for i := syncedHeight + 1; i <= endHeight; i++ {
 				hash, err := client.GetBlockHash(int64(i)) //Why use client not chainclient? It uses a interface to adapt to different client.
@@ -73,62 +70,32 @@ func (w *Wallet) handleChainNotifications() {
 				if err != nil {
 					return err
 				}
-				blockAbeDetail, err := wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(b)
+				blockAbeDetail, err := wtxmgr.NewBlockRecordFromMsgBlock(b)
 				if err != nil {
 					return err
 				}
-				// For all address there would be check and fetch the vsk if need
-				coinAddrToVSK := map[string][]byte{}
-				coinAddrToSnSK := map[string][]byte{}
-				coinAddrToInstanceAddr := map[string][]byte{}
-				for j := 0; j < len(b.Transactions); j++ {
-					for k := 0; k < len(b.Transactions[j].TxOuts); k++ {
-						coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(b.Transactions[j].TxOuts[k].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
-						if err != nil {
-							return err
-						}
-						addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
-						if _, ok := coinAddrToVSK[addrKey]; ok {
-							continue
-						}
-						addrBytesEnc, _, addressSecretSnEnc, vskBytesEnc, err := w.ManagerAbe.FetchAddressKeyEnc(addrmgrNs, coinAddr)
-						if err != nil {
-							return err
-						}
-						if addrBytesEnc != nil && vskBytesEnc != nil {
-							addrBytes, _, addressSecretSnBytes, vskBytes, err := w.ManagerAbe.DecryptAddressKey(addrBytesEnc, nil, addressSecretSnEnc, vskBytesEnc)
-							if err != nil {
-								return err
-							}
-							coinAddrToVSK[addrKey] = vskBytes
-							coinAddrToInstanceAddr[addrKey] = addrBytes
-							coinAddrToSnSK[addrKey] = addressSecretSnBytes
-						}
-					}
-				}
-				extraBlockAbeDetails := make(map[uint32]*wtxmgr.BlockAbeRecord, 2)
+				extraBlockAbeDetails := make(map[uint32]*wtxmgr.BlockRecord, 2)
 				if blockAbeDetail.Height%blockNum == blockNum-1 {
-					b1, err := chainClient.GetBlockAbe(&blockAbeDetail.MsgBlockAbe.Header.PrevBlock)
+					b1, err := chainClient.GetBlockAbe(&blockAbeDetail.MsgBlock.Header.PrevBlock)
 					if err != nil {
 						return err
 					}
-					extraBlockAbeDetails[uint32(blockAbeDetail.Height-1)], err = wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(b1)
+					extraBlockAbeDetails[uint32(blockAbeDetail.Height-1)], err = wtxmgr.NewBlockRecordFromMsgBlock(b1)
 					if err != nil {
 						return err
 					}
 
-					b2, err := chainClient.GetBlockAbe(&extraBlockAbeDetails[uint32(blockAbeDetail.Height-1)].MsgBlockAbe.Header.PrevBlock)
+					b2, err := chainClient.GetBlockAbe(&extraBlockAbeDetails[uint32(blockAbeDetail.Height-1)].MsgBlock.Header.PrevBlock)
 					if err != nil {
 						return err
 					}
-					extraBlockAbeDetails[uint32(blockAbeDetail.Height-2)], err = wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(b2)
+					extraBlockAbeDetails[uint32(blockAbeDetail.Height-2)], err = wtxmgr.NewBlockRecordFromMsgBlock(b2)
 					if err != nil {
 						return err
 					}
 				}
 
-				//err = w.TxStore.InsertBlockAbe(txmgrNs, blockAbeDetail,*maturedBlockHash, mpk, msvk)
-				err = w.TxStore.InsertBlockAbeNew(txmgrNs, addrmgrNs, blockAbeDetail, extraBlockAbeDetails, maturedBlockHashs, coinAddrToSnSK, coinAddrToVSK, coinAddrToInstanceAddr)
+				err = w.TxStore.InsertBlock(txmgrNs, addrmgrNs, blockAbeDetail, extraBlockAbeDetails, maturedBlockHashs)
 				if err != nil {
 					return err
 				}
@@ -138,7 +105,7 @@ func (w *Wallet) handleChainNotifications() {
 					Timestamp: blockAbeDetail.RecvTime,
 				}
 				//err = w.Manager.SetSyncedTo(ns, &bs)
-				err = w.ManagerAbe.SetSyncedTo(addrmgrNs, &bs)
+				err = w.Manager.SetSyncedTo(addrmgrNs, &bs)
 				if err != nil {
 					return err
 				}
@@ -169,33 +136,39 @@ func (w *Wallet) handleChainNotifications() {
 				// we'll make sure that our birthday block has
 				// been set correctly to potentially prevent
 				// missing relevant events.
-				//TODO(abe):in there, we just want to sync with chain
-				// so we use catch up to chain tip from block height which
-				// wallet had synced to
 				birthdayStore := &walletBirthdayStore{
-					db:         w.db,
-					managerAbe: w.ManagerAbe,
+					db:      w.db,
+					manager: w.Manager,
 				}
 				birthdayBlock, err := birthdaySanityCheck(
 					chainClient, birthdayStore,
 				)
 				if err != nil && !waddrmgr.IsError(err, waddrmgr.ErrBirthdayBlockNotSet) {
-					panic(fmt.Errorf("Unable to sanity "+
+					panic(fmt.Errorf("unable to sanity "+
 						"check wallet birthday block: %v",
 						err))
 				}
-				// TODO(abe): when the wallet has connected to the full node, it need
-				//  to sync with the chain
-				//err = w.syncWithChain(birthdayBlock)
+				// When the wallet has connected to the full node, it need
+				// to sync with the chain
+				// It would happen that the chain would fork successful
+				// So there should be check it and sync to the best chain
 				err = w.syncWithChainAbe(birthdayBlock)
 				if err != nil && !w.ShuttingDown() {
-					panic(fmt.Errorf("Unable to synchronize "+
+					panic(fmt.Errorf("unable to synchronize "+
 						"wallet to chain: %v", err))
 				}
 			case chain.BlockAbeConnected:
 				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 					return w.connectBlockAbe(tx, wtxmgr.BlockMeta(n))
 				})
+				// When receiving a notification of connecting block
+				// The wallet resend all transaction that is not mined.
+				// On the one hand, the transaction would be invalid due
+				// to the newer block, so clean the invalid transaction,
+				// and update the balance
+				// On the other hand, the valid transaction would be resend
+				// to the backend, and expected to package into the next block.
+				// TODO 20220611: there should be use the wait group to trace the goroutine
 				go w.resendUnminedTx()
 				notificationName = "block connected"
 			case chain.BlockAbeDisconnected:
@@ -237,15 +210,6 @@ func (w *Wallet) handleChainNotifications() {
 // TODO(abe): this function is used to notify the client
 func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) error {
 	// actually we just used the addrmgrNS to manage the sync state, other content will be deleted
-	// TODO(abe): transfer to IsMyAddress function...
-	//mpk, err := abepqringct.MasterPublicKeyIfc(serializedMPK)
-	//if err != nil {
-	//	return err
-	//}
-	//msvk, err := abesalrs.DeseralizeMasterSecretViewKey(serializedMSVK)
-	//if err != nil {
-	//	return err
-	//}
 	var err error
 	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
 
@@ -254,7 +218,7 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 		Hash:      b.Hash,
 		Timestamp: b.Time,
 	}
-	err = w.ManagerAbe.SetSyncedTo(addrmgrNs, &bs)
+	err = w.Manager.SetSyncedTo(addrmgrNs, &bs)
 	if err != nil {
 		return err
 	}
@@ -262,38 +226,8 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 	if err != nil {
 		return err
 	}
-	// handle all output address in block
-	// For all address there would be check and fetch the vsk if need
-	coinAddrToVSK := map[string][]byte{}
-	coinAddrToSnSk := map[string][]byte{}
-	coinAddrToInstanceAddr := map[string][]byte{}
-	for j := 0; j < len(block.Transactions); j++ {
-		for k := 0; k < len(block.Transactions[j].TxOuts); k++ {
-			coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(block.Transactions[j].TxOuts[k].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
-			if err != nil {
-				return err
-			}
-			addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
-			if _, ok := coinAddrToVSK[addrKey]; ok {
-				continue
-			}
-			addrBytesEnc, _, addressSecretSnEnc, vskBytesEnc, err := w.ManagerAbe.FetchAddressKeyEnc(addrmgrNs, coinAddr)
-			if err != nil {
-				return err
-			}
-			if addrBytesEnc != nil && vskBytesEnc != nil {
-				addrBytes, _, addressSecretSnBytes, vskBytes, err := w.ManagerAbe.DecryptAddressKey(addrBytesEnc, nil, addressSecretSnEnc, vskBytesEnc)
-				if err != nil {
-					return err
-				}
-				coinAddrToVSK[addrKey] = vskBytes
-				coinAddrToSnSk[addrKey] = addressSecretSnBytes
-				coinAddrToInstanceAddr[addrKey] = addrBytes
-			}
-		}
-	}
 
-	br, err := wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(block)
+	br, err := wtxmgr.NewBlockRecordFromMsgBlock(block)
 	if err != nil {
 		return err
 	}
@@ -314,29 +248,29 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 			}
 		}
 	}
-	extraBlockAbeDetails := make(map[uint32]*wtxmgr.BlockAbeRecord, 2)
+	extraBlockAbeDetails := make(map[uint32]*wtxmgr.BlockRecord, 2)
 	if br.Height%blockNum == blockNum-1 {
-		b1, err := w.chainClient.GetBlockAbe(&br.MsgBlockAbe.Header.PrevBlock)
+		b1, err := w.chainClient.GetBlockAbe(&br.MsgBlock.Header.PrevBlock)
 		if err != nil {
 			return err
 		}
-		extraBlockAbeDetails[uint32(br.Height-1)], err = wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(b1)
+		extraBlockAbeDetails[uint32(br.Height-1)], err = wtxmgr.NewBlockRecordFromMsgBlock(b1)
 		if err != nil {
 			return err
 		}
 
-		b2, err := w.chainClient.GetBlockAbe(&extraBlockAbeDetails[uint32(br.Height-1)].MsgBlockAbe.Header.PrevBlock)
+		b2, err := w.chainClient.GetBlockAbe(&extraBlockAbeDetails[uint32(br.Height-1)].MsgBlock.Header.PrevBlock)
 		if err != nil {
 			return err
 		}
-		extraBlockAbeDetails[uint32(br.Height-2)], err = wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(b2)
+		extraBlockAbeDetails[uint32(br.Height-2)], err = wtxmgr.NewBlockRecordFromMsgBlock(b2)
 		if err != nil {
 			return err
 		}
 	}
 
 	//err = w.TxStore.InsertBlockAbe(txmgrNs, br,*maturedBlockHash, mpk, msvk)
-	err = w.TxStore.InsertBlockAbeNew(txmgrNs, addrmgrNs, br, extraBlockAbeDetails, maturedBlockHashs, coinAddrToSnSk, coinAddrToVSK, coinAddrToInstanceAddr)
+	err = w.TxStore.InsertBlock(txmgrNs, addrmgrNs, br, extraBlockAbeDetails, maturedBlockHashs)
 	if err != nil {
 		return err
 	}
@@ -351,9 +285,6 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 // disconnectBlock handles a chain server reorganize by rolling back all
 // block history from the reorged block for a wallet in-sync with the chain
 // server.
-
-// TODO(abe): the logic of this function woule be redesigned.
-// TODO(abe): when the height meet the need, the utxo in the block shoule be modified
 func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) error {
 	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
@@ -364,8 +295,8 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 
 	// Disconnect the removed block and all blocks after it if we know about
 	// the disconnected block. Otherwise, the block is in the future.
-	if b.Height <= w.ManagerAbe.SyncedTo().Height {
-		hash, err := w.ManagerAbe.BlockHash(addrmgrNs, b.Height)
+	if b.Height <= w.Manager.SyncedTo().Height {
+		hash, err := w.Manager.BlockHash(addrmgrNs, b.Height)
 		if err != nil {
 			return err
 		}
@@ -376,7 +307,7 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 				Height: b.Height - 1,
 			}
 			// fetch the block hash from the database with height
-			hash, err = w.ManagerAbe.BlockHash(addrmgrNs, bs.Height)
+			hash, err = w.Manager.BlockHash(addrmgrNs, bs.Height)
 			if err != nil {
 				return err
 			}
@@ -390,14 +321,14 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 
 			bs.Timestamp = header.Timestamp //if fail to detach, it will be not commited
 			// roll back the synced status of database
-			err = w.ManagerAbe.SetSyncedTo(addrmgrNs, &bs)
+			err = w.Manager.SetSyncedTo(addrmgrNs, &bs)
 			if err != nil {
 				return err
 			}
 			log.Infof("Rollbacking to block with height %d, hash %s", bs.Height, bs.Hash)
 
 			// rollback to the assigned height
-			err = w.TxStore.RollbackAbe(w.ManagerAbe, addrmgrNs, txmgrNs, bs.Height)
+			err = w.TxStore.Rollback(w.Manager, addrmgrNs, txmgrNs, bs.Height)
 			if err != nil {
 				return err
 			}
@@ -418,11 +349,15 @@ func (w *Wallet) addRelevantTxAbe(dbtx walletdb.ReadWriteTx, rec *wtxmgr.TxRecor
 	// relevant.  This assumption will not hold true when SPV support is
 	// added, but until then, simply insert the transaction because there
 	// should either be one or more relevant inputs or outputs.
-	err := w.TxStore.InsertTxAbe(txmgrNs, rec, block) //TODO(abe): when add a transaction to wallet, it means that this transaction is created by the wallet itself, it must move the outputs of this transaction from unspent txo bucket to spentButUmined txo bucket
+	// TODO(abe): when add a transaction to wallet, it means that
+	// this transaction is created by the wallet itself, it must
+	// move the outputs of this transaction from unspent txo
+	// bucket to spentButUmined txo bucket
+	err := w.TxStore.InsertTx(txmgrNs, rec, block)
 	if err != nil {
 		return err
 	}
-	// TODO(abe):Notificate the client know some coins/utxos has been spent
+	// TODO(abe):Notificate the client know some coins/utxos has been updated
 	// but now, we need to add some struct to express it.
 	return nil
 }
@@ -465,17 +400,15 @@ type birthdayStore interface {
 // walletBirthdayStore is a wrapper around the wallet's database and address
 // manager that satisfies the birthdayStore interface.
 type walletBirthdayStore struct {
-	db         walletdb.DB
-	managerAbe *waddrmgr.Manager
+	db      walletdb.DB
+	manager *waddrmgr.Manager
 }
 
 var _ birthdayStore = (*walletBirthdayStore)(nil)
 
 // Birthday returns the birthday timestamp of the wallet.
 func (s *walletBirthdayStore) Birthday() time.Time {
-	//TODO(abe):replace manager with abe
-	//return s.manager.Birthday()
-	return s.managerAbe.Birthday()
+	return s.manager.Birthday()
 }
 
 // BirthdayBlock returns the birthday block of the wallet.
@@ -489,8 +422,7 @@ func (s *walletBirthdayStore) BirthdayBlock() (waddrmgr.BlockStamp, bool, error)
 		var err error
 		ns := tx.ReadBucket(waddrmgrNamespaceKey)
 		//TODO(abe):replace manager with abe
-		//birthdayBlock, birthdayBlockVerified, err = s.manager.BirthdayBlock(ns)
-		birthdayBlock, birthdayBlockVerified, err = s.managerAbe.BirthdayBlock(ns)
+		birthdayBlock, birthdayBlockVerified, err = s.manager.BirthdayBlock(ns)
 		return err
 	})
 
@@ -507,15 +439,11 @@ func (s *walletBirthdayStore) BirthdayBlock() (waddrmgr.BlockStamp, bool, error)
 func (s *walletBirthdayStore) SetBirthdayBlock(block waddrmgr.BlockStamp) error {
 	return walletdb.Update(s.db, func(tx walletdb.ReadWriteTx) error {
 		ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
-		//TODO(abe):replace manager with abe
-		//err := s.manager.SetBirthdayBlock(ns, block, true)
-		err := s.managerAbe.SetBirthdayBlock(ns, block, true)
+		err := s.manager.SetBirthdayBlock(ns, block, true)
 		if err != nil {
 			return err
 		}
-		//TODO(abe):replace manager with abe
-		//return s.manager.SetSyncedTo(ns, &block)
-		return s.managerAbe.SetSyncedTo(ns, &block)
+		return s.manager.SetSyncedTo(ns, &block)
 	})
 }
 

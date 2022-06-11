@@ -190,8 +190,7 @@ func EstimateVirtualSize(numP2PKHIns, numP2WPKHIns, numNestedP2WPKHIns int,
 	// always rounded up.
 	return baseSize + (witnessWeight+3)/blockchain.WitnessScaleFactor
 }
-//TODO(abe): the size should be compute accurately... and add the size of tx inputs
-func EstimateVirtualSizeAbe(txIns []*wire.TxInAbe,txOuts []*wire.TxOutAbe, addChangeOutput bool) int {
+func EstimateVirtualSizeAbe(txIns []*wire.TxInAbe, txOuts []*wire.TxOutAbe, addChangeOutput bool) int {
 	changeSize := 0
 	outputCount := len(txOuts)
 	if addChangeOutput {

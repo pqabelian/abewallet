@@ -186,9 +186,9 @@ func (l *Loader) createNewWalletAbe(pubPassphrase, privPassphrase,
 				if _, ok := addrToVSK[addrKey]; ok {
 					continue
 				}
-				addrBytesEnc, _, _, vskBytesEnc, err := w.ManagerAbe.FetchAddressKeyEnc(addrmgrNs, coinAddr)
+				addrBytesEnc, _, _, vskBytesEnc, err := w.Manager.FetchAddressKeyEnc(addrmgrNs, coinAddr)
 				if addrBytesEnc != nil && vskBytesEnc != nil {
-					addrBytes, _, _, vskBytes, err := w.ManagerAbe.DecryptAddressKey(addrBytesEnc, nil, nil, vskBytesEnc)
+					addrBytes, _, _, vskBytes, err := w.Manager.DecryptAddressKey(addrBytesEnc, nil, nil, vskBytesEnc)
 					if err != nil {
 						return err
 					}
@@ -198,11 +198,11 @@ func (l *Loader) createNewWalletAbe(pubPassphrase, privPassphrase,
 			}
 		}
 
-		genesisBlockRecords, err := wtxmgr.NewBlockAbeRecordFromMsgBlockAbe(l.chainParams.GenesisBlock)
+		genesisBlockRecords, err := wtxmgr.NewBlockRecordFromMsgBlock(l.chainParams.GenesisBlock)
 		if err != nil {
 			return err
 		}
-		err = w.TxStore.InsertGenesisBlockAbeNew(txmgrNs, genesisBlockRecords, addrToVSK, coinAddrToInstanceAddr)
+		err = w.TxStore.InsertGenesisBlock(txmgrNs, genesisBlockRecords, addrToVSK, coinAddrToInstanceAddr)
 		if err != nil {
 			log.Error("Fail to create wallet due to:", err)
 		}

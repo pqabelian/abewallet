@@ -27,16 +27,11 @@ const (
 
 // byAmount defines the methods needed to satisify sort.Interface to
 // sort credits by their output amount.
+
 type byAmount []wtxmgr.UnspentUTXO
 
-func (s byAmount) Len() int           { return len(s) }
-func (s byAmount) Less(i, j int) bool { return s[i].Amount < s[j].Amount }
-func (s byAmount) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
-
-type byAmountAbe []wtxmgr.UnspentUTXO
-
-func (s byAmountAbe) Len() int { return len(s) }
-func (s byAmountAbe) Less(i, j int) bool {
+func (s byAmount) Len() int { return len(s) }
+func (s byAmount) Less(i, j int) bool {
 	if s[i].Version < s[j].Version {
 		return true
 	} else if s[i].Version > s[j].Version {
@@ -45,12 +40,12 @@ func (s byAmountAbe) Less(i, j int) bool {
 		return s[i].Amount < s[j].Amount
 	}
 }
-func (s byAmountAbe) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
+func (s byAmount) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 
 /*func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO, rings map[chainhash.Hash]*wtxmgr.Ring) txauthor.InputSourceAbe {
 	// Pick largest outputs first.  This is only done for compatibility with
 	// previous tx creation code, not because it's a good idea.
-	sort.Sort(sort.Reverse(byAmountAbe(eligible)))
+	sort.Sort(sort.Reverse(byAmount(eligible)))
 
 	// Current inputs and their total value.  These are closed over by the
 	// returned input source and reused across multiple calls.
@@ -106,7 +101,7 @@ func (s byAmountAbe) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 //func makeInputSourceAbe(eligible []wtxmgr.UnspentUTXO) txauthor.InputSourceAbe {
 //	// Pick largest outputs first.  This is only done for compatibility with
 //	// previous tx creation code, not because it's a good idea.
-//	sort.Sort(sort.Reverse(byAmountAbe(eligible)))
+//	sort.Sort(sort.Reverse(byAmount(eligible)))
 //
 //	// Current inputs and their total value.  These are closed over by the
 //	// returned input source and reused across multiple calls.
@@ -316,7 +311,7 @@ func (s byAmountAbe) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 //	//
 //	//err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 //	//	txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-//	//	err = w.TxStore.InsertTxAbe(txmgrNs, txRecordAbe, nil)
+//	//	err = w.TxStore.InsertTx(txmgrNs, txRecordAbe, nil)
 //	//	if err != nil {
 //	//		return err
 //	//	}
@@ -476,7 +471,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 		}
 		// todo_DONE: order by version-then-amount
 		//	pick utxos to spend
-		sort.Sort(sort.Reverse(byAmountAbe(eligible)))
+		sort.Sort(sort.Reverse(byAmount(eligible)))
 		//TODO check the feeSpecified and feePerKbSpecified
 
 		// fix the transaction fee
@@ -741,11 +736,11 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 			if err != nil {
 				return err
 			}
-			serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, err = w.ManagerAbe.FetchAddressKeyEnc(addrmgrNs, coinAddr)
+			serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, err = w.Manager.FetchAddressKeyEnc(addrmgrNs, coinAddr)
 			if err != nil {
 				return err
 			}
-			serializeAddressBytes[i], serializedAskspBytes[i], serializedAsksnBytes[i], serializedVskBytes[i], err = w.ManagerAbe.DecryptAddressKey(serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc)
+			serializeAddressBytes[i], serializedAskspBytes[i], serializedAsksnBytes[i], serializedVskBytes[i], err = w.Manager.DecryptAddressKey(serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc)
 			if err != nil {
 				return err
 			}
@@ -892,7 +887,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 	//
 	//err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 	//	txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-	//	err = w.TxStore.InsertTxAbe(txmgrNs, txRecordAbe, nil)
+	//	err = w.TxStore.InsertTx(txmgrNs, txRecordAbe, nil)
 	//	if err != nil {
 	//		return err
 	//	}
@@ -935,7 +930,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 
 // TODO(abe):we should request the unspent transaction output from tx manager
 func (w *Wallet) findEligibleOutputsAbe(txmgrNs walletdb.ReadBucket, minconf int32, bs *waddrmgr.BlockStamp) ([]wtxmgr.UnspentUTXO, map[chainhash.Hash]*wtxmgr.Ring, error) {
-	unspent, err := w.TxStore.UnspentOutputsAbe(txmgrNs) // In ABE, this result will be spendable for the logic of store
+	unspent, err := w.TxStore.UnspentOutputs(txmgrNs) // In ABE, this result will be spendable for the logic of store
 	if err != nil {
 		return nil, nil, err
 	}
@@ -988,7 +983,7 @@ func (w *Wallet) findEligibleOutputsAbe(txmgrNs walletdb.ReadBucket, minconf int
 
 //	todo (AliceBob): This method just read the eligible Txos from WalletDB
 func (w *Wallet) findEligibleTxosAbe(txmgrNs walletdb.ReadBucket, minconf int32, bs *waddrmgr.BlockStamp) ([]wtxmgr.UnspentUTXO, error) {
-	unspent, err := w.TxStore.UnspentOutputsAbe(txmgrNs) // In ABE, this result will be spendable for the logic of store
+	unspent, err := w.TxStore.UnspentOutputs(txmgrNs) // In ABE, this result will be spendable for the logic of store
 	if err != nil {
 		return nil, err
 	}

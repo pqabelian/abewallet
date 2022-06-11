@@ -80,8 +80,8 @@ type Wallet struct {
 	// Data stores
 	db walletdb.DB
 	//Manager    *waddrmgr.Manager
-	ManagerAbe *waddrmgr.Manager
-	TxStore    *wtxmgr.Store
+	Manager *waddrmgr.Manager
+	TxStore *wtxmgr.Store
 
 	chainClient        chain.Interface
 	chainClientLock    sync.Mutex
@@ -335,7 +335,7 @@ func (w *Wallet) activeDataAbe(dbtx walletdb.ReadWriteTx) ([]wtxmgr.UnspentUTXO,
 	//	return nil, nil, err
 	//}
 
-	unspent, err := w.TxStore.UnspentOutputsAbe(txmgrNs)
+	unspent, err := w.TxStore.UnspentOutputs(txmgrNs)
 	return unspent, err
 }
 
@@ -377,7 +377,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 	if birthdayStamp == nil {
 		var err error
 		birthdayStamp, err = locateBirthdayBlock(
-			chainClient, w.ManagerAbe.Birthday(),
+			chainClient, w.Manager.Birthday(),
 		)
 		if err != nil {
 			return fmt.Errorf("unable to locate birthday block: %v",
@@ -404,7 +404,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 
 		err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 			ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
-			return w.ManagerAbe.SetBirthdayBlock(ns, *birthdayStamp, true)
+			return w.Manager.SetBirthdayBlock(ns, *birthdayStamp, true)
 		})
 		if err != nil {
 			return fmt.Errorf("unable to persist initial sync "+
@@ -426,7 +426,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 	// these blocks no longer exist, rollback all of the missing blocks
 	// before catching up with the rescan.
 	rollback := false
-	rollbackStamp := w.ManagerAbe.SyncedTo()
+	rollbackStamp := w.Manager.SyncedTo()
 	// TODO(abe): there are some problem which incur the wallet stop running?
 	// TODO(abe): rescan will be tested...
 	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
@@ -434,7 +434,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
 
 		for height := rollbackStamp.Height; true; height-- {
-			hash, err := w.ManagerAbe.BlockHash(addrmgrNs, height)
+			hash, err := w.Manager.BlockHash(addrmgrNs, height)
 			if err != nil {
 				return err
 			}
@@ -463,7 +463,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 		}
 
 		// Otherwise, we'll mark this as our new synced height.
-		err := w.ManagerAbe.SetSyncedTo(addrmgrNs, &rollbackStamp)
+		err := w.Manager.SetSyncedTo(addrmgrNs, &rollbackStamp)
 		if err != nil {
 			return err
 		}
@@ -473,7 +473,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 		// we'll need to find a new one by syncing with the chain again
 		// until finding one.
 		if rollbackStamp.Height <= birthdayStamp.Height && !bytes.Equal(rollbackStamp.Hash[:], birthdayStamp.Hash[:]) {
-			err := w.ManagerAbe.SetBirthdayBlock(addrmgrNs, rollbackStamp, true)
+			err := w.Manager.SetBirthdayBlock(addrmgrNs, rollbackStamp, true)
 			if err != nil {
 				return err
 			}
@@ -483,7 +483,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 		// stale state. `Rollback` unconfirms transactions at and beyond
 		// the passed height, so add one to the new synced-to height to
 		// prevent unconfirming transactions in the synced-to block.
-		return w.TxStore.RollbackAbe(w.ManagerAbe, addrmgrNs, txmgrNs, rollbackStamp.Height)
+		return w.TxStore.Rollback(w.Manager, addrmgrNs, txmgrNs, rollbackStamp.Height)
 	})
 	if err != nil {
 		return err
@@ -950,7 +950,7 @@ out:
 			err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 				addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
 				//return w.Manager.Unlock(addrmgrNs, req.passphrase)
-				return w.ManagerAbe.Unlock(addrmgrNs, req.passphrase)
+				return w.Manager.Unlock(addrmgrNs, req.passphrase)
 			})
 			if err != nil {
 				req.err <- err
@@ -968,7 +968,7 @@ out:
 		case req := <-w.changePassphrase:
 			err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 				addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
-				return w.ManagerAbe.ChangePassphrase(
+				return w.Manager.ChangePassphrase(
 					addrmgrNs, req.old, req.new, req.private,
 					&waddrmgr.DefaultScryptOptions,
 				)
@@ -979,7 +979,7 @@ out:
 		case req := <-w.changePassphrases:
 			err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 				addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
-				err := w.ManagerAbe.ChangePassphrase(
+				err := w.Manager.ChangePassphrase(
 					addrmgrNs, req.publicOld, req.publicNew,
 					false, &waddrmgr.DefaultScryptOptions,
 				)
@@ -987,7 +987,7 @@ out:
 					return err
 				}
 
-				return w.ManagerAbe.ChangePassphrase(
+				return w.Manager.ChangePassphrase(
 					addrmgrNs, req.privateOld, req.privateNew,
 					true, &waddrmgr.DefaultScryptOptions,
 				)
@@ -996,7 +996,7 @@ out:
 			continue
 
 		case req := <-w.holdUnlockRequests:
-			if w.ManagerAbe.IsLocked() {
+			if w.Manager.IsLocked() {
 				close(req)
 				continue
 			}
@@ -1017,7 +1017,7 @@ out:
 			default:
 				continue
 			}
-		case w.lockState <- w.ManagerAbe.IsLocked():
+		case w.lockState <- w.Manager.IsLocked():
 			continue
 
 		case <-quit:
@@ -1033,7 +1033,7 @@ out:
 		timeout = nil
 		refreshed = nil
 		//err := w.Manager.Lock()
-		err := w.ManagerAbe.Lock()
+		err := w.Manager.Lock()
 		if err != nil && !waddrmgr.IsError(err, waddrmgr.ErrLocked) {
 			log.Errorf("Could not lock wallet: %v", err)
 		} else {
@@ -1189,9 +1189,9 @@ func (w *Wallet) CalculateBalanceAbe(confirms int32) ([]abeutil.Amount, error) {
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		var err error
-		blk := w.ManagerAbe.SyncedTo()
+		blk := w.Manager.SyncedTo()
 		//balances, err = w.TxStore.BalanceAbe(txmgrNs, confirms, blk.Height)
-		balances, err = w.TxStore.BalanceAbeNew(txmgrNs, confirms, blk.Height)
+		balances, err = w.TxStore.Balance(txmgrNs, confirms, blk.Height)
 		return err
 	})
 	return balances, err
@@ -1202,7 +1202,7 @@ func (w *Wallet) FetchUnmatruedUTXOSet() ([]wtxmgr.UnspentUTXO, error) {
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
-		utxos, err = w.TxStore.UnmaturedOutputsAbe(txmgrNs)
+		utxos, err = w.TxStore.UnmaturedOutputs(txmgrNs)
 		return err
 	})
 	return utxos, err
@@ -1211,7 +1211,7 @@ func (w *Wallet) FetchUnmatruedUTXOSet() ([]wtxmgr.UnspentUTXO, error) {
 func (w *Wallet) FetchUnspentUTXOSet() ([]wtxmgr.UnspentUTXO, error) {
 	var utxos []wtxmgr.UnspentUTXO
 	var err error
-	bs := w.ManagerAbe.SyncedTo()
+	bs := w.Manager.SyncedTo()
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
@@ -1227,7 +1227,7 @@ func (w *Wallet) FetchSpentButUnminedTXOSet() ([]wtxmgr.SpentButUnminedTXO, erro
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
-		utxos, err = w.TxStore.SpentButUnminedOutputsAbe(txmgrNs)
+		utxos, err = w.TxStore.SpentButUnminedOutputs(txmgrNs)
 		return err
 	})
 	return utxos, err
@@ -1239,7 +1239,7 @@ func (w *Wallet) FetchSpentAndConfirmedTXOSet() ([]wtxmgr.SpentConfirmedTXO, err
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
-		utxos, err = w.TxStore.SpentAndMinedOutputsAbe(txmgrNs)
+		utxos, err = w.TxStore.SpentAndMinedOutputs(txmgrNs)
 		return err
 	})
 	return utxos, err
@@ -1572,7 +1572,7 @@ func (w *Wallet) resendUnminedTx() {
 				tx.TxHash(), err)
 			err = walletdb.Update(w.db, func(dbtx walletdb.ReadWriteTx) error {
 				txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
-				return wtxmgr.DeleteRawUnminedAbe(txmgrNs, tx)
+				return wtxmgr.DeleteRawUnmined(txmgrNs, tx)
 			})
 			if err != nil {
 				log.Errorf("Unable to retrieve unconfirmed transactions to "+
@@ -1600,43 +1600,43 @@ func (w *Wallet) NewAddressKeyAbe() (uint64, []byte, error) {
 	err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 		addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 		var err error
-		seedEnc, err := w.ManagerAbe.FetchSeedEnc(addrmgrNs)
+		seedEnc, err := w.Manager.FetchSeedEnc(addrmgrNs)
 		if err != nil {
 			return err
 		}
-		seed, err := w.ManagerAbe.Decrypt(waddrmgr.CKTSeed, seedEnc)
+		seed, err := w.Manager.Decrypt(waddrmgr.CKTSeed, seedEnc)
 		if err != nil {
 			return err
 		}
 		var serializedASksp, serializedASksn, serializedVSk []byte
-		numberOrder, addr, serializedASksp, serializedASksn, serializedVSk, err = w.ManagerAbe.GenerateAddressKeys(addrmgrNs, seed)
+		numberOrder, addr, serializedASksp, serializedASksn, serializedVSk, err = w.Manager.GenerateAddressKeys(addrmgrNs, seed)
 		if err != nil {
 			return err
 		}
 		addressSecretKeySpEnc, err :=
-			w.ManagerAbe.Encrypt(waddrmgr.CKTPrivate, serializedASksp)
+			w.Manager.Encrypt(waddrmgr.CKTPrivate, serializedASksp)
 		if err != nil {
 			return err
 		}
 		addressSecretKeySnEnc, err :=
-			w.ManagerAbe.Encrypt(waddrmgr.CKTPublic, serializedASksn)
+			w.Manager.Encrypt(waddrmgr.CKTPublic, serializedASksn)
 		if err != nil {
 			return err
 		}
 		addressKeyEnc, err :=
-			w.ManagerAbe.Encrypt(waddrmgr.CKTPublic, addr)
+			w.Manager.Encrypt(waddrmgr.CKTPublic, addr)
 		if err != nil {
 			return err
 		}
 		valueSecretKeyEnc, err :=
-			w.ManagerAbe.Encrypt(waddrmgr.CKTPublic, serializedVSk)
+			w.Manager.Encrypt(waddrmgr.CKTPublic, serializedVSk)
 		if err != nil {
 			return err
 		}
 
 		addKey := chainhash.DoubleHashB(addr[4 : 4+abecryptoparam.PQRingCTPP.AddressPublicKeySerializeSize()])
 
-		err = w.ManagerAbe.PutAddressKeysEnc(addrmgrNs, addKey[:], valueSecretKeyEnc,
+		err = w.Manager.PutAddressKeysEnc(addrmgrNs, addKey[:], valueSecretKeyEnc,
 			addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
 		if err != nil {
 			return err
@@ -2124,7 +2124,7 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 	w := &Wallet{
 		publicPassphrase:    pubPass,
 		db:                  db,
-		ManagerAbe:          addrMgrAbe,
+		Manager:             addrMgrAbe,
 		TxStore:             txMgr,
 		lockedOutpoints:     map[wire.OutPoint]struct{}{},
 		recoveryWindow:      recoveryWindow,

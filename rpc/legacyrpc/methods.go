@@ -322,7 +322,7 @@ func getBalances(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.GetBalancesAbeCmd)
 
 	currentTime := time.Now().String()
-	bs := w.ManagerAbe.SyncedTo()
+	bs := w.Manager.SyncedTo()
 	var balances []abeutil.Amount
 	//var needUpdateNum int
 	var err error
@@ -371,7 +371,7 @@ func getDetailedUtxos(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 // TODO(abe): this function can be reused for abelian
 func getBestBlock(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	//blk := w.Manager.SyncedTo()
-	blk := w.ManagerAbe.SyncedTo()
+	blk := w.Manager.SyncedTo()
 	result := &abejson.GetBestBlockResult{
 		Hash:   blk.Hash.String(),
 		Height: blk.Height,
@@ -384,7 +384,7 @@ func getBestBlock(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 // TODO(abe): this function can be reused for abelian
 func getBestBlockHash(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	//blk := w.Manager.SyncedTo()
-	blk := w.ManagerAbe.SyncedTo()
+	blk := w.Manager.SyncedTo()
 	return blk.Hash.String(), nil
 }
 
@@ -393,7 +393,7 @@ func getBestBlockHash(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 // TODO(abe): this function can be reused for abelian
 func getBlockCount(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	//blk := w.Manager.SyncedTo()
-	blk := w.ManagerAbe.SyncedTo()
+	blk := w.Manager.SyncedTo()
 	return blk.Height, nil
 }
 

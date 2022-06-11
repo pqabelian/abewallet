@@ -94,7 +94,7 @@ func createWallet(cfg *config) error {
 		}
 
 		//w.Manager.Close()
-		w.ManagerAbe.Close()
+		w.Manager.Close()
 		fmt.Println("The wallet has been created successfully.")
 	} else if cfg.NonInteractiveCreate {
 		var seed []byte
@@ -142,7 +142,7 @@ func createWallet(cfg *config) error {
 			return err
 		}
 
-		w.ManagerAbe.Close()
+		w.Manager.Close()
 	}
 
 	return nil
