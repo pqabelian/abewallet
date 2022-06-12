@@ -66,10 +66,6 @@ type Block struct {
 	Hash   chainhash.Hash
 	Height int32
 }
-type BlockAbe struct {
-	Hash   chainhash.Hash
-	Height int32
-}
 
 // BlockMeta contains the unique identification for a block and any metadata
 // pertaining to the block.  At the moment, this additional metadata only
@@ -78,10 +74,7 @@ type BlockMeta struct {
 	Block
 	Time time.Time
 }
-type BlockAbeMeta struct {
-	BlockAbe
-	Time time.Time
-}
+
 type BlockRecord struct {
 	MsgBlock        wire.MsgBlockAbe //TODO(abe):using a pointer replace the struct
 	Height          int32
@@ -91,7 +84,7 @@ type BlockRecord struct {
 	SerializedBlock []byte
 }
 
-func NewBlockAbeRecord(serializedBlock []byte) (*BlockRecord, error) {
+func NewBlockRecord(serializedBlock []byte) (*BlockRecord, error) {
 	rec := &BlockRecord{
 		SerializedBlock: serializedBlock,
 	}
@@ -166,15 +159,9 @@ type indexedIncidence struct {
 // transaction credits.
 
 // credit describes a transaction output which was or is spendable by wallet.
-type credit struct {
-	outPoint wire.OutPoint
-	block    Block
-	amount   abeutil.Amount
-	change   bool
-	spentBy  indexedIncidence // Index == ^uint32(0) if unspent
-}
 
 // TxRecord represents a transaction managed by the Store.
+// TODO: this struct would be add more information for managing transaction
 type TxRecord struct {
 	MsgTx        wire.MsgTxAbe
 	Hash         chainhash.Hash
@@ -772,10 +759,8 @@ func Create(ns walletdb.ReadWriteBucket) error {
 // TODO(abe): update the balance in this function
 // TODO(abe): record this transaction in unmined transaction bucket,
 // TODO(abe): wait for a mempool transacion, need to design
-
-func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block *BlockAbeMeta) error {
+func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block *BlockMeta) error {
 	//TODO(abe):remove the outputs of the wallet spent by given tx from UnspentTXObucket to SpentButUmined bucket
-
 	if block != nil {
 		return fmt.Errorf("InsertTx just consideates the unconfirmed transaction")
 	}
@@ -783,7 +768,8 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 	if v != nil { // it means that has exists unmined transaction bucket
 		return nil
 	}
-	// move the unspentutxo bucket to spentbutunmined bucket
+	// 1. move the unspentutxo bucket to spentbutunmined bucket
+	// 2. TODO update the utxoring？
 	for i := 0; i < len(rec.MsgTx.TxIns); i++ {
 		// do not update the utxoring bucket  until the transaction packaged into a block
 		// just mark it is spent and move from unspent bucket to spentbutunmined bucket
@@ -824,7 +810,6 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 		if err != nil {
 			return err
 		}
-		//err = deleteUnspentTXO(wtxmgrNs, k)
 		err = deleteMaturedOutput(wtxmgrNs, k)
 		if err != nil {
 			return err
@@ -935,7 +920,7 @@ func (s *Store) InsertGenesisBlock(ns walletdb.ReadWriteBucket, block *BlockReco
 				v[offset] = ops[j].Index
 				offset += 1
 			}
-			err := putBlockAbeOutput(ns, k, v)
+			err := putBlockOutput(ns, k, v)
 			if err != nil {
 				return err
 			}
@@ -981,8 +966,8 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 
 	// delete oldest block in the database
 	// It assumes that the deleted block would not be reverted.
-	if block.Height > NUMBERBLOCKABE {
-		_, err = deleteRawBlockWithBlockHeight(txMgrNs, block.Height-NUMBERBLOCKABE)
+	if block.Height > NUMBERBLOCK {
+		_, err = deleteRawBlockWithBlockHeight(txMgrNs, block.Height-NUMBERBLOCK)
 		if err != nil {
 			return err
 		}
@@ -1241,7 +1226,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 				v[offset] = ops[j].Index
 				offset += 1
 			}
-			err := putBlockAbeOutput(txMgrNs, k, v)
+			err := putBlockOutput(txMgrNs, k, v)
 			if err != nil {
 				return err
 			}
@@ -1285,7 +1270,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 		// if the height is match, it need to generate the utxo ring
 		// if the number of utxo in previous two block is not zero, take it
 		msgBlock2 := block.MsgBlock
-		block1Outputs, err := fetchBlockAbeOutput(txMgrNs, block.Height-1, msgBlock2.Header.PrevBlock)
+		block1Outputs, err := fetchBlockOutput(txMgrNs, block.Height-1, msgBlock2.Header.PrevBlock)
 		if err != nil && err.Error() != "the entry is empty" {
 			return err
 		}
@@ -1319,7 +1304,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			return err
 		}
 
-		block0Outputs, err := fetchBlockAbeOutput(txMgrNs, block.Height-2, msgBlock1.Header.PrevBlock)
+		block0Outputs, err := fetchBlockOutput(txMgrNs, block.Height-2, msgBlock1.Header.PrevBlock)
 		if err != nil && err.Error() != "the entry is empty" {
 			return err
 		}
@@ -1717,10 +1702,10 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 	}
 	keysWithHeight := make(map[int32][]byte)
 	maxHeight := height
-	// because we do not know whether the blockAbeIterator works properly,
+	// because we do not know whether the blockIterator works properly,
 	// we just use as following:
 	blockNum := int32(wire.GetBlockNumPerRingGroupByBlockHeight(height))
-	err = wtxmgrNs.NestedReadBucket(bucketBlockAbes).ForEach(func(k []byte, v []byte) error {
+	err = wtxmgrNs.NestedReadBucket(bucketBlocks).ForEach(func(k []byte, v []byte) error {
 		heightK := int32(byteOrder.Uint32(k[0:4]))
 		if heightK >= height-blockNum {
 			keysWithHeight[heightK] = k
@@ -1765,7 +1750,7 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 					copy(key[4:], blockHash[:])
 				}
 
-				outpoints, err := fetchBlockAbeOutput(wtxmgrNs, i-j, *blockHash)
+				outpoints, err := fetchBlockOutput(wtxmgrNs, i-j, *blockHash)
 				if outpoints == nil {
 					continue
 				}

@@ -326,7 +326,7 @@ func getBalances(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	var balances []abeutil.Amount
 	//var needUpdateNum int
 	var err error
-	balances, err = w.CalculateBalanceAbe(int32(*cmd.Minconf))
+	balances, err = w.CalculateBalance(int32(*cmd.Minconf))
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +356,7 @@ func getBalances(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 }
 
 // getDetailedUtxos is a temporary command for convenience of test.
-// will be deleted or modified in the future
+// TODO(abe) this function would be modified
 func getDetailedUtxos(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.GetDetailedUtxosCmd)
 	res, err := w.FetchDetailedUtxos(int32(*cmd.Minconf))
@@ -368,9 +368,7 @@ func getDetailedUtxos(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 
 // getBestBlock handles a getbestblock request by returning a JSON object
 // with the height and hash of the most recently processed block.
-// TODO(abe): this function can be reused for abelian
 func getBestBlock(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	//blk := w.Manager.SyncedTo()
 	blk := w.Manager.SyncedTo()
 	result := &abejson.GetBestBlockResult{
 		Hash:   blk.Hash.String(),
@@ -410,7 +408,7 @@ func getInfo(icmd interface{}, w *wallet.Wallet, chainClient *chain.RPCClient) (
 	}
 	// TODO(abe):need add the update number into result struct
 	//bal, err := w.CalculateBalance(1)  // switch to calculateBalanceAbe
-	bal, err := w.CalculateBalanceAbe(1)
+	bal, err := w.CalculateBalance(1)
 	if err != nil {
 		return nil, err
 	}
@@ -989,7 +987,7 @@ func sendAddressAbe(w *wallet.Wallet, amounts []abejson.Pair,
 	if err != nil {
 		return "", err
 	}
-	tx, err := w.SendOutputsAbe(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, "") // TODO(abe): what's label?
+	tx, err := w.SendOutputs(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, "") // TODO(abe): what's label?
 	if err != nil {
 		if err == txrules.ErrAmountNegative {
 			return "", ErrNeedPositiveAmount
@@ -1021,7 +1019,7 @@ func sendPairsAbe(w *wallet.Wallet, amounts map[string]abeutil.Amount,
 	if err != nil {
 		return "", err
 	}
-	tx, err := w.SendOutputsAbe(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, "") // TODO(abe): what's label?
+	tx, err := w.SendOutputs(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, "") // TODO(abe): what's label?
 	if err != nil {
 		if err == txrules.ErrAmountNegative {
 			return "", ErrNeedPositiveAmount
@@ -1127,7 +1125,7 @@ func generateAddressAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 	var err error
 	var numberOrder uint64
 	var address []byte
-	numberOrder, address, err = w.NewAddressKeyAbe()
+	numberOrder, address, err = w.NewAddressKey()
 	if err != nil {
 		return nil, err
 	}
@@ -1146,12 +1144,6 @@ func generateAddressAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 		No_:  numberOrder,
 		Addr: hex.EncodeToString(b),
 	}, nil
-}
-func freshen(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	_ = icmd.(*abejson.FreshenCmd)
-
-	flag, err := w.Refresh()
-	return flag, err
 }
 
 func sendToAddressesAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {

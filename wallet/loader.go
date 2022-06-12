@@ -150,12 +150,12 @@ func (l *Loader) createNewWalletAbe(pubPassphrase, privPassphrase,
 
 	// Initialize the newly created database for the wallet before opening.
 	if isWatchingOnly {
-		err = CreateWatchingOnlyAbe(db, pubPassphrase, l.chainParams, bday)
+		err = CreateWatchingOnly(db, pubPassphrase, l.chainParams, bday)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		err = CreateAbe(
+		err = Create(
 			db, pubPassphrase, privPassphrase, seed, end, l.chainParams, bday,
 		)
 		if err != nil {

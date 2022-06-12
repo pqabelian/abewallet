@@ -35,6 +35,7 @@ const (
 	//
 	// NOTE: at time of writing, public encryption only applies to public
 	// data in the waddrmgr namespace.  Transactions are not yet encrypted.
+	// TODO 20220612 Would be delete
 	InsecurePubPassphrase = "public"
 
 	walletDbWatchingOnlyName = "wowallet.db"
@@ -97,9 +98,7 @@ type Wallet struct {
 	// call the rescan RPC.
 
 	// Channel for transaction creation requests.
-	createTxRequests    chan createTxRequest
-	createTxAbeRequests chan createTxAbeRequest
-	refreshRequests     chan refreshRequest
+	createTxRequests chan createTxRequest
 
 	// Channels for the manager locker.
 	unlockRequests     chan unlockRequest
@@ -110,10 +109,13 @@ type Wallet struct {
 	changePassphrases  chan changePassphrasesRequest
 
 	// Information for reorganization handling.
+	// TODO 20220610 use this field to control something?
 	reorganizingLock sync.Mutex
 	reorganizeToHash chainhash.Hash
 	reorganizing     bool
 
+	// TODO 20220610 notification server to notify the client that something
+	// like a hook?
 	NtfnServer *NotificationServer
 
 	chainParams *chaincfg.Params
@@ -146,7 +148,7 @@ func (w *Wallet) Start() {
 	w.quitMu.Unlock()
 
 	w.wg.Add(2)
-	go w.txAbeCreator()
+	go w.txCreator()
 	go w.walletLocker()
 }
 
@@ -169,32 +171,21 @@ func (w *Wallet) SynchronizeRPC(chainClient chain.Interface) {
 	// TODO: Ignoring the new client when one is already set breaks callers
 	// who are replacing the client, perhaps after a disconnect.
 	w.chainClientLock.Lock()
+
 	if w.chainClient != nil {
 		w.chainClientLock.Unlock()
 		return
 	}
 	w.chainClient = chainClient
 
-	// If the chain client is a NeutrinoClient instance, set a birthday so
-	// we don't download all the filters as we go.
-	//	todo(ABE): ABE does not support NeutrinoClient or BitcoindClient
-	//switch cc := chainClient.(type) {
-	//case *chain.NeutrinoClient:
-	//	cc.SetStartTime(w.Manager.Birthday())
-	//case *chain.BitcoindClient:
-	//	cc.SetBirthday(w.Manager.Birthday())
-	//}
 	w.chainClientLock.Unlock()
 
 	// TODO: It would be preferable to either run these goroutines
 	// separately from the wallet (use wallet mutator functions to
 	// make changes from the RPC client) and not have to stop and
-	// restart them each time the client disconnects and reconnets.
+	// restart them each time the client disconnects and reconnects.
 	w.wg.Add(1)
 	go w.handleChainNotifications()
-	//go w.rescanBatchHandler()
-	//go w.rescanProgressHandler()
-	//go w.rescanRPCHandler()
 }
 
 // requireChainClient marks that a wallet method can only be completed when the
@@ -272,7 +263,7 @@ func (w *Wallet) WaitForShutdown() {
 }
 
 // SynchronizingToNetwork returns whether the wallet is currently synchronizing
-// with the Bitcoin network.
+// with the Abelian network.
 func (w *Wallet) SynchronizingToNetwork() bool {
 	// At the moment, RPC is the only synchronization method.  In the
 	// future, when SPV is added, a separate check will also be needed, or
@@ -310,61 +301,21 @@ func (w *Wallet) SetChainSynced(synced bool) {
 // outputs.  This is primarely intended to provide the parameters for a
 // rescan request.
 
-//TODO(abe):we just provide unspent txo
-func (w *Wallet) activeDataAbe(dbtx walletdb.ReadWriteTx) ([]wtxmgr.UnspentUTXO, error) {
-	//addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
-	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
-
-	//var addrs []abeutil.Address
-	//err := w.Manager.ForEachRelevantActiveAddress(
-	//	addrmgrNs, func(addr abeutil.Address) error {
-	//		addrs = append(addrs, addr)
-	//		return nil
-	//	},
-	//)
-	//if err != nil {
-	//	return nil, nil, err
-	//}
-
-	// Before requesting the list of spendable UTXOs, we'll delete any
-	// expired output locks.
-	//err = w.TxStore.DeleteExpiredLockedOutputs(
-	//	dbtx.ReadWriteBucket(wtxmgrNamespaceKey),
-	//)
-	//if err != nil {
-	//	return nil, nil, err
-	//}
-
-	unspent, err := w.TxStore.UnspentOutputs(txmgrNs)
-	return unspent, err
-}
-
 // syncWithChain brings the wallet up to date with the current chain server
 // connection. It creates a rescan request and blocks until the rescan has
 // finished. The birthday block can be passed in, if set, to ensure we can
 // properly detect if it gets rolled back.
-func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
+func (w *Wallet) syncWithChain(birthdayStamp *waddrmgr.BlockStamp) error {
 	chainClient, err := w.requireChainClient()
 	if err != nil {
 		return err
 	}
-
-	// Neutrino relies on the information given to it by the cfheader server
-	// so it knows exactly whether it's synced up to the server's state or
-	// not, even on dev chains. To recover a Neutrino wallet, we need to
-	// make sure it's synced before we start scanning for addresses,
-	// otherwise we might miss some if we only scan up to its current sync
-	// point.
-	//	Todo(ABE): ABE does not support neutrino client
-	//neutrinoRecovery := chainClient.BackEnd() == "neutrino" &&
-	//	w.recoveryWindow > 0
 
 	// We'll wait until the backend is synced to ensure we get the latest
 	// MaxReorgDepth blocks to store. We don't do this for development
 	// environments as we can't guarantee a lively chain, except for
 	// Neutrino, where the cfheader server tells us what it believes the
 	// chain tip is.
-	//if !w.isDevEnv() || neutrinoRecovery {
 	if !w.isDevEnv() {
 		log.Debug("Waiting for chain backend to sync to tip")
 		if err := w.waitUntilBackendSynced(chainClient); err != nil {
@@ -412,27 +363,18 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 		}
 	}
 
-	// If the wallet requested an on-chain recovery of its funds, we'll do
-	// so now.
-	//TODO(abe):recovery? it seems be the part of HD wallet, and this code will be deleted.
-	if w.recoveryWindow > 0 {
-		if err := w.recoveryAbe(chainClient, birthdayStamp); err != nil {
-			return fmt.Errorf("unable to perform wallet recovery: "+
-				"%v", err)
-		}
-	}
-
 	// Compare previously-seen blocks against the current chain. If any of
 	// these blocks no longer exist, rollback all of the missing blocks
 	// before catching up with the rescan.
 	rollback := false
 	rollbackStamp := w.Manager.SyncedTo()
-	// TODO(abe): there are some problem which incur the wallet stop running?
-	// TODO(abe): rescan will be tested...
+
 	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 		addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
 
+		// compare the block with the backend chain, and rollback the sync
+		// height if necessary
 		for height := rollbackStamp.Height; true; height-- {
 			hash, err := w.Manager.BlockHash(addrmgrNs, height)
 			if err != nil {
@@ -504,22 +446,7 @@ func (w *Wallet) syncWithChainAbe(birthdayStamp *waddrmgr.BlockStamp) error {
 	// Finally, we'll trigger a wallet rescan and request notifications for
 	// transactions sending to all wallet addresses and spending all wallet
 	// UTXOs.
-	//	todo(ABE): ABE needs to get each block and checks the transactions to see whether they should be put into wallet.
-	//var (
-	//	//addrs   []abeutil.Address
-	//	//unspent []wtxmgr.Credit
-	//	unspent []wtxmgr.UnspentUTXO
-	//)
-	//err = walletdb.Update(w.db, func(dbtx walletdb.ReadWriteTx) error {
-	//	unspent, err = w.activeDataAbe(dbtx)
-	//	return err
-	//})
-	//if err != nil {
-	//	return err
-	//}
-
-	//return w.rescanWithTarget(addrs, unspent, nil)
-	return w.rescanWithTargetAbe(nil)
+	return w.rescanWithTarget(nil)
 }
 
 // isDevEnv determines whether the wallet is currently under a local developer
@@ -598,7 +525,7 @@ func locateBirthdayBlock(chainClient chainConn,
 		if mid == startHeight || mid == bestHeight || mid == left {
 			birthdayBlock = &waddrmgr.BlockStamp{
 				Hash:      *hash,
-				Height:    int32(mid),
+				Height:    mid,
 				Timestamp: header.Timestamp,
 			}
 			break
@@ -620,7 +547,7 @@ func locateBirthdayBlock(chainClient chainConn,
 
 		birthdayBlock = &waddrmgr.BlockStamp{
 			Hash:      *hash,
-			Height:    int32(mid),
+			Height:    mid,
 			Timestamp: header.Timestamp,
 		}
 		break
@@ -636,128 +563,7 @@ func locateBirthdayBlock(chainClient chainConn,
 // recovery attempts to recover any unspent outputs that pay to any of our
 // addresses starting from our birthday, or the wallet's tip (if higher), which
 // would indicate resuming a recovery after a restart.
-// TODO(abe):we need to design the principle of recovery, at least, we do not need to
-//  restore the derived address. And when we create a wallet, we must rescan the blockchain
-//  to read the all block and parse it to get the coins those belong to wallet.
-func (w *Wallet) recoveryAbe(chainClient chain.Interface,
-	birthdayBlock *waddrmgr.BlockStamp) error {
-
-	log.Infof("RECOVERY MODE ENABLED -- rescanning for used addresses "+
-		"with recovery_window=%d", w.recoveryWindow)
-	w.recoveryWindow = 0
-	return nil
-
-	// We'll initialize the recovery manager with a default batch size of
-	// 2000.
-	//recoveryMgr := NewRecoveryManager(
-	//	w.recoveryWindow, recoveryBatchSize, w.chainParams,
-	//)
-
-	// In the event that this recovery is being resumed, we will need to
-	// repopulate all found addresses from the database. Ideally, for basic
-	// recovery, we would only do so for the default scopes, but due to a
-	// bug in which the wallet would create change addresses outside of the
-	// default scopes, it's necessary to attempt all registered key scopes.
-	//TODO(abe):we have no scope
-	//scopedMgrs := make(map[waddrmgr.KeyScope]*waddrmgr.ScopedKeyManager)
-	//for _, scopedMgr := range w.Manager.ActiveScopedKeyManagers() {
-	//	scopedMgrs[scopedMgr.Scope()] = scopedMgr
-	//}
-	//err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-	//	txMgrNS := tx.ReadBucket(wtxmgrNamespaceKey)
-	//	utxos, err := w.TxStore.UnspentOutputsAbe(txMgrNS)
-	//	if err != nil {
-	//		return err
-	//	}
-	//	addrMgrNS := tx.ReadBucket(waddrmgrNamespaceKey)
-	//	return recoveryMgr.ResurrectAbe(addrMgrNS, utxos)
-	//})
-	//if err != nil {
-	//	return err
-	//}
-
-	// Fetch the best height from the backend to determine when we should
-	// stop.
-	//_, bestHeight, err := chainClient.GetBestBlock()
-	//if err != nil {
-	//	return err
-	//}
-
-	//	todo (ABE): Wallet Recovery first read the credits from database, then scan and catch up the chain.
-
-	// Now we can begin scanning the chain from the wallet's current tip to
-	// ensure we properly handle restarts. Since the recovery process itself
-	// acts as rescan, we'll also update our wallet's synced state along the
-	// way to reflect the blocks we process and prevent rescanning them
-	// later on.
-	//
-	// NOTE: We purposefully don't update our best height since we assume
-	// that a wallet rescan will be performed from the wallet's tip, which
-	// will be of bestHeight after completing the recovery process.
-	//var blocks []*waddrmgr.BlockStamp
-	//startHeight := w.Manager.SyncedTo().Height + 1
-	//for height := startHeight; height <= bestHeight; height++ {
-	//	hash, err := chainClient.GetBlockHash(int64(height))
-	//	if err != nil {
-	//		return err
-	//	}
-	//	header, err := chainClient.GetBlockHeader(hash)
-	//	if err != nil {
-	//		return err
-	//	}
-	//	blocks = append(blocks, &waddrmgr.BlockStamp{
-	//		Hash:      *hash,
-	//		Height:    height,
-	//		Timestamp: header.Timestamp,
-	//	})
-	//
-	//	// It's possible for us to run into blocks before our birthday
-	//	// if our birthday is after our reorg safe height, so we'll make
-	//	// sure to not add those to the batch.
-	//	if height >= birthdayBlock.Height {
-	//		recoveryMgr.AddToBlockBatch(
-	//			hash, height, header.Timestamp,
-	//		)
-	//	}
-	//
-	//	// We'll perform our recovery in batches of 2000 blocks.  It's
-	//	// possible for us to reach our best height without exceeding
-	//	// the recovery batch size, so we can proceed to commit our
-	//	// state to disk.
-	//	recoveryBatch := recoveryMgr.BlockBatch()
-	//	if len(recoveryBatch) == recoveryBatchSize || height == bestHeight {
-	//		err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-	//			ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
-	//			for _, block := range blocks {
-	//				err := w.Manager.SetSyncedTo(ns, block)
-	//				if err != nil {
-	//					return err
-	//				}
-	//			}
-	//			return w.recoverScopedAddresses(
-	//				chainClient, tx, ns, recoveryBatch,
-	//				recoveryMgr.State(), scopedMgrs,
-	//			)
-	//		})
-	//		if err != nil {
-	//			return err
-	//		}
-	//
-	//		if len(recoveryBatch) > 0 {
-	//			log.Infof("Recovered addresses from blocks "+
-	//				"%d-%d", recoveryBatch[0].Height,
-	//				recoveryBatch[len(recoveryBatch)-1].Height)
-	//		}
-	//
-	//		// Clear the batch of all processed blocks to reuse the
-	//		// same memory for future batches.
-	//		blocks = blocks[:0]
-	//		recoveryMgr.ResetBlockBatch()
-	//	}
-	//}
-
-	//return nil
-}
+// In abelian, when create a wallet, the user would input the address number to recover
 
 // recoverScopedAddresses scans a range of blocks in attempts to recover any
 // previously used addresses for a particular account derivation path. At a high
@@ -792,36 +598,17 @@ func (w *Wallet) recoveryAbe(chainClient chain.Interface,
 
 type (
 	createTxRequest struct {
-		account     uint32
-		outputs     []*wire.TxOut
-		minconf     int32
-		feeSatPerKB abeutil.Amount
-		dryRun      bool
-		resp        chan createTxResponse
-	}
-	createTxAbeRequest struct {
 		txOutDescs        []*abecrypto.AbeTxOutputDesc
 		minconf           int32
 		feePerKbSpecified abeutil.Amount
 		feeSpecified      abeutil.Amount
 		utxoSpecified     []string
 		dryRun            bool
-		resp              chan createTxAbeResponse
-	}
-	refreshRequest struct {
-		resp chan refreshResponse
+		resp              chan createTxResponse
 	}
 	createTxResponse struct {
-		tx  *txauthor.AuthoredTx
-		err error
-	}
-	createTxAbeResponse struct {
 		tx  *txauthor.AuthoredTxAbe
 		err error
-	}
-	refreshResponse struct {
-		flag bool
-		err  error
 	}
 )
 
@@ -835,22 +622,22 @@ type (
 // transactions are being created.  In this situation, it would then be possible
 // for both requests, rather than just one, to fail due to not enough available
 // inputs.
-func (w *Wallet) txAbeCreator() {
+func (w *Wallet) txCreator() {
 	quit := w.quitChan()
 out:
 	for {
 		select {
-		case txr := <-w.createTxAbeRequests:
+		case txr := <-w.createTxRequests:
 			heldUnlock, err := w.holdUnlock()
 			if err != nil {
-				txr.resp <- createTxAbeResponse{nil, err}
+				txr.resp <- createTxResponse{nil, err}
 				continue
 			}
 			// todo(AliceBob): rename the methods
 			//tx, err := w.txAbeToOutputs(txr.txOutDescs, txr.minconf, txr.feeSatPerKB, txr.dryRun)
 			tx, err := w.txAbePqringCTToOutputs(txr.txOutDescs, txr.minconf, txr.feePerKbSpecified, txr.feeSpecified, txr.utxoSpecified, txr.dryRun)
 			heldUnlock.release()
-			txr.resp <- createTxAbeResponse{tx, err}
+			txr.resp <- createTxResponse{tx, err}
 		case <-quit:
 			break out
 		}
@@ -867,47 +654,21 @@ out:
 //
 // NOTE: The dryRun argument can be set true to create a tx that doesn't alter
 // the database. A tx created with this set to true SHOULD NOT be broadcasted.
-func (w *Wallet) CreateSimpleTx(account uint32, outputs []*wire.TxOut,
-	minconf int32, satPerKb abeutil.Amount, dryRun bool) (
-	*txauthor.AuthoredTx, error) {
-
-	req := createTxRequest{
-		account:     account,
-		outputs:     outputs,
-		minconf:     minconf,
-		feeSatPerKB: satPerKb,
-		dryRun:      dryRun,
-		resp:        make(chan createTxResponse),
-	}
-	w.createTxRequests <- req
-	resp := <-req.resp
-	return resp.tx, resp.err
-}
-
-func (w *Wallet) CreateSimpleTxAbe(outputDescs []*abecrypto.AbeTxOutputDesc, minconf int32,
+func (w *Wallet) CreateSimpleTx(outputDescs []*abecrypto.AbeTxOutputDesc, minconf int32,
 	feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, dryRun bool) (*txauthor.AuthoredTxAbe, error) {
 
-	req := createTxAbeRequest{
+	req := createTxRequest{
 		txOutDescs:        outputDescs,
 		minconf:           minconf,
 		feePerKbSpecified: feePerKbSpecified,
 		feeSpecified:      feeSpecified,
 		utxoSpecified:     utxoSpecified,
 		dryRun:            dryRun,
-		resp:              make(chan createTxAbeResponse),
+		resp:              make(chan createTxResponse),
 	}
-	w.createTxAbeRequests <- req
+	w.createTxRequests <- req
 	resp := <-req.resp
 	return resp.tx, resp.err
-}
-
-func (w *Wallet) Refresh() (bool, error) {
-	req := refreshRequest{
-		resp: make(chan refreshResponse),
-	}
-	w.refreshRequests <- req
-	resp := <-req.resp
-	return resp.flag, resp.err
 }
 
 type (
@@ -940,7 +701,6 @@ type (
 // walletLocker manages the locked/unlocked state of a wallet.
 func (w *Wallet) walletLocker() {
 	var timeout <-chan time.Time
-	var refreshed chan bool
 	holdChan := make(heldUnlock)
 	quit := w.quitChan()
 out:
@@ -1012,8 +772,6 @@ out:
 			case <-timeout:
 			// Let the top level select fallthrough so the
 			// wallet is locked.
-			case <-refreshed:
-				//after refreshed, lock the wallet
 			default:
 				continue
 			}
@@ -1025,14 +783,11 @@ out:
 
 		case <-w.lockRequests:
 		case <-timeout:
-		case <-refreshed:
 		}
 
 		// Select statement fell through by an explicit lock or the
 		// timer expiring.  Lock the manager here.
 		timeout = nil
-		refreshed = nil
-		//err := w.Manager.Lock()
 		err := w.Manager.Lock()
 		if err != nil && !waddrmgr.IsError(err, waddrmgr.ErrLocked) {
 			log.Errorf("Could not lock wallet: %v", err)
@@ -1125,7 +880,7 @@ func (w *Wallet) ChangePublicPassphrase(old, new []byte) error {
 
 // ChangePassphrases modifies the public and private passphrase of the wallet
 // atomically.
-//	todo(ABE): This function is never used yet.
+// TODO :This function is never used yet until the gRPC is supported.
 func (w *Wallet) ChangePassphrases(publicOld, publicNew, privateOld,
 	privateNew []byte) error {
 
@@ -1143,37 +898,9 @@ func (w *Wallet) ChangePassphrases(publicOld, publicNew, privateOld,
 // accountUsed returns whether there are any recorded transactions spending to
 // a given account. It returns true if atleast one address in the account was
 // used and false if no address in the account was used.
-func (w *Wallet) accountUsed(addrmgrNs walletdb.ReadWriteBucket, account uint32) (bool, error) {
-	//var used bool
-	//err := w.Manager.ForEachAccountAddress(addrmgrNs, account,
-	//	func(maddr waddrmgr.ManagedAddress) error {
-	//		used = maddr.Used(addrmgrNs)
-	//		if used {
-	//			return waddrmgr.Break
-	//		}
-	//		return nil
-	//	})
-	//if err == waddrmgr.Break {
-	//	err = nil
-	//}
-	//return used, err
-	// TODO(abe): we do not support the account
-	return false, nil
-}
 
 // AccountAddresses returns the addresses for every created address for an
 // account.
-func (w *Wallet) AccountAddresses(account uint32) (addrs []abeutil.Address, err error) {
-	//err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-	//	addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-	//	return w.Manager.ForEachAccountAddress(addrmgrNs, account, func(maddr waddrmgr.ManagedAddress) error {
-	//		addrs = append(addrs, maddr.Address())
-	//		return nil
-	//	})
-	//})
-	// TODO(abe): we do not support the account
-	return
-}
 
 // CalculateBalance sums the amounts of all unspent transaction
 // outputs to addresses of a wallet and returns the balance.
@@ -1184,24 +911,23 @@ func (w *Wallet) AccountAddresses(account uint32) (addrs []abeutil.Address, err 
 // the balance will be calculated based on how many how many blocks
 // include a UTXO.
 
-func (w *Wallet) CalculateBalanceAbe(confirms int32) ([]abeutil.Amount, error) {
+func (w *Wallet) CalculateBalance(confirms int32) ([]abeutil.Amount, error) {
 	var balances []abeutil.Amount
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		var err error
 		blk := w.Manager.SyncedTo()
-		//balances, err = w.TxStore.BalanceAbe(txmgrNs, confirms, blk.Height)
 		balances, err = w.TxStore.Balance(txmgrNs, confirms, blk.Height)
 		return err
 	})
 	return balances, err
 }
+
 func (w *Wallet) FetchUnmatruedUTXOSet() ([]wtxmgr.UnspentUTXO, error) {
 	var utxos []wtxmgr.UnspentUTXO
 	var err error
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
-		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
 		utxos, err = w.TxStore.UnmaturedOutputs(txmgrNs)
 		return err
 	})
@@ -1214,36 +940,34 @@ func (w *Wallet) FetchUnspentUTXOSet() ([]wtxmgr.UnspentUTXO, error) {
 	bs := w.Manager.SyncedTo()
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
-		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
 		utxos, err = w.findEligibleTxosAbe(txmgrNs, 1, &bs)
 		return err
 	})
 	return utxos, err
 }
+
 func (w *Wallet) FetchSpentButUnminedTXOSet() ([]wtxmgr.SpentButUnminedTXO, error) {
 	var utxos []wtxmgr.SpentButUnminedTXO
 	var err error
-	//bs := w.Manager.SyncedTo()
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
-		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
 		utxos, err = w.TxStore.SpentButUnminedOutputs(txmgrNs)
 		return err
 	})
 	return utxos, err
 }
+
 func (w *Wallet) FetchSpentAndConfirmedTXOSet() ([]wtxmgr.SpentConfirmedTXO, error) {
 	var utxos []wtxmgr.SpentConfirmedTXO
 	var err error
-	//bs := w.Manager.SyncedTo()
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
-		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
 		utxos, err = w.TxStore.SpentAndMinedOutputs(txmgrNs)
 		return err
 	})
 	return utxos, err
 }
+
 func (w *Wallet) FetchDetailedUtxos(confirms int32) (string, error) {
 	var details []string
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
@@ -1284,11 +1008,6 @@ type Balances struct {
 // are not indexed by the accounts they credit to, and all unspent transaction
 // outputs must be iterated.
 
-// CurrentAddress gets the most recently requested Bitcoin payment address
-// from a wallet for a particular key-chain scope.  If the address has already
-// been used (there is at least one transaction spending to it in the
-// blockchain or btcd mempool), the next chained address is returned.
-
 // PubKeyForAddress looks up the associated public key for a P2PKH address.
 
 // LabelTransaction adds a label to the transaction with the hash provided. The
@@ -1314,8 +1033,6 @@ type Balances struct {
 // manager, then updates the indexes based on the address pools.
 
 // RenameAccount sets the name for an account number to newName.
-
-const maxEmptyAccounts = 100
 
 // NextAccount creates the next account and returns its account number.  The
 // name must be unique to the account.  In order to support automatic seed
@@ -1398,13 +1115,6 @@ type GetTransactionsResult struct {
 // chain tip is included in the result for atomicity reasons.
 //
 
-// AccountBalanceResult is a single result for the Wallet.AccountBalances method.
-type AccountBalanceResult struct {
-	AccountNumber  uint32
-	AccountName    string
-	AccountBalance abeutil.Amount
-}
-
 // AccountBalances returns all accounts in the wallet and their balances.
 // Balances are determined by excluding transactions that have not met
 // requiredConfs confirmations.
@@ -1414,6 +1124,8 @@ type AccountBalanceResult struct {
 // time and mined in the same block are not guaranteed to be sorted by the order
 // they appear in the block.  Credits from the same transaction are sorted by
 // output index.
+
+// unspentUTXOSlice would be used for choose UTXO or other intention for sort
 type unspentUTXOSlice []wtxmgr.UnspentUTXO
 
 func (u unspentUTXOSlice) Len() int {
@@ -1459,7 +1171,7 @@ func (u unspentUTXOSlice) Swap(i, j int) {
 
 // ImportPrivateKey imports a private key to the wallet and writes the new
 // wallet to disk.
-//
+// TODO : this function would be delete
 // NOTE: If a block stamp is not provided, then the wallet's birthday will be
 // set to the genesis block of the corresponding chain.
 func (w *Wallet) ImportPrivateKey(wif *abeutil.WIF,
@@ -1470,6 +1182,7 @@ func (w *Wallet) ImportPrivateKey(wif *abeutil.WIF,
 
 // LockedOutpoint returns whether an outpoint has been marked as locked and
 // should not be used as an input for created transactions.
+// TODO: this function would be used after gRPC is supported.
 func (w *Wallet) LockedOutpoint(op wire.OutPoint) bool {
 	_, locked := w.lockedOutpoints[op]
 	return locked
@@ -1477,6 +1190,7 @@ func (w *Wallet) LockedOutpoint(op wire.OutPoint) bool {
 
 // LockOutpoint marks an outpoint as locked, that is, it should not be used as
 // an input for newly created transactions.
+// TODO: this function would be used after gRPC is supported.
 func (w *Wallet) LockOutpoint(op wire.OutPoint) {
 	w.lockedOutpoints[op] = struct{}{}
 }
@@ -1553,7 +1267,7 @@ func (w *Wallet) resendUnminedTx() {
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		var err error
-		txs, err = w.TxStore.UnminedTxAbes(txmgrNs)
+		txs, err = w.TxStore.UnminedTxs(txmgrNs)
 		return err
 	})
 	if err != nil {
@@ -1567,6 +1281,8 @@ func (w *Wallet) resendUnminedTx() {
 
 	for _, tx := range txs {
 		txHash, err := w.publishTransaction(tx)
+		// TODO 20220611 according to the response to handle
+		// not all delete the unmined transaction
 		if err != nil {
 			log.Debugf("Unable to rebroadcast transaction %v: %v",
 				tx.TxHash(), err)
@@ -1592,9 +1308,8 @@ func (w *Wallet) resendUnminedTx() {
 
 // NewAddress returns the next external chained address for a wallet.
 
-// NewChangeAddress returns a new change address for a wallet.
-
-func (w *Wallet) NewAddressKeyAbe() (uint64, []byte, error) {
+// NewAddressKey returns a new address for a wallet.
+func (w *Wallet) NewAddressKey() (uint64, []byte, error) {
 	var numberOrder uint64
 	var addr []byte
 	err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
@@ -1678,17 +1393,18 @@ func confirms(txHeight, curHeight int32) int32 {
 // Wallet.TotalReceivedForAccounts method.
 
 // TotalReceivedForAccounts iterates through a wallet's transaction history,
-// returning the total amount of Bitcoin received for all accounts.
+// returning the total amount of Abelian received for all accounts.
 
 // TotalReceivedForAddr iterates through a wallet's transaction history,
-// returning the total amount of bitcoins received for a single wallet
+// returning the total amount of abelian received for a single wallet
 // address.
 
 // SendOutputs creates and sends payment transactions. It returns the
 // transaction upon success.
 
-func (w *Wallet) SendOutputsAbe(outputDescs []*abecrypto.AbeTxOutputDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, label string) (*wire.MsgTxAbe, error) {
-
+func (w *Wallet) SendOutputs(outputDescs []*abecrypto.AbeTxOutputDesc,
+	minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount,
+	utxoSpecified []string, label string) (*wire.MsgTxAbe, error) {
 	// Ensure the outputs to be created adhere to the network's consensus
 	// rules.
 	for _, txOutDesc := range outputDescs {
@@ -1704,7 +1420,7 @@ func (w *Wallet) SendOutputsAbe(outputDescs []*abecrypto.AbeTxOutputDesc, mincon
 	// transaction will be added to the database in order to ensure that we
 	// continue to re-broadcast the transaction upon restarts until it has
 	// been confirmed.
-	createdTx, err := w.CreateSimpleTxAbe(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, false)
+	createdTx, err := w.CreateSimpleTx(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1715,18 +1431,12 @@ func (w *Wallet) SendOutputsAbe(outputDescs []*abecrypto.AbeTxOutputDesc, mincon
 	}
 
 	// Sanity check on the returned tx hash.
+	// something error ?
 	if *txHash != createdTx.Tx.TxHash() {
 		return nil, errors.New("tx hash mismatch")
 	}
 
 	return createdTx.Tx, nil
-}
-
-// SignatureError records the underlying error when validating a transaction
-// input signature.
-type SignatureError struct {
-	InputIndex uint32
-	Error      error
 }
 
 // SignTransaction uses secrets of the wallet, as well as additional secrets
@@ -1797,18 +1507,18 @@ func (w *Wallet) reliablyPublishTransaction(tx *wire.MsgTxAbe,
 	// firstly, send the transaction to the backend
 	hash, err := w.publishTransaction(tx)
 	// if failed, do nothing
-	// if successfully, add the transaction into unmined bucket
 	if err != nil {
 		// failed
 		return nil, err
 	}
+	// if successfully, add the transaction into unmined bucket
 	txRec, err := wtxmgr.NewTxRecordFromMsgTx(tx, time.Now())
 	if err != nil {
 		return nil, err
 	}
 	// add the transaction into unmined bucket
 	err = walletdb.Update(w.db, func(dbTx walletdb.ReadWriteTx) error {
-		if err := w.addRelevantTxAbe(dbTx, txRec, nil); err != nil {
+		if err := w.addRelevantTx(dbTx, txRec, nil); err != nil {
 			return err
 		}
 		// If the tx label is empty, we can return early.
@@ -1866,7 +1576,7 @@ func (w *Wallet) publishTransaction(tx *wire.MsgTxAbe) (*chainhash.Hash, error) 
 	// If the transaction is already in the mempool, we can just return now.
 	//
 	// This error is returned when broadcasting/sending a transaction to a
-	// btcd node that already has it in their mempool.
+	// abec node that already has it in their mempool.
 	// https://github.com/btcsuite/btcd/blob/130ea5bddde33df32b06a1cdb42a6316eb73cff5/mempool/mempool.go#L953
 	case match(err, "already have transaction"):
 		fallthrough
@@ -2007,10 +1717,10 @@ func (w *Wallet) Database() walletdb.DB {
 // recommended length is generated.
 
 // TODO(abe):
-func CreateAbe(db walletdb.DB, pubPass, privPass, seed []byte, end uint64,
+func Create(db walletdb.DB, pubPass, privPass, seed []byte, end uint64,
 	params *chaincfg.Params, birthday time.Time) error {
 
-	return createAbe(
+	return create(
 		db, pubPass, privPass, seed, end, params, birthday, false,
 	)
 }
@@ -2019,18 +1729,15 @@ func CreateAbe(db walletdb.DB, pubPass, privPass, seed []byte, end uint64,
 // an empty database. No seed can be provided as this wallet will be
 // watching only.  Likewise no private passphrase may be provided
 // either.
-
-//TODO(abe):
-func CreateWatchingOnlyAbe(db walletdb.DB, pubPass []byte,
+func CreateWatchingOnly(db walletdb.DB, pubPass []byte,
 	params *chaincfg.Params, birthday time.Time) error {
 
-	return createAbe(
+	return create(
 		db, pubPass, nil, nil, 0, params, birthday, true,
 	)
 }
 
-// TODO(abe):
-func createAbe(db walletdb.DB, pubPass, privPass, seed []byte, end uint64,
+func create(db walletdb.DB, pubPass, privPass, seed []byte, end uint64,
 	params *chaincfg.Params, birthday time.Time, isWatchingOnly bool) error {
 	// TODO: the following snippet is not run?
 	if !isWatchingOnly {
@@ -2122,23 +1829,21 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 	log.Infof("Opened wallet") // TODO: log balance? last sync height?
 
 	w := &Wallet{
-		publicPassphrase:    pubPass,
-		db:                  db,
-		Manager:             addrMgrAbe,
-		TxStore:             txMgr,
-		lockedOutpoints:     map[wire.OutPoint]struct{}{},
-		recoveryWindow:      recoveryWindow,
-		createTxRequests:    make(chan createTxRequest),
-		createTxAbeRequests: make(chan createTxAbeRequest),
-		unlockRequests:      make(chan unlockRequest),
-		refreshRequests:     make(chan refreshRequest),
-		lockRequests:        make(chan struct{}),
-		holdUnlockRequests:  make(chan chan heldUnlock),
-		lockState:           make(chan bool),
-		changePassphrase:    make(chan changePassphraseRequest),
-		changePassphrases:   make(chan changePassphrasesRequest),
-		chainParams:         params,
-		quit:                make(chan struct{}),
+		publicPassphrase:   pubPass,
+		db:                 db,
+		Manager:            addrMgrAbe,
+		TxStore:            txMgr,
+		lockedOutpoints:    map[wire.OutPoint]struct{}{},
+		recoveryWindow:     recoveryWindow,
+		createTxRequests:   make(chan createTxRequest),
+		unlockRequests:     make(chan unlockRequest),
+		lockRequests:       make(chan struct{}),
+		holdUnlockRequests: make(chan chan heldUnlock),
+		lockState:          make(chan bool),
+		changePassphrase:   make(chan changePassphraseRequest),
+		changePassphrases:  make(chan changePassphrasesRequest),
+		chainParams:        params,
+		quit:               make(chan struct{}),
 	}
 
 	//	todo(ABE): ABE does not support spent and unspent notifications.

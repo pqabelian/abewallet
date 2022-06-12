@@ -1,5 +1,6 @@
 package wallet
 
+// unstableAPI is reserved to keep for experiment API although the APIs of abewallet is not stable
 type unstableAPI struct {
 	w *Wallet
 }

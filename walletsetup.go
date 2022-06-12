@@ -171,7 +171,7 @@ func createSimulationWallet(cfg *config) error {
 	defer db.Close()
 
 	// Create the wallet.
-	err = wallet.CreateAbe(db, pubPass, privPass, nil, 0, activeNet.Params, time.Now())
+	err = wallet.Create(db, pubPass, privPass, nil, 0, activeNet.Params, time.Now())
 	if err != nil {
 		return err
 	}

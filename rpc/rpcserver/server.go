@@ -293,6 +293,7 @@ func (s *walletServer) FundTransaction(ctx context.Context, req *pb.FundTransact
 	//}, nil
 }
 
+// marshalGetTransactionsResult would be used after the gRPC is supported.
 func marshalGetTransactionsResult(wresp *wallet.GetTransactionsResult) (
 	*pb.GetTransactionsResponse, error) {
 

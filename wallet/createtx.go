@@ -718,9 +718,6 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 	// doesn't affect the serialize size, so the change amount will still
 	// be valid.
 
-	// acquire thr master key
-	//  generate the transacion
-
 	PrintConsumedUTXOs(selectedTxos)
 
 	serializeAddressBytes := make([][]byte, len(selectedTxos))
@@ -795,7 +792,7 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 
 	if needChangeFlag {
 		// fetch a change address for the change
-		_, addrBytes, err := w.NewAddressKeyAbe()
+		_, addrBytes, err := w.NewAddressKey()
 		if err != nil {
 			return nil, err
 		}
@@ -820,7 +817,8 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 	if err != nil {
 		return nil, err
 	}
-	// update the utxoring
+	// update the utxoring?
+	// TODO 20220611: record the serial number and output with the transfer transaction
 	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
 		for i, txo := range selectedTxos {
@@ -846,86 +844,18 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 		Tx: transferTx,
 	}
 	return resTx, nil
+
 	// If a dry run was requested, we return now before adding the input
 	// scripts, and don't commit the database transaction. The DB will be
 	// rolled back when this method returns to ensure the dry run didn't
 	// alter the DB in any way.
+
 	//if dryRun {
 	//	return unsignedTx, nil
 	//}
 
-	// TODO(abe):refresh the utxo ring
-	//   todo
-	// TODO(abe):need to get serialNumber and signature for all input in new transaction
-	//err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-	//	addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-	//	txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-	//	// TODO 20210520: the signed message will be the hash of the transaction information without signature
-	//	err = unsignedTx.AddAllInputScripts([]byte("this is a test"), w.Manager, addrmgrNs, txmgrNs)
-	//	if err != nil {
-	//		return nil
-	//	}
-	//	return nil
-	//})
-	//if err != nil {
-	//	return nil, err
-	//}
-	//	todo(ABE): Is this necessary?
-	// TODO(osy): temporary ignore it
-	//err = validateMsgTx(tx.Tx, tx.PrevScripts, tx.PrevInputValues)
-	//if err != nil {
-	//	return nil, err
-	//}
-
-	// TODO(abe):up to here, the transaction will be successful created, so the spent utxo should be marked used and move to SpentButUmined Bucket.
-	//   and modify the utxo ring bucket.
-
-	//txRecordAbe, err := wtxmgr.NewTxRecordAbeFromMsgTxAbe(unsignedTx.Tx, time.Now())
-	//if err != nil {
-	//	return nil, err
-	//}
-	//
-	//err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-	//	txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-	//	err = w.TxStore.InsertTx(txmgrNs, txRecordAbe, nil)
-	//	if err != nil {
-	//		return err
-	//	}
-	//	return nil
-	//})
-	//if err!=nil{
-	//	return nil,err
-	//}
-	//return unsignedTx, nil
-	//return unsignedTx, nil
-	//
-	//if err := dbtx.Commit(); err != nil {
-	//	return nil, err
-	//}
-	//
-	////if tx.ChangeIndex >= 0 && account == waddrmgr.ImportedAddrAccount {
-	////	changeAmount := abeutil.Amount(tx.Tx.TxOuts[tx.ChangeIndex].ValueScript)
-	////	log.Warnf("Spend from imported account produced change: moving"+
-	////		" %v from imported account into default account.", changeAmount)
-	////}
-	//
 	//// Finally, we'll request the backend to notify us of the transaction
 	//// that pays to the change address, if there is one, when it confirms.
-	////TODO(abe): this process will be ignore, because we can not spend this change output before this transaction is mined into the chain
-	////if tx.ChangeIndex >= 0 {
-	////	changePkScript := tx.Tx.TxOuts[tx.ChangeIndex].AddressScript
-	////	_, addrs, _, err := txscript.ExtractPkScriptAddrs(
-	////		changePkScript, w.chainParams,
-	////	)
-	////	if err != nil {
-	////		return nil, err
-	////	}
-	////	if err := chainClient.NotifyReceived(addrs); err != nil {
-	////		return nil, err
-	////	}
-	////}
-	//
-	//return tx, nil
 }
 
 // TODO(abe):we should request the unspent transaction output from tx manager

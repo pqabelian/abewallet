@@ -57,7 +57,7 @@ import (
 // rescanWithTarget performs a rescan starting at the optional startStamp. If
 // none is provided, the rescan will begin from the manager's sync tip.
 
-func (w *Wallet) rescanWithTargetAbe(startStamp *waddrmgr.BlockStamp) error {
+func (w *Wallet) rescanWithTarget(startStamp *waddrmgr.BlockStamp) error {
 	if startStamp == nil {
 		startStamp = &waddrmgr.BlockStamp{}
 		*startStamp = w.Manager.SyncedTo()

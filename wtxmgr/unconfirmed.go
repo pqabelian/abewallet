@@ -23,11 +23,8 @@ import (
 // UnminedTxs returns the underlying transactions for all unmined transactions
 // which are not known to have been mined in a block.  Transactions are
 // guaranteed to be sorted by their dependency order.
-
-//TODO(abe):this function will be used by some other function
-
-func (s *Store) UnminedTxAbes(ns walletdb.ReadBucket) ([]*wire.MsgTxAbe, error) {
-	recSet, err := s.unminedTxAbeRecords(ns)
+func (s *Store) UnminedTxs(ns walletdb.ReadBucket) ([]*wire.MsgTxAbe, error) {
+	recSet, err := s.unminedTxRecords(ns)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +37,7 @@ func (s *Store) UnminedTxAbes(ns walletdb.ReadBucket) ([]*wire.MsgTxAbe, error) 
 	return txSet, nil
 }
 
-func (s *Store) unminedTxAbeRecords(ns walletdb.ReadBucket) ([]*TxRecord, error) {
+func (s *Store) unminedTxRecords(ns walletdb.ReadBucket) ([]*TxRecord, error) {
 	unmined := make([]*TxRecord, 0)
 	err := ns.NestedReadBucket(bucketUnminedAbe).ForEach(func(k, v []byte) error {
 		var txHash chainhash.Hash

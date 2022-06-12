@@ -2,6 +2,7 @@ package wallet
 
 // OutputSelectionPolicy describes the rules for selecting an output from the
 // wallet.
+// TODO: use this structure to choose UTXO
 type OutputSelectionPolicy struct {
 	Account               uint32
 	RequiredConfirmations int32

@@ -11,6 +11,7 @@ import (
 
 // RecoveryManager maintains the state required to recover previously used
 // addresses, and coordinates batched processing of the blocks to search.
+// TODO: this struct is reserved for recovery address but now is useless.
 type RecoveryManager struct {
 	// recoveryWindow defines the key-derivation lookahead used when
 	// attempting to recover the set of used addresses.

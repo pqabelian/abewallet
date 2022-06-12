@@ -78,7 +78,7 @@ func walletMain() error {
 
 	// Create and start chain RPC client so it's ready to connect to
 	// the wallet when loaded later.
-	if !cfg.NoInitialLoad {      // communicate with abec
+	if !cfg.NoInitialLoad { // communicate with abec
 		go rpcClientConnectLoop(legacyRPCServer, loader)
 	}
 
@@ -273,5 +273,5 @@ func startChainRPC(certs []byte) (*chain.RPCClient, error) {
 }
 
 func setSyncFrom(w *wallet.Wallet, height int32) {
-	w.SyncFrom = height - height % 3
+	w.SyncFrom = height - height%3 // TODO 20220611 use the function or constant to replace a number
 }

@@ -65,6 +65,8 @@ type AuthoredTx struct {
 
 type AuthoredTxAbe struct {
 	Tx *wire.MsgTxAbe
+	// TODO 20220611 consumed txo to recover UTXO
+	// when the transaction is invalid
 }
 
 // ChangeSource provides P2PKH change output scripts for transaction creation.

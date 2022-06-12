@@ -52,15 +52,15 @@ var byteOrder = binary.BigEndian
 // assumption holds true.
 var _ [32]byte = chainhash.Hash{}
 
-const NUMBERBLOCKABE = 24 //TODO(abe):this value need to think about
-//	todo(ABE): wallet buckets
+const NUMBERBLOCK = 24 //TODO(abe):this value need to think about
+
 // Bucket names
 var (
 	bucketTxLabels      = []byte("l")  // not support now, but it may be supported
 	bucketLockedOutputs = []byte("lo") // not support now, but it may be supported
 
 	//TODO(abe):bucket design
-	bucketBlockAbes    = []byte("blocksabe") // store blocks
+	bucketBlocks       = []byte("blocksabe") // store blocks
 	bucketBlockOutputs = []byte("blockoutputs")
 	bucketBlockInputs  = []byte("blockinputs")
 
@@ -208,7 +208,7 @@ func canonicalBlock(blockHeight int32, blockHash chainhash.Hash) []byte {
 	copy(k[4:], blockHash[:])
 	return k[:]
 }
-func readCanonicalBlock(k []byte, b *BlockAbe) error {
+func readCanonicalBlock(k []byte, b *Block) error {
 	if len(k) < 36 {
 		str := "short canonical block"
 		return storeError(ErrData, str, nil)
@@ -227,8 +227,8 @@ func readCanonicalBlock(k []byte, b *BlockAbe) error {
 //   [44:]   For each transaction hash:
 //             Hash (32 bytes)
 
-// Details regarding raw block are saved as k/v pairs in the rawblockabe bucket.
-// rawblockabe are keyed by their height and hash.
+// Details regarding raw block are saved as k/v pairs in the rawblock bucket.
+// rawblock are keyed by their height and hash.
 //The key is serialized as such:
 //	 [0:4] Height(4 bytes)
 //   [4:36]  Hash (32 bytes)
@@ -247,10 +247,10 @@ func valueBlock(block wire.MsgBlockAbe) []byte {
 func readBlockBlockRecord(k, v []byte, block *BlockRecord) error {
 	if len(k) < 36 {
 		str := fmt.Sprintf("%s: short key (expected %d bytes, read %d)",
-			bucketBlockAbes, 4, len(k))
+			bucketBlocks, 4, len(k))
 		return storeError(ErrData, str, nil)
 	}
-	block, err := NewBlockAbeRecord(v)
+	block, err := NewBlockRecord(v)
 	if err != nil {
 		return err
 	}
@@ -258,7 +258,7 @@ func readBlockBlockRecord(k, v []byte, block *BlockRecord) error {
 }
 
 func putRawBlock(ns walletdb.ReadWriteBucket, k, v []byte) error {
-	err := ns.NestedReadWriteBucket(bucketBlockAbes).Put(k, v)
+	err := ns.NestedReadWriteBucket(bucketBlocks).Put(k, v)
 	if err != nil {
 		str := "failed to store block"
 		return storeError(ErrDatabase, str, err)
@@ -268,7 +268,7 @@ func putRawBlock(ns walletdb.ReadWriteBucket, k, v []byte) error {
 func putBlockRecord(ns walletdb.ReadWriteBucket, block *BlockRecord) error {
 	k := canonicalBlock(block.Height, block.Hash)
 	v := block.SerializedBlock
-	err := ns.NestedReadWriteBucket(bucketBlockAbes).Put(k, v)
+	err := ns.NestedReadWriteBucket(bucketBlocks).Put(k, v)
 	if err != nil {
 		str := "failed to store block"
 		return storeError(ErrDatabase, str, err)
@@ -277,22 +277,22 @@ func putBlockRecord(ns walletdb.ReadWriteBucket, block *BlockRecord) error {
 }
 func fetchRawBlock(ns walletdb.ReadBucket, height int32, hash chainhash.Hash) (k, v []byte) {
 	k = canonicalBlock(height, hash)
-	v = ns.NestedReadBucket(bucketBlockAbes).Get(k)
+	v = ns.NestedReadBucket(bucketBlocks).Get(k)
 	return
 }
 func existsRawBlock(ns walletdb.ReadBucket, height int32, hash chainhash.Hash) (k, v []byte) {
 	k = canonicalBlock(height, hash)
-	v = ns.NestedReadBucket(bucketBlockAbes).Get(k)
+	v = ns.NestedReadBucket(bucketBlocks).Get(k)
 	return
 }
 func deleteRawBlock(ns walletdb.ReadWriteBucket, height int32, hash chainhash.Hash) error {
 	k := canonicalBlock(height, hash)
-	return ns.NestedReadWriteBucket(bucketBlockAbes).Delete(k)
+	return ns.NestedReadWriteBucket(bucketBlocks).Delete(k)
 }
 func deleteRawBlockWithBlockHeight(ns walletdb.ReadWriteBucket, height int32) (*BlockRecord, error) {
-	// iterator the blockabe bucket
+	// iterator the block bucket
 	var block *BlockRecord
-	err := ns.NestedReadBucket(bucketBlockAbes).ForEach(func(k, v []byte) error {
+	err := ns.NestedReadBucket(bucketBlocks).ForEach(func(k, v []byte) error {
 
 		if height == int32(byteOrder.Uint32(k[0:4])) {
 			block = new(BlockRecord)
@@ -300,7 +300,7 @@ func deleteRawBlockWithBlockHeight(ns walletdb.ReadWriteBucket, height int32) (*
 			if err != nil {
 				return err
 			}
-			return ns.NestedReadWriteBucket(bucketBlockAbes).Delete(k)
+			return ns.NestedReadWriteBucket(bucketBlocks).Delete(k)
 		}
 		return nil
 	})
@@ -310,8 +310,8 @@ func deleteRawBlockWithBlockHeight(ns walletdb.ReadWriteBucket, height int32) (*
 // appendRawBlockRecord returns a new block record value with a transaction
 // hash appended to the end and an incremented number of transactions.
 
-// TODO(abe):has some problem,need to fix
-type blockAbeIterator struct {
+// TODO(abe):this struct test some problem, need to fix
+type blockIterator struct {
 	c      walletdb.ReadWriteCursor
 	prefix []byte // height
 	ck     []byte // height || hash
@@ -320,37 +320,37 @@ type blockAbeIterator struct {
 	err    error
 }
 
-func makeBlockAbeIterator(ns walletdb.ReadWriteBucket, height int32) blockAbeIterator {
+func makeBlockIterator(ns walletdb.ReadWriteBucket, height int32) blockIterator {
 	prefix := make([]byte, 4)
 	byteOrder.PutUint32(prefix, uint32(height))
-	c := ns.NestedReadWriteBucket(bucketBlockAbes).ReadWriteCursor()
-	return blockAbeIterator{c: c, prefix: prefix}
+	c := ns.NestedReadWriteBucket(bucketBlocks).ReadWriteCursor()
+	return blockIterator{c: c, prefix: prefix}
 }
 
-func makeReadBlockAbeIterator(ns walletdb.ReadBucket, height int32) blockAbeIterator {
+func makeReadBlockIterator(ns walletdb.ReadBucket, height int32) blockIterator {
 	prefix := make([]byte, 4)
 	byteOrder.PutUint32(prefix, uint32(height))
-	c := ns.NestedReadBucket(bucketBlockAbes).ReadCursor()
-	return blockAbeIterator{c: readCursor{c}, prefix: prefix}
+	c := ns.NestedReadBucket(bucketBlocks).ReadCursor()
+	return blockIterator{c: readCursor{c}, prefix: prefix}
 }
 
 // Works just like makeBlockIterator but will initially position the cursor at
 // the last k/v pair.  Use this with blockIterator.prev.
-func makeReverseBlockAbeIterator(ns walletdb.ReadWriteBucket, height int32) blockAbeIterator {
+func makeReverseBlockIterator(ns walletdb.ReadWriteBucket, height int32) blockIterator {
 	prefix := make([]byte, 4)
 	byteOrder.PutUint32(prefix, uint32(height))
-	c := ns.NestedReadWriteBucket(bucketBlockAbes).ReadWriteCursor()
-	return blockAbeIterator{c: c, prefix: prefix}
+	c := ns.NestedReadWriteBucket(bucketBlocks).ReadWriteCursor()
+	return blockIterator{c: c, prefix: prefix}
 }
 
-func makeReadReverseBlockAbeIterator(ns walletdb.ReadBucket, height int32) blockAbeIterator {
+func makeReadReverseBlockIterator(ns walletdb.ReadBucket, height int32) blockIterator {
 	prefix := make([]byte, 4)
 	byteOrder.PutUint32(prefix, uint32(height))
-	c := ns.NestedReadBucket(bucketBlockAbes).ReadCursor()
-	return blockAbeIterator{c: readCursor{c}, prefix: prefix}
+	c := ns.NestedReadBucket(bucketBlocks).ReadCursor()
+	return blockIterator{c: readCursor{c}, prefix: prefix}
 }
 
-func (it *blockAbeIterator) prev() bool {
+func (it *blockIterator) prev() bool {
 	if it.c == nil {
 		return false
 	}
@@ -374,7 +374,7 @@ func (it *blockAbeIterator) prev() bool {
 
 	return true
 }
-func (it *blockAbeIterator) next() bool {
+func (it *blockIterator) next() bool {
 	if it.c == nil {
 		return false
 	}
@@ -397,13 +397,13 @@ func (it *blockAbeIterator) next() bool {
 	return true
 }
 
-func (it *blockAbeIterator) readElem() error {
+func (it *blockIterator) readElem() error {
 	if len(it.ck) < 36 {
 		str := fmt.Sprintf("%s: short key (expected %d bytes, read %d)",
-			bucketBlockAbes, 36, len(it.ck))
+			bucketBlocks, 36, len(it.ck))
 		return storeError(ErrData, str, nil)
 	}
-	e, err := NewBlockAbeRecord(it.cv)
+	e, err := NewBlockRecord(it.cv)
 	if err != nil {
 		return err
 	}
@@ -562,7 +562,7 @@ func readRawTxRecordAbe(txHash *chainhash.Hash, v []byte, rec *TxRecord) error {
 //  		[4:36] transaction hash
 //  		[36:37] output index...
 
-func appendRawBlockAbeOutput(ns walletdb.ReadWriteBucket, k []byte, v []byte, txHash chainhash.Hash, index uint8) ([]byte, error) {
+func appendRawBlockOutput(ns walletdb.ReadWriteBucket, k []byte, v []byte, txHash chainhash.Hash, index uint8) ([]byte, error) {
 	if len(v) < 37 {
 		str := fmt.Sprintf("%s: short read (expected %d bytes, read %d)",
 			bucketBlockOutputs, 40, len(v))
@@ -570,7 +570,7 @@ func appendRawBlockAbeOutput(ns walletdb.ReadWriteBucket, k []byte, v []byte, tx
 	}
 	if v == nil || len(v) == 0 {
 		v = canonicalOutPointAbe(txHash, index)
-		err := putBlockAbeOutput(ns, k, v)
+		err := putBlockOutput(ns, k, v)
 		return v, err
 	}
 	newv := make([]byte, len(v)+33)
@@ -579,10 +579,10 @@ func appendRawBlockAbeOutput(ns walletdb.ReadWriteBucket, k []byte, v []byte, tx
 	byteOrder.PutUint32(newv[0:4], n+1)
 	copy(newv[4:len(v)], v[4:])
 	copy(newv[len(v):len(v)+33], appended[:])
-	err := putBlockAbeOutput(ns, k, newv)
+	err := putBlockOutput(ns, k, newv)
 	return newv, err
 }
-func putBlockAbeOutput(ns walletdb.ReadWriteBucket, k, v []byte) error {
+func putBlockOutput(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	err := ns.NestedReadWriteBucket(bucketBlockOutputs).Put(k, v)
 	if err != nil {
 		str := "failed to put block output"
@@ -627,7 +627,7 @@ func fetchBlockOutputWithHeight(ns walletdb.ReadBucket, height int32) ([]byte, [
 	}
 	return k, res, nil
 }
-func fetchBlockAbeOutput(ns walletdb.ReadBucket, blockHeight int32, blockHash chainhash.Hash) ([]*wire.OutPointAbe, error) {
+func fetchBlockOutput(ns walletdb.ReadBucket, blockHeight int32, blockHash chainhash.Hash) ([]*wire.OutPointAbe, error) {
 	k := canonicalBlock(blockHeight, blockHash)
 	v := ns.NestedReadBucket(bucketBlockOutputs).Get(k)
 	if v == nil {
@@ -650,7 +650,7 @@ func fetchBlockAbeOutput(ns walletdb.ReadBucket, blockHeight int32, blockHash ch
 	}
 	return res, nil
 }
-func fetchRawBlockAbeOutput(ns walletdb.ReadWriteBucket, k []byte) ([]*wire.OutPointAbe, error) {
+func fetchRawBlockOutput(ns walletdb.ReadWriteBucket, k []byte) ([]*wire.OutPointAbe, error) {
 	v := ns.NestedReadBucket(bucketBlockOutputs).Get(k)
 	if v == nil {
 		return nil, fmt.Errorf("the entry is empty")
@@ -672,7 +672,7 @@ func fetchRawBlockAbeOutput(ns walletdb.ReadWriteBucket, k []byte) ([]*wire.OutP
 	return res, nil
 }
 
-func deleteBlockAbeOutput(ns walletdb.ReadWriteBucket, k []byte) error {
+func deleteBlockOutput(ns walletdb.ReadWriteBucket, k []byte) error {
 	err := ns.NestedReadWriteBucket(bucketBlockOutputs).Delete(k)
 	if err != nil {
 		str := "failed to delete block output"
@@ -1387,7 +1387,7 @@ func deleteUTXORing(ns walletdb.ReadWriteBucket, k []byte) error {
 //   [0:4]   Block height (4 bytes)
 //   [4:36]  Block hash (32 bytes)
 
-func readUnspentBlockAbe(v []byte, block *BlockAbe) error {
+func readUnspentBlock(v []byte, block *Block) error {
 	if len(v) < 36 {
 		str := "short unspent value"
 		return storeError(ErrData, str, nil)
@@ -1776,8 +1776,8 @@ func createBuckets(ns walletdb.ReadWriteBucket) error {
 		return storeError(ErrDatabase, str, err)
 	}
 	//TODO(abe): change the name of bucket
-	if _, err := ns.CreateBucket(bucketBlockAbes); err != nil {
-		str := "fialed to create blockabe bucket"
+	if _, err := ns.CreateBucket(bucketBlocks); err != nil {
+		str := "fialed to create block bucket"
 		return storeError(ErrDatabase, str, err)
 	}
 	if _, err := ns.CreateBucket(bucketBlockInputs); err != nil {
@@ -1833,8 +1833,8 @@ func deleteBuckets(ns walletdb.ReadWriteBucket) error {
 		return storeError(ErrDatabase, str, err)
 	}
 	//TODO(abe):change the name of bucket
-	if err := ns.DeleteNestedBucket(bucketBlockAbes); err != nil {
-		str := "fialed to delete blockabe bucket"
+	if err := ns.DeleteNestedBucket(bucketBlocks); err != nil {
+		str := "fialed to delete block bucket"
 		return storeError(ErrDatabase, str, err)
 	}
 	if err := ns.DeleteNestedBucket(bucketBlockInputs); err != nil {

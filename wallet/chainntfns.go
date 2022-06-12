@@ -152,14 +152,14 @@ func (w *Wallet) handleChainNotifications() {
 				// to sync with the chain
 				// It would happen that the chain would fork successful
 				// So there should be check it and sync to the best chain
-				err = w.syncWithChainAbe(birthdayBlock)
+				err = w.syncWithChain(birthdayBlock)
 				if err != nil && !w.ShuttingDown() {
 					panic(fmt.Errorf("unable to synchronize "+
 						"wallet to chain: %v", err))
 				}
 			case chain.BlockAbeConnected:
 				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-					return w.connectBlockAbe(tx, wtxmgr.BlockMeta(n))
+					return w.connectBlock(tx, wtxmgr.BlockMeta(n))
 				})
 				// When receiving a notification of connecting block
 				// The wallet resend all transaction that is not mined.
@@ -173,7 +173,7 @@ func (w *Wallet) handleChainNotifications() {
 				notificationName = "block connected"
 			case chain.BlockAbeDisconnected:
 				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-					return w.disconnectBlockAbe(tx, wtxmgr.BlockMeta(n))
+					return w.disconnectBlock(tx, wtxmgr.BlockMeta(n))
 				})
 				notificationName = "block disconnected"
 			}
@@ -208,7 +208,7 @@ func (w *Wallet) handleChainNotifications() {
 // the passed block.
 
 // TODO(abe): this function is used to notify the client
-func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) error {
+func (w *Wallet) connectBlock(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) error {
 	// actually we just used the addrmgrNS to manage the sync state, other content will be deleted
 	var err error
 	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
@@ -285,7 +285,7 @@ func (w *Wallet) connectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 // disconnectBlock handles a chain server reorganize by rolling back all
 // block history from the reorged block for a wallet in-sync with the chain
 // server.
-func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) error {
+func (w *Wallet) disconnectBlock(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) error {
 	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
 
@@ -342,7 +342,7 @@ func (w *Wallet) disconnectBlockAbe(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMet
 }
 
 //	todo(ABE): Wallet adds transactions to wallet db.
-func (w *Wallet) addRelevantTxAbe(dbtx walletdb.ReadWriteTx, rec *wtxmgr.TxRecord, block *wtxmgr.BlockAbeMeta) error {
+func (w *Wallet) addRelevantTx(dbtx walletdb.ReadWriteTx, rec *wtxmgr.TxRecord, block *wtxmgr.BlockMeta) error {
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
 	//addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
 	// At the moment all notified transactions are assumed to actually be
