@@ -331,22 +331,24 @@ func getBalances(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 		return nil, err
 	}
 	type tt struct {
-		CurrentTime      string  `json:"current_time,omitempty"`
-		CurrentHeight    int32   `json:"current_height,omitempty"`
-		CurrentBlockHash string  `json:"current_block_hash,omitempty"`
-		TotalBalance     float64 `json:"total_balance"`
-		SpendableBalance float64 `json:"spendable_balance"`
-		FreezeBalance    float64 `json:"freeze_balance"`
-		LockedBalance    float64 `json:"locked_balance"`
+		CurrentTime        string  `json:"current_time,omitempty"`
+		CurrentHeight      int32   `json:"current_height,omitempty"`
+		CurrentBlockHash   string  `json:"current_block_hash,omitempty"`
+		TotalBalance       float64 `json:"total_balance"`
+		SpendableBalance   float64 `json:"spendable_balance"`
+		ImmatureCBBalance  float64 `json:"immature_cb_balance"`
+		ImmatureTRBalance  float64 `json:"immature_tr_balance"`
+		UnconfirmedBalance float64 `json:"unconfirmed_balance"`
 	}
 	res := &tt{
-		CurrentTime:      currentTime,
-		CurrentHeight:    bs.Height,
-		CurrentBlockHash: bs.Hash.String(),
-		TotalBalance:     balances[0].ToABE(),
-		SpendableBalance: balances[1].ToABE(),
-		FreezeBalance:    balances[2].ToABE(),
-		LockedBalance:    balances[3].ToABE(),
+		CurrentTime:        currentTime,
+		CurrentHeight:      bs.Height,
+		CurrentBlockHash:   bs.Hash.String(),
+		TotalBalance:       balances[0].ToABE(),
+		SpendableBalance:   balances[1].ToABE(),
+		ImmatureCBBalance:  balances[2].ToABE(),
+		ImmatureTRBalance:  balances[3].ToABE(),
+		UnconfirmedBalance: balances[4].ToABE(),
 	}
 	marshal, err := json.Marshal(res)
 	if err != nil {

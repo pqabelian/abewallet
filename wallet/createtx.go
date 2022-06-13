@@ -453,7 +453,6 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 	//var addrBytes, vskBytes, aSkSpBytes []byte
 	//var addrBytes, aSkSpBytes []byte
 	needChangeFlag := false //whether need to make a change
-	// TODO(abe):should use a db.View to spend, if successful, use db.Update
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
@@ -473,7 +472,6 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 		//	pick utxos to spend
 		sort.Sort(sort.Reverse(byAmount(eligible)))
 		//TODO check the feeSpecified and feePerKbSpecified
-
 		// fix the transaction fee
 		if feeSpecified > 0 {
 			currentVersion := eligible[0].Version
@@ -539,7 +537,6 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 				}
 			}
 			selectedRings = make(map[chainhash.Hash]*wtxmgr.Ring)
-			// todo: read selected rings, form the TxIn and the inputDesc, call TxGen
 			for _, txo := range selectedTxos {
 				_, ok := selectedRings[txo.RingHash]
 				if !ok {
@@ -687,7 +684,6 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 				}
 			}
 			selectedRings = make(map[chainhash.Hash]*wtxmgr.Ring)
-			// todo: read selected rings, form the TxIn and the inputDesc, call TxGen
 			for _, txo := range selectedTxos {
 				_, ok := selectedRings[txo.RingHash]
 				if !ok {
@@ -728,7 +724,6 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
 		var serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc []byte
 		for i := 0; i < len(selectedTxos); i++ {
-			// todo:extract the address from txoScripts
 			coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(selectedRings[selectedTxos[i].RingHash].TxoScripts[selectedTxos[i].Index], abecryptoparam.CryptoSchemePQRingCT)
 			if err != nil {
 				return err
@@ -814,29 +809,6 @@ func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc,
 		return nil, errors.New("error for creating a transfer transaction template ")
 	}
 	transferTx, err := abecrypto.TransferTxGen(abeTxInputDescs, txOutDescs, transferTxTemplate)
-	if err != nil {
-		return nil, err
-	}
-	// update the utxoring?
-	// TODO 20220611: record the serial number and output with the transfer transaction
-	err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-		for i, txo := range selectedTxos {
-			utxoRing, err := wtxmgr.FetchUTXORing(txmgrNs, txo.RingHash[:])
-			if err != nil {
-				return err
-			}
-			if utxoRing.OriginSerialNumberes == nil {
-				utxoRing.OriginSerialNumberes = map[uint8][]byte{}
-			}
-			utxoRing.OriginSerialNumberes[txo.Index] = transferTx.TxIns[i].SerialNumber
-			err = wtxmgr.PutUTXORing(txmgrNs, txo.RingHash[:], utxoRing)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	})
 	if err != nil {
 		return nil, err
 	}

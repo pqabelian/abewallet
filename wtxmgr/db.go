@@ -78,11 +78,14 @@ var (
 
 // Root (namespace) bucket keys
 var (
-	rootCreateDate       = []byte("date")
-	rootVersion          = []byte("vers")
-	rootMinedBalance     = []byte("bal")          // total balance
-	rootSpendableBalance = []byte("spendablebal") // spendable balance
-	rootFreezedBalance   = []byte("freezedbal")   // freeze balance
+	rootCreateDate              = []byte("date")
+	rootVersion                 = []byte("vers")
+	rootMinedBalance            = []byte("bal")            // total balance
+	rootSpendableBalance        = []byte("spendablebal")   // spendable balance
+	rootImmatureCoinbaseBalance = []byte("immaturecbbal")  // immature coinbase balance
+	rootImmatureTransferBalance = []byte("immaturetrbal")  // immature transfer balance
+	rootUnconfirmedBalance      = []byte("unconfirmedbal") // spendable balance
+	rootFreezedBalance          = []byte("freezedbal")     // freeze balance
 )
 
 // The root bucket's mined balance k/v pair records the total balance for all
@@ -144,6 +147,65 @@ func putFreezedBalance(ns walletdb.ReadWriteBucket, amt abeutil.Amount) error {
 	v := make([]byte, 8)
 	byteOrder.PutUint64(v, uint64(amt))
 	err := ns.Put(rootFreezedBalance, v)
+	if err != nil {
+		str := "failed to put balance"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+
+func fetchImmatureCoinbaseBalance(ns walletdb.ReadBucket) (abeutil.Amount, error) {
+	v := ns.Get(rootImmatureCoinbaseBalance)
+	if len(v) != 8 {
+		str := fmt.Sprintf("balance: short read (expected 8 bytes, "+
+			"read %v)", len(v))
+		return 0, storeError(ErrData, str, nil)
+	}
+	return abeutil.Amount(byteOrder.Uint64(v)), nil
+}
+func putImmatureCoinbaseBalance(ns walletdb.ReadWriteBucket, amt abeutil.Amount) error {
+	v := make([]byte, 8)
+	byteOrder.PutUint64(v, uint64(amt))
+	err := ns.Put(rootImmatureCoinbaseBalance, v)
+	if err != nil {
+		str := "failed to put balance"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+
+func fetchImmatureTransferBalance(ns walletdb.ReadBucket) (abeutil.Amount, error) {
+	v := ns.Get(rootImmatureTransferBalance)
+	if len(v) != 8 {
+		str := fmt.Sprintf("balance: short read (expected 8 bytes, "+
+			"read %v)", len(v))
+		return 0, storeError(ErrData, str, nil)
+	}
+	return abeutil.Amount(byteOrder.Uint64(v)), nil
+}
+func putImmatureTransferBalance(ns walletdb.ReadWriteBucket, amt abeutil.Amount) error {
+	v := make([]byte, 8)
+	byteOrder.PutUint64(v, uint64(amt))
+	err := ns.Put(rootImmatureTransferBalance, v)
+	if err != nil {
+		str := "failed to put balance"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+func fetchUnconfirmedBalance(ns walletdb.ReadBucket) (abeutil.Amount, error) {
+	v := ns.Get(rootUnconfirmedBalance)
+	if len(v) != 8 {
+		str := fmt.Sprintf("balance: short read (expected 8 bytes, "+
+			"read %v)", len(v))
+		return 0, storeError(ErrData, str, nil)
+	}
+	return abeutil.Amount(byteOrder.Uint64(v)), nil
+}
+func putUnconfirmedBalance(ns walletdb.ReadWriteBucket, amt abeutil.Amount) error {
+	v := make([]byte, 8)
+	byteOrder.PutUint64(v, uint64(amt))
+	err := ns.Put(rootUnconfirmedBalance, v)
 	if err != nil {
 		str := "failed to put balance"
 		return storeError(ErrDatabase, str, err)
@@ -1752,6 +1814,27 @@ func createStore(ns walletdb.ReadWriteBucket) error {
 	// Write a zero balance.
 	byteOrder.PutUint64(v[:], 0)
 	err = ns.Put(rootSpendableBalance, v[:])
+	if err != nil {
+		str := "failed to write zero spendable balance"
+		return storeError(ErrDatabase, str, err)
+	}
+	// Write a zero balance.
+	byteOrder.PutUint64(v[:], 0)
+	err = ns.Put(rootImmatureCoinbaseBalance, v[:])
+	if err != nil {
+		str := "failed to write zero spendable balance"
+		return storeError(ErrDatabase, str, err)
+	}
+	// Write a zero balance.
+	byteOrder.PutUint64(v[:], 0)
+	err = ns.Put(rootImmatureTransferBalance, v[:])
+	if err != nil {
+		str := "failed to write zero spendable balance"
+		return storeError(ErrDatabase, str, err)
+	}
+	// Write a zero balance.
+	byteOrder.PutUint64(v[:], 0)
+	err = ns.Put(rootUnconfirmedBalance, v[:])
 	if err != nil {
 		str := "failed to write zero spendable balance"
 		return storeError(ErrDatabase, str, err)

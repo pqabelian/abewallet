@@ -791,10 +791,6 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 		if index == -1 { //it do not belong the wallet
 			continue
 		}
-		// do not mark it as spent, wait the block coming to mark it as spent
-		//if u.IsMy[index] {
-		//	u.Spent[index] = true
-		//}
 		//move from the unspentUtxo bucket to spentUtxobucket if necessary
 		k := canonicalOutPointAbe(rec.MsgTx.TxIns[i].PreviousOutPointRing.OutPoints[index].TxHash, rec.MsgTx.TxIns[i].PreviousOutPointRing.OutPoints[index].Index)
 		//v := wtxmgrNs.NestedReadWriteBucket(bucketUnspentTXO).Get(k)
@@ -804,9 +800,21 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 		}
 		// update the spendable balance
 		spendableBal, err := fetchSpenableBalance(wtxmgrNs)
+		if err != nil {
+			return err
+		}
+		unconfirmedBal, err := fetchUnconfirmedBalance(wtxmgrNs)
+		if err != nil {
+			return err
+		}
 		amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
 		spendableBal -= amt
+		unconfirmedBal += amt
 		err = putSpenableBalance(wtxmgrNs, spendableBal)
+		if err != nil {
+			return err
+		}
+		err = putUnconfirmedBalance(wtxmgrNs, spendableBal)
 		if err != nil {
 			return err
 		}
@@ -850,7 +858,15 @@ func (s *Store) InsertGenesisBlock(ns walletdb.ReadWriteBucket, block *BlockReco
 	if err != nil {
 		return err
 	}
-	freezedBal, err := fetchFreezedBalance(ns)
+	immatureCBBal, err := fetchImmatureCoinbaseBalance(ns)
+	if err != nil {
+		return err
+	}
+	immatureTRBal, err := fetchImmatureTransferBalance(ns)
+	if err != nil {
+		return err
+	}
+	unconfirmedBal, err := fetchUnconfirmedBalance(ns)
 	if err != nil {
 		return err
 	}
@@ -889,7 +905,7 @@ func (s *Store) InsertGenesisBlock(ns walletdb.ReadWriteBucket, block *BlockReco
 		if valid && v != 0 {
 			amt := abeutil.Amount(v)
 			log.Infof("(Coinbase) Find my txo at block height %d (hash %s) with value %v", block.Height, block.Hash, amt.ToABE())
-			freezedBal += amt
+			immatureCBBal += amt
 			balance += amt
 			k := wire.OutPointAbe{
 				TxHash: coinbaseTx.TxHash(),
@@ -932,15 +948,20 @@ func (s *Store) InsertGenesisBlock(ns walletdb.ReadWriteBucket, block *BlockReco
 	if err != nil {
 		return err
 	}
-	err = putFreezedBalance(ns, freezedBal)
+	err = putImmatureCoinbaseBalance(ns, immatureCBBal)
+	if err != nil {
+		return err
+	}
+	err = putImmatureTransferBalance(ns, immatureTRBal)
+	if err != nil {
+		return err
+	}
+	err = putUnconfirmedBalance(ns, unconfirmedBal)
 	if err != nil {
 		return err
 	}
 	return putMinedBalance(ns, balance)
 }
-
-// TODO(abe): abstract the check function, it is relevant to the ns
-// TODO(abe): update the balance in this function  (finished)
 
 func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb.ReadWriteBucket, block *BlockRecord, extraBlock map[uint32]*BlockRecord, maturedBlockHashs []*chainhash.Hash) error {
 	log.Infof("Current sync height %d", block.Height)
@@ -953,7 +974,15 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 	if err != nil {
 		return err
 	}
-	freezedBal, err := fetchFreezedBalance(txMgrNs)
+	immatureCBBal, err := fetchImmatureCoinbaseBalance(txMgrNs)
+	if err != nil {
+		return err
+	}
+	immatureTRBal, err := fetchImmatureTransferBalance(txMgrNs)
+	if err != nil {
+		return err
+	}
+	unconfirmedBal, err := fetchUnconfirmedBalance(txMgrNs)
 	if err != nil {
 		return err
 	}
@@ -1008,7 +1037,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 		if valid {
 			amt := abeutil.Amount(v)
 			log.Infof("(Coinbase) Find my txo at block height %d (hash %s) with value %v", block.Height, block.Hash, amt.ToABE())
-			freezedBal += amt
+			immatureCBBal += amt
 			balance += amt
 			// TODO: the transaction hash and index cannot be a unique key
 			k := wire.OutPointAbe{
@@ -1092,7 +1121,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 		for k, v := range relevantUTXORings {
 			//  move relevant utxo from unspentTXO or SpentButUnmined bucket to SpentConfirmTXO
 			for t := 0; t < len(v.IsMy); t++ {
-				// the outpoint owned by wallet is spendt
+				// the outpoint owned by wallet is spent
 				// it should be move to spent and confirmed bucket
 				if v.IsMy[t] && v.Spent[t] {
 					k := canonicalOutPointAbe(v.TxHashes[t], v.OutputIndexes[t])
@@ -1120,6 +1149,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 						if v != nil { //otherwise it has been moved to spentButUnmined bucket
 							amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
 							balance -= amt
+							unconfirmedBal -= amt
 
 							var confirmTime [8]byte
 							byteOrder.PutUint64(confirmTime[:], uint64(block.RecvTime.Unix()))
@@ -1187,7 +1217,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			if valid {
 				amt := abeutil.Amount(v)
 				log.Infof("(Transfer) Find my txo at block height %d (hash %s) with value %v", block.Height, block.Hash, amt.ToABE())
-				freezedBal += amt
+				immatureTRBal += amt
 				balance += amt
 				k := wire.OutPointAbe{
 					TxHash: txi.TxHash(),
@@ -1247,7 +1277,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 				v := valueUnspentTXO(true, utxo.Version, utxoHeight, utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 				amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
 				spendableBal += amt
-				freezedBal -= amt
+				immatureCBBal -= amt
 				err = putRawMaturedOutput(txMgrNs, canonicalOutPointAbe(op.TxHash, op.Index), v)
 				if err != nil {
 					return err
@@ -1324,11 +1354,19 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			len(block1CoinbaseUTXO) == 0 && len(block1TransferUTXO) == 0 &&
 			len(block0CoinbaseUTXO) == 0 && len(block0TransferUTXO) == 0 {
 			// return handle
-			err := putSpenableBalance(txMgrNs, spendableBal)
+			err = putSpenableBalance(txMgrNs, spendableBal)
 			if err != nil {
 				return err
 			}
-			err = putFreezedBalance(txMgrNs, freezedBal)
+			err = putImmatureCoinbaseBalance(txMgrNs, immatureCBBal)
+			if err != nil {
+				return err
+			}
+			err = putImmatureTransferBalance(txMgrNs, immatureTRBal)
+			if err != nil {
+				return err
+			}
+			err = putUnconfirmedBalance(txMgrNs, unconfirmedBal)
 			if err != nil {
 				return err
 			}
@@ -1574,7 +1612,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			v := valueUnspentTXO(false, utxo.Version, utxo.Height, utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 			amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
 			spendableBal += amt
-			freezedBal -= amt
+			immatureTRBal -= amt
 			log.Infof("Transfer txo at Height %d (Hash %s) , Value %v is matured!", utxo.Height, msgBlock1.BlockHash(), float64(utxo.Amount)/math.Pow10(7))
 			err = putRawMaturedOutput(txMgrNs, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
@@ -1590,7 +1628,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			v := valueUnspentTXO(false, utxo.Version, utxo.Height, utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 			amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
 			spendableBal += amt
-			freezedBal -= amt
+			immatureTRBal -= amt
 			log.Infof("Transfer txo at Height %d (Hash %s) , Value %v is matured!", utxo.Height, msgBlock0.BlockHash(), float64(utxo.Amount)/math.Pow10(7))
 			err = putRawMaturedOutput(txMgrNs, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
@@ -1628,7 +1666,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 		}
 		amt := abeutil.Amount(newBal)
 		spendableBal += amt
-		freezedBal -= amt
+		immatureTRBal -= amt
 	} else { // immatured
 		if len(transferOutputs) != 0 {
 			err := putRawImmaturedOutput(txMgrNs, canonicalBlock(block.Height, block.Hash), valueImmaturedOutput(transferOutputs))
@@ -1644,7 +1682,15 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 	if err != nil {
 		return err
 	}
-	err = putFreezedBalance(txMgrNs, freezedBal)
+	err = putImmatureCoinbaseBalance(txMgrNs, immatureCBBal)
+	if err != nil {
+		return err
+	}
+	err = putImmatureTransferBalance(txMgrNs, immatureTRBal)
+	if err != nil {
+		return err
+	}
+	err = putUnconfirmedBalance(txMgrNs, unconfirmedBal)
 	if err != nil {
 		return err
 	}
@@ -1696,7 +1742,15 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 	if err != nil {
 		return err
 	}
-	freezedBal, err := fetchFreezedBalance(wtxmgrNs)
+	immatureCBBal, err := fetchImmatureCoinbaseBalance(wtxmgrNs)
+	if err != nil {
+		return err
+	}
+	immatureTRBal, err := fetchImmatureTransferBalance(wtxmgrNs)
+	if err != nil {
+		return err
+	}
+	unconfirmedBal, err := fetchUnconfirmedBalance(wtxmgrNs)
 	if err != nil {
 		return err
 	}
@@ -1780,8 +1834,8 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 					if output, err := fetchMaturedOutput(wtxmgrNs, outpoint.TxHash, outpoint.Index); err == nil {
 						amt := abeutil.Amount(output.Amount)
 						spendableBal -= amt
-						freezedBal += amt
-						log.Infof("(Rollback) Transfer txo in %d (hash %s) with value %v: spendable -> freezed", i-j, blockHash, amt.ToABE())
+						immatureTRBal += amt
+						log.Infof("(Rollback) Transfer txo in %d (hash %s) with value %v: spendable -> immature", i-j, blockHash, amt.ToABE())
 
 						tmp, err := chainhash.NewHash(output.RingHash[:])
 						if err != nil {
@@ -1804,8 +1858,9 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 					// check in spend but unmined output
 					if output, err := fetchSpentButUnminedTXO(wtxmgrNs, outpoint.TxHash, outpoint.Index); err == nil {
 						amt := abeutil.Amount(output.Amount)
-						freezedBal += amt
-						log.Infof("(Rollback) Transfer txo in %d (hash %s) with value %v: spent but unmined -> freezed", i-j, blockHash, amt.ToABE())
+						unconfirmedBal -= amt
+						immatureTRBal += amt
+						log.Infof("(Rollback) Transfer txo in %d (hash %s) with value %v: spent but unmined -> immature", i-j, blockHash, amt.ToABE())
 
 						tmp, err := chainhash.NewHash(output.RingHash[:])
 						if err != nil {
@@ -1838,9 +1893,9 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 					// check in spent and mined output
 					if output, err := fetchSpentConfirmedTXO(wtxmgrNs, outpoint.TxHash, outpoint.Index); err == nil {
 						amt := abeutil.Amount(output.Amount)
-						freezedBal += amt
+						immatureTRBal += amt
 						balance += amt
-						log.Infof("(Rollback) Transfer txo in %d (hash %s) with value %v: spent and minded -> freezed", i-j, blockHash, amt.ToABE())
+						log.Infof("(Rollback) Transfer txo in %d (hash %s) with value %v: spent and minded -> immature", i-j, blockHash, amt.ToABE())
 
 						tmp, err := chainhash.NewHash(output.RingHash[:])
 						if err != nil {
@@ -1920,9 +1975,9 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 		if err == nil && coinbaseOutputs != nil {
 			for _, unspentUTXO := range coinbaseOutputs {
 				amt := abeutil.Amount(unspentUTXO.Amount)
-				freezedBal -= amt
+				immatureCBBal -= amt
 				balance -= amt
-				log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: freezed -> null", i, blockHash, amt.ToABE())
+				log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: immature -> null", i, blockHash, amt.ToABE())
 			}
 			err = deleteImmaturedCoinbaseOutput(wtxmgrNs, keysWithHeight[i])
 			if err != nil {
@@ -1933,9 +1988,9 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 		if err == nil && transferOutputs != nil {
 			for _, unspentUTXO := range transferOutputs {
 				amt := abeutil.Amount(unspentUTXO.Amount)
-				freezedBal -= amt
+				immatureTRBal -= amt
 				balance -= amt
-				log.Infof("(Rollback) Transfer txo in %d (hash %s) with value %v: freezed -> null", i, blockHash, amt.ToABE())
+				log.Infof("(Rollback) Transfer txo in %d (hash %s) with value %v: immature -> null", i, blockHash, amt.ToABE())
 			}
 			err = deleteImmaturedOutput(wtxmgrNs, keysWithHeight[i])
 			if err != nil {
@@ -2032,8 +2087,8 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 					if output, err := fetchMaturedOutput(wtxmgrNs, outpoint.TxHash, outpoint.Index); err == nil && output.FromCoinBase {
 						amt := abeutil.Amount(output.Amount)
 						spendableBal -= amt
-						freezedBal += amt
-						log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: spendable -> freezed", i-maturity-ii, currentBlockHash, amt.ToABE())
+						immatureCBBal += amt
+						log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: spendable -> immature", i-maturity-ii, currentBlockHash, amt.ToABE())
 
 						err = deleteMaturedOutput(wtxmgrNs, canonicalOutPointAbe(outpoint.TxHash, outpoint.Index))
 						if err != nil {
@@ -2045,8 +2100,9 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 					// check in spend but unmined output
 					if output, err := fetchSpentButUnminedTXO(wtxmgrNs, outpoint.TxHash, outpoint.Index); err == nil && output.FromCoinBase {
 						amt := abeutil.Amount(output.Amount)
-						freezedBal += amt
-						log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: spent but unmined -> freezed", i-maturity-ii, currentBlockHash, amt.ToABE())
+						unconfirmedBal -= amt
+						immatureCBBal += amt
+						log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: spent but unmined -> immature", i-maturity-ii, currentBlockHash, amt.ToABE())
 
 						err = deleteSpentButUnminedTXO(wtxmgrNs, canonicalOutPointAbe(outpoint.TxHash, outpoint.Index))
 						if err != nil {
@@ -2068,9 +2124,9 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 					// check in spent and mined output
 					if output, err := fetchSpentConfirmedTXO(wtxmgrNs, outpoint.TxHash, outpoint.Index); err == nil && output.FromCoinBase {
 						amt := abeutil.Amount(output.Amount)
-						freezedBal += amt
+						unconfirmedBal += amt
 						balance += amt
-						log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: spent -> freezed", i-maturity-ii, currentBlockHash, amt.ToABE())
+						log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: spent -> unconfirmed", i-maturity-ii, currentBlockHash, amt.ToABE())
 
 						err = deleteSpentConfirmedTXO(wtxmgrNs, canonicalOutPointAbe(outpoint.TxHash, outpoint.Index))
 						if err != nil {
@@ -2103,7 +2159,15 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 	if err != nil {
 		return err
 	}
-	err = putFreezedBalance(wtxmgrNs, freezedBal)
+	err = putImmatureCoinbaseBalance(wtxmgrNs, immatureCBBal)
+	if err != nil {
+		return err
+	}
+	err = putImmatureTransferBalance(wtxmgrNs, immatureTRBal)
+	if err != nil {
+		return err
+	}
+	err = putUnconfirmedBalance(wtxmgrNs, unconfirmedBal)
 	if err != nil {
 		return err
 	}
@@ -2418,11 +2482,19 @@ func (s *Store) Balance(ns walletdb.ReadBucket, minConf int32, syncHeight int32)
 	if err != nil {
 		return []abeutil.Amount{}, err
 	}
-	freezedBal, err := fetchFreezedBalance(ns)
+	immatureCBBal, err := fetchImmatureCoinbaseBalance(ns)
 	if err != nil {
 		return []abeutil.Amount{}, err
 	}
-	return []abeutil.Amount{allBal, spendableBal, freezedBal, allBal - spendableBal - freezedBal}, nil
+	immatureTRBal, err := fetchImmatureTransferBalance(ns)
+	if err != nil {
+		return []abeutil.Amount{}, err
+	}
+	unconfirmdBal, err := fetchUnconfirmedBalance(ns)
+	if err != nil {
+		return []abeutil.Amount{}, err
+	}
+	return []abeutil.Amount{allBal, spendableBal, immatureCBBal, immatureTRBal, unconfirmdBal}, nil
 }
 
 // PutTxLabel validates transaction labels and writes them to disk if they
