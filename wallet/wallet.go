@@ -1782,9 +1782,8 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 	params *chaincfg.Params, recoveryWindow uint32) (*Wallet, error) {
 
 	var (
-		//addrMgr *waddrmgr.Manager
-		addrMgrAbe *waddrmgr.Manager
-		txMgr      *wtxmgr.Store
+		addrMgr *waddrmgr.Manager
+		txMgr   *wtxmgr.Store
 	)
 
 	// Before attempting to open the wallet, we'll check if there are any
@@ -1811,11 +1810,11 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 
 		//TODO(abe):disable old manager
 		//addrMgr, err = waddrmgr.Open(addrMgrBucket, pubPass, params)
-		addrMgrAbe, err = waddrmgr.Open(addrMgrBucket, pubPass, params)
+		addrMgr, err = waddrmgr.Open(addrMgrBucket, pubPass, params)
 		if err != nil {
 			return err
 		}
-		txMgr, err = wtxmgr.Open(addrMgrAbe, txMgrBucket, params)
+		txMgr, err = wtxmgr.Open(addrMgr, txMgrBucket, params)
 		if err != nil {
 			return err
 		}
@@ -1831,7 +1830,7 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 	w := &Wallet{
 		publicPassphrase:   pubPass,
 		db:                 db,
-		Manager:            addrMgrAbe,
+		Manager:            addrMgr,
 		TxStore:            txMgr,
 		lockedOutpoints:    map[wire.OutPoint]struct{}{},
 		recoveryWindow:     recoveryWindow,

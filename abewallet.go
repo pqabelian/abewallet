@@ -81,6 +81,7 @@ func walletMain() error {
 		go rpcClientConnectLoop(legacyRPCServer, loader)
 	}
 
+	// TODO 20220614 gRPC would be support later
 	loader.RunAfterLoad(func(w *wallet.Wallet) {
 		startWalletRPCServices(w, rpcs, legacyRPCServer)
 	})
@@ -256,7 +257,7 @@ func readCAFile() []byte {
 	return certs
 }
 
-// startChainRPC opens a RPC client connection to a btcd server for blockchain
+// startChainRPC opens a RPC client connection to a abec server for blockchain
 // services.  This function uses the RPC options from the global config and
 // there is no recovery in case the server is not available or if there is an
 // authentication error.  Instead, all requests to the client will simply error.

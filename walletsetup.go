@@ -88,7 +88,7 @@ func createWallet(cfg *config) error {
 		}
 
 		fmt.Println("Creating the wallet...")
-		w, err := loader.CreateNewWalletAbe(pubPass, privPass, seed[4:], end, time.Now())
+		w, err := loader.CreateNewWallet(pubPass, privPass, seed[4:], end, time.Now())
 		if err != nil {
 			return err
 		}
@@ -137,7 +137,7 @@ func createWallet(cfg *config) error {
 		if cfg.MyWalletPass == "" {
 			cfg.MyWalletPass = wallet.InsecurePubPassphrase
 		}
-		w, err := loader.CreateNewWalletAbe([]byte(cfg.MyWalletPass), []byte(cfg.MyPassword), seed[4:], cfg.MyRestoreNumber, time.Now())
+		w, err := loader.CreateNewWallet([]byte(cfg.MyWalletPass), []byte(cfg.MyPassword), seed[4:], cfg.MyRestoreNumber, time.Now())
 		if err != nil {
 			return err
 		}

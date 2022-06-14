@@ -59,7 +59,7 @@ type config struct {
 	Profile       string                  `long:"profile" description:"Enable HTTP profiling on given port -- NOTE port must be between 1024 and 65536"`
 
 	// Wallet options
-	WalletPass string         `long:"walletpass" default-mask:"-" description:"The public wallet password -- Only required if the wallet was created with one"`
+	WalletPass string         `long:"walletpass" default-mask:"-" description:"The public wallet password"`
 	WordList   []string       `long:"wordlist" description:"The mnemonic code for generating deterministic keys"`
 	WordMap    map[string]int `long:"wordmap" description:"The map of mnemonic code for generating deterministic keys"`
 	SyncFrom   int32          `long:"syncfrom" description:"Sync start height"`
@@ -75,6 +75,7 @@ type config struct {
 	ProxyPass        string                  `long:"proxypass" default-mask:"-" description:"Password for proxy server"`
 
 	// SPV client options
+	// TODO 20220614:Would be disable, does not support SPV at this moment.
 	UseSPV       bool          `long:"usespv" description:"Enables the experimental use of SPV rather than RPC for chain synchronization"`
 	AddPeers     []string      `short:"a" long:"addpeer" description:"Add a peer to connect with at startup"`
 	ConnectPeers []string      `long:"connect" description:"Connect only to the specified peers at startup"`
@@ -104,11 +105,7 @@ type config struct {
 	//
 	// These options will change (and require changes to config files, etc.)
 	// when the new gRPC server is enabled.
-	//	todo(ABE): Why it is referred to as 'Experimental'?
 	ExperimentalRPCListeners []string `long:"experimentalrpclisten" description:"Listen for RPC connections on this interface/port"`
-
-	// Deprecated options
-	DataDir *cfgutil.ExplicitString `short:"b" long:"datadir" default-mask:"-" description:"DEPRECATED -- use appdata instead"`
 
 	// Options that are used when creating wallet in non-interactive mode
 	NonInteractiveCreate bool   `long:"noninteractivecreate" description:"Create a wallet in non-interactive mode, just using command line args"`
@@ -262,7 +259,7 @@ func parseAndSetDebugLevels(debugLevel string) error {
 //      3) Load configuration file overwriting defaults with any specified options
 //      4) Parse CLI options and overwrite/add any specified options
 //
-// The above results in btcwallet functioning properly without any config
+// The above results in abewallet functioning properly without any config
 // settings while still allowing the user to override settings with config files
 // and command line options.  Command line options always take precedence.
 func loadConfig() (*config, []string, error) {
@@ -278,7 +275,6 @@ func loadConfig() (*config, []string, error) {
 		RPCCert:                cfgutil.NewExplicitString(defaultRPCCertFile),
 		LegacyRPCMaxClients:    defaultRPCMaxClients,
 		LegacyRPCMaxWebsockets: defaultRPCMaxWebsockets,
-		DataDir:                cfgutil.NewExplicitString(defaultAppDataDir),
 		UseSPV:                 false,
 		AddPeers:               []string{},
 		ConnectPeers:           []string{},
@@ -323,9 +319,6 @@ func loadConfig() (*config, []string, error) {
 		configFilePath = cleanAndExpandPath(configFilePath)
 	} else {
 		appDataDir := preCfg.AppDataDir.Value
-		if !preCfg.AppDataDir.ExplicitlySet() && preCfg.DataDir.ExplicitlySet() {
-			appDataDir = cleanAndExpandPath(preCfg.DataDir.Value)
-		}
 		if appDataDir != defaultAppDataDir {
 			configFilePath = filepath.Join(appDataDir, defaultConfigFilename)
 		}
@@ -358,17 +351,6 @@ func loadConfig() (*config, []string, error) {
 			parser.WriteHelp(os.Stderr)
 		}
 		return nil, nil, err
-	}
-
-	// Check deprecated aliases.  The new options receive priority when both
-	// are changed from the default.
-	//	todo(ABE): remove the deprecated parts.
-	if cfg.DataDir.ExplicitlySet() {
-		fmt.Fprintln(os.Stderr, "datadir option has been replaced by "+
-			"appdata -- please update your config")
-		if !cfg.AppDataDir.ExplicitlySet() {
-			cfg.AppDataDir.Value = cfg.DataDir.Value
-		}
 	}
 
 	// If an alternate data directory was specified, and paths with defaults
@@ -429,7 +411,7 @@ func loadConfig() (*config, []string, error) {
 
 	// Exit if you try to use a simulation wallet with a standard
 	// data directory.
-	if !(cfg.AppDataDir.ExplicitlySet() || cfg.DataDir.ExplicitlySet()) && cfg.CreateTemp {
+	if !cfg.AppDataDir.ExplicitlySet() && cfg.CreateTemp {
 		fmt.Fprintln(os.Stderr, "Tried to create a temporary simulation "+
 			"wallet, but failed to specify data directory!")
 		os.Exit(0)
@@ -446,9 +428,6 @@ func loadConfig() (*config, []string, error) {
 	// Ensure the wallet exists or create it when the create flag is set.
 	netDir := networkDir(cfg.AppDataDir.Value, activeNet.Params)
 	dbPath := filepath.Join(netDir, walletDbName)
-
-	//	todo(ABE):
-	//	cfg.Create = true //	todo(ABE): to be removed
 
 	if cfg.CreateTemp && cfg.Create {
 		err := fmt.Errorf("The flags --create and --createtemp can not " +
@@ -481,8 +460,6 @@ func loadConfig() (*config, []string, error) {
 
 		if !tempWalletExists {
 			// Perform the initial wallet creation wizard.
-			//if err := createSimulationWallet(&cfg); err != nil {
-			//TODO(abe):
 			if err := createSimulationWallet(&cfg); err != nil {
 				fmt.Fprintln(os.Stderr, "Unable to create wallet:", err)
 				return nil, nil, err
@@ -530,9 +507,9 @@ func loadConfig() (*config, []string, error) {
 		//neutrino.MaxPeers = cfg.MaxPeers
 		//neutrino.BanDuration = cfg.BanDuration
 		//neutrino.BanThreshold = cfg.BanThreshold
-		fmt.Fprintf(os.Stderr,
-			"ABE does not support SPV or use neutrino in lighting")
-		return nil, nil, nil
+		err = fmt.Errorf("ABE does not support SPV or use neutrino in lighting")
+		fmt.Fprintln(os.Stderr, err)
+		return nil, nil, err
 	} else {
 		if cfg.RPCConnect == "" {
 			cfg.RPCConnect = net.JoinHostPort("localhost", activeNet.RPCClientPort)
@@ -590,7 +567,6 @@ func loadConfig() (*config, []string, error) {
 		}
 	}
 
-	// TODO(abe): this section have something we must to do?
 	// Only set default RPC listeners when there are no listeners set for
 	// the experimental RPC server.  This is required to prevent the old RPC
 	// server from sharing listen addresses, since it is impossible to
@@ -676,10 +652,10 @@ func loadConfig() (*config, []string, error) {
 	cfg.RPCKey.Value = cleanAndExpandPath(cfg.RPCKey.Value)
 
 	// TODO(Abe): this part maybe can redesign.
-	// If the btcd username or password are unset, use the same auth as for
-	// the client.  The two settings were previously shared for btcd and
+	// If the abec username or password are unset, use the same auth as for
+	// the client.  The two settings were previously shared for abec and
 	// client auth, so this avoids breaking backwards compatibility while
-	// allowing users to use different auth settings for btcd and wallet.
+	// allowing users to use different auth settings for abec and wallet.
 	if cfg.AbecUsername == "" {
 		cfg.AbecUsername = cfg.Username
 	}

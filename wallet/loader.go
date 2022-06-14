@@ -98,10 +98,9 @@ func (l *Loader) RunAfterLoad(fn func(*Wallet)) {
 // passphrases.  The seed is optional.  If non-nil, addresses are derived from
 // this seed.  If nil, a secure random seed is generated.
 
-func (l *Loader) CreateNewWalletAbe(pubPassphrase, privPassphrase, seed []byte, end uint64,
+func (l *Loader) CreateNewWallet(pubPassphrase, privPassphrase, seed []byte, end uint64,
 	bday time.Time) (*Wallet, error) {
-
-	return l.createNewWalletAbe(
+	return l.createNewWallet(
 		pubPassphrase, privPassphrase, seed, end, bday, false,
 	)
 }
@@ -109,17 +108,15 @@ func (l *Loader) CreateNewWalletAbe(pubPassphrase, privPassphrase, seed []byte, 
 // CreateNewWatchingOnlyWallet creates a new wallet using the provided
 // public passphrase.  No seed or private passphrase may be provided
 // since the wallet is watching-only.
-
-func (l *Loader) CreateNewWatchingOnlyWalletAbe(pubPassphrase, privPassphrase,
+// TODO 20220614 would be support
+func (l *Loader) CreateNewWatchingOnlyWallet(pubPassphrase, privPassphrase,
 	seed []byte, end uint64, bday time.Time, isWatchingOnly bool) (*Wallet, error) {
-
-	return l.createNewWalletAbe(
+	return l.createNewWallet(
 		pubPassphrase, privPassphrase, seed, end, bday, true,
 	)
 }
 
-//TODO(abe):
-func (l *Loader) createNewWalletAbe(pubPassphrase, privPassphrase,
+func (l *Loader) createNewWallet(pubPassphrase, privPassphrase,
 	seed []byte, end uint64, bday time.Time, isWatchingOnly bool) (*Wallet, error) {
 
 	defer l.mu.Unlock()
@@ -238,7 +235,6 @@ func (l *Loader) OpenExistingWallet(pubPassphrase []byte, canConsolePrompt bool)
 
 	// Open the database using the boltdb backend.
 	dbPath := filepath.Join(l.dbDirPath, walletDbName)
-	//	todo(ABE): Here the dbType is hardcoded as 'bdb'. Maybe need to define a global const.
 	db, err := walletdb.Open("bdb", dbPath, l.noFreelistSync)
 	if err != nil {
 		log.Errorf("Failed to open database: %v", err)
