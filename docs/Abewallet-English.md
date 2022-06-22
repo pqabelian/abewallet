@@ -1,18 +1,81 @@
-# Overview
+# 1. Overview
 
 The main purpose of Abewallet is to manage the coin in Abelian blockchain. The main functions are as follows:
 
 - Create new wallet
-- Restore created wallet with mnemonic words
-- Query the balances or other information of wallet
-- Create and manage transcantions
 - Create and manage addresses
+- Query the balances or other information of wallet
+- Create and manage transactions
+- Restore created wallet with mnemonic words
 
-The system is designed as follows:
+The architecture is as follows:
 
-Through the interaction with the Abelian blockchain node, query and scan the block data, store the chain data concerned by the wallet through the database, at the same time, the wallet manages the address, and provides the function of creating transaction, and updates the wallet according to the updated data on the chain.
+Through the interaction with the Abelian blockchain node (ABEC node), query and scan the block data, store the chain data concerned by the wallet through the database, at the same time, the wallet manages the address, and provides the function of creating transaction, and updates the wallet according to the updated data on the chain.
 
 ![System Design](images/System Design.jpg)
+
+# 2. Functionalities (User Interface)
+Abewallet provides the following functionalities to the users:
+1. A user can create his wallet, and a 24-words mnemonic and an initial (first) address will be returned.
+   Note that mnemonic words can be used to recover the wallet.
+2. The wallet owner can create addresses when needed, by running his wallet and using the provided APIs.
+3. Users can use the addresses to receive coins, in mining or transfer.
+4. The wallet owner can configure his wallet to connect to a local or remote ABEC node.
+5. The wallet owner can run the wallet to synchronize the blockchain data when needed, and the wallet will communicate with the connected (running) ABEC node, scan the blockchain and update its local database.
+6. Users can query wallet status and information through the provided APIs.
+7. When needed, a user can restore his wallet, by using the 24-words mnemonic. 
+
+## 2.1 Create a new wallet
+
+## 2.2 Create more addresses
+
+## 2.3 Configure the connected ABEC node
+
+## 2.4 Synchronize the blockchain
+
+## 2.5 Query wallet status and blockchain information
+
+## 2.6 Create Transfer Transactions
+
+## 2.7 Restore a wallet
+
+
+# 3. Detailed Designs
+
+## 3.1 The start of abewallet
+The ***package abewallet (actually abewallet/abewallet.go)*** is the entrance of the wallet.
+- It loads configuration and parse command line, and if the configuration file does not exist, it will initialize that.
+- The command and options to start abewallet are list as the table below: (TODO)
+  - abewallet --create
+    - start wallet create procedure
+  - abewallet --walletpass=[public passphrase]
+    - connect the ABEC node to synchronize the blockchain data
+    - start the RPC server to listen the client's requests
+  - ...
+  
+## 3.2 Wallet Create and Address Create
+The command ***abewallet --create*** will trigger the procedure of wallet create.
+If the wallet database exits, it will just show the warning information and stop.
+Otherwise, it will 
+- request the user to input ***private passphrase*** and ***public passphrase***
+- request the user to input whether he has a seed to restore the wallet. To create a new wallet, here the user should input 'No'
+- generate the ***seed***, the ***initial instance address***, and protect the wallet data using the private passphrase and public passphrase.
+
+The designs are shown as below:
+-- todo
+-- the package is introduced when used
+
+After a wallet is created, the wallet owner can create more addresses managed by this wallet, when needed:
+- unlock the wallet using the private passphrase
+- create a new address
+
+## 3.3 Configure the connected ABEC node
+ToDo: draw a picture, to show the connection architecture of ABEC node -- Wallet -- AbewalletCtl/RPCClient
+
+## 3.4 Synchronize the blockchain
+ToDo: describe the design here
+-- the connection design
+-- the data structure and data flow
 
 
 
@@ -20,14 +83,17 @@ Through the interaction with the Abelian blockchain node, query and scan the blo
 
 - Instructions for the overall use of the system
 
-  1. Users create a wallet, get mnemonic words and the first address, mnemonic words can be used to recover the wallet.
-  2. Users use address in the block chain
-  3. After the user has completed the necessary configuration information, run the wallet and it would scan all the TXO on the blockchain through the connection node, and update the wallet.
-  4. Users query wallet status and information through the HTTP APIs provided by the wallet
+  1. Users can create wallets when needed. For each wallet, a 24-words mnemonic and an initial (first) address will be returned. 
+  Note that mnemonic words can be used to recover the wallet.
+  2. Users can create addresses when needed, by running his wallet and using the provided APIs.
+  3. Users can use the addresses to receive coins, in mining or transfer.
+  4. Users can configure the wallet to connect to a local or remote ABEC node. 
+  5. Users can run the wallet when needed, and the wallet will communicate with the connected (running) ABEC node, scan the blockchain and update its local database.
+  6. Users can query wallet status and information through the provided APIs.
 
-- Create/Resotre wallet
+- Create a new wallet
 
-  ![Create Wallet](./images/Create Wallet - English.jpg)
+  ![Create Wallet](./images/Create Wallet English.jpg)
 
 - Wallet status and query
 
