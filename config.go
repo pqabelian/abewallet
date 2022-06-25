@@ -68,8 +68,8 @@ type config struct {
 	RPCConnect       string                  `short:"c" long:"rpcconnect" description:"Hostname/IP and port of abec RPC server to connect to (default localhost:8667, testnet: localhost:18667, simnet: localhost:18889)"`
 	CAFile           *cfgutil.ExplicitString `long:"cafile" description:"File containing root certificates to authenticate a TLS connections with abec"`
 	DisableClientTLS bool                    `long:"noclienttls" description:"Disable TLS for the RPC client -- NOTE: This is only allowed if the RPC client is connecting to localhost"`
-	AbecUsername     string                  `long:"abecusername" description:"Username for abec authentication"`
-	AbecPassword     string                  `long:"abecpassword" default-mask:"-" description:"Password for abec authentication"`
+	AbecRpcuser      string                  `long:"abecrpcuser" description:"Username for abec authentication"`
+	AbecRpcpass      string                  `long:"abecrpcpass" default-mask:"-" description:"Password for abec authentication"`
 	Proxy            string                  `long:"proxy" description:"Connect via SOCKS5 proxy (eg. 127.0.0.1:9050)"`
 	ProxyUser        string                  `long:"proxyuser" description:"Username for proxy server"`
 	ProxyPass        string                  `long:"proxypass" default-mask:"-" description:"Password for proxy server"`
@@ -98,8 +98,8 @@ type config struct {
 	LegacyRPCListeners     []string                `long:"rpclisten" description:"Listen for legacy RPC connections on this interface/port (default port: 8332, testnet: 18332, simnet: 18554)"`
 	LegacyRPCMaxClients    int64                   `long:"rpcmaxclients" description:"Max number of legacy RPC clients for standard connections"`
 	LegacyRPCMaxWebsockets int64                   `long:"rpcmaxwebsockets" description:"Max number of legacy RPC websocket connections"`
-	Username               string                  `short:"u" long:"username" description:"Username for legacy RPC and abec authentication (if abec is unset)"`
-	Password               string                  `short:"P" long:"password" default-mask:"-" description:"Password for legacy RPC and abec authentication (if abecpassword is unset)"`
+	Rpcuser                string                  `short:"u" long:"rpcuser" description:"Username for legacy RPC and abec authentication (if abecrpcuser is unset)"`
+	Rpcpass                string                  `short:"P" long:"rpcpass" default-mask:"-" description:"Password for legacy RPC and abec authentication (if abecrpcpass is unset)"`
 
 	// EXPERIMENTAL RPC server options
 	//
@@ -656,11 +656,11 @@ func loadConfig() (*config, []string, error) {
 	// the client.  The two settings were previously shared for abec and
 	// client auth, so this avoids breaking backwards compatibility while
 	// allowing users to use different auth settings for abec and wallet.
-	if cfg.AbecUsername == "" {
-		cfg.AbecUsername = cfg.Username
+	if cfg.AbecRpcuser == "" {
+		cfg.AbecRpcuser = cfg.Rpcuser
 	}
-	if cfg.AbecPassword == "" {
-		cfg.AbecPassword = cfg.Password
+	if cfg.AbecRpcpass == "" {
+		cfg.AbecRpcpass = cfg.Rpcpass
 	}
 
 	// Warn about missing config file after the final command line parse
@@ -726,10 +726,10 @@ func createDefaultConfigFile(destinationPath string) error {
 			return err
 		}
 
-		if strings.Contains(line, "; username=") {
-			line = "username=" + generatedRPCUser + "\n"
-		} else if strings.Contains(line, "; password=") {
-			line = "password=" + generatedRPCPass + "\n"
+		if strings.Contains(line, "; rpcuser=") {
+			line = "rpcuser=" + generatedRPCUser + "\n"
+		} else if strings.Contains(line, "; rpcpass=") {
+			line = "rpcpass=" + generatedRPCPass + "\n"
 		}
 
 		if _, err := dest.WriteString(line); err != nil {

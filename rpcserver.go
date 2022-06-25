@@ -151,8 +151,8 @@ func startRPCServers(walletLoader *wallet.Loader) (*grpc.Server, *legacyrpc.Serv
 			}*/
 	}
 
-	if cfg.Username == "" || cfg.Password == "" {
-		log.Info("Legacy RPC server disabled (requires username and password)")
+	if cfg.Rpcuser == "" || cfg.Rpcpass == "" {
+		log.Info("Legacy RPC server disabled (requires rpcuser and rpcpass)")
 	} else if len(cfg.LegacyRPCListeners) != 0 {
 		listeners := makeListeners(cfg.LegacyRPCListeners, legacyListen)
 		if len(listeners) == 0 {
@@ -160,8 +160,8 @@ func startRPCServers(walletLoader *wallet.Loader) (*grpc.Server, *legacyrpc.Serv
 			return nil, nil, err
 		}
 		opts := legacyrpc.Options{
-			Username:            cfg.Username,
-			Password:            cfg.Password,
+			Username:            cfg.Rpcuser,
+			Password:            cfg.Rpcpass,
 			MaxPOSTClients:      cfg.LegacyRPCMaxClients,
 			MaxWebsocketClients: cfg.LegacyRPCMaxWebsockets,
 		}

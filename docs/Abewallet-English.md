@@ -66,13 +66,13 @@ To synchronize block chain data, the wallet need to connect a blockchain node, s
 
 The configuration items contains:
 
-- `abecusername=[abec node rpc username]`
+- `abecrpcuser=[abec node rpc username]`
 
-  `abecusername` should be configured to be the value of  `rpcuser` in abec.conf of abelian node side.
+  `abecrpcuser` should be configured to be the value of  `rpcuser` in abec.conf of abelian node side.
 
--  `abecpassword=[abec node rpc password]`
+-  `abecrpcpass=[abec node rpc password]`
 
-  `abecpassword` should be configured to be the value of  `rpcpass` in abec.conf of abelian node side.
+  `abecrpcpass` should be configured to be the value of  `rpcpass` in abec.conf of abelian node side.
 
 - `rpcconnect=[abec node ip,default localhost]`
 
@@ -194,11 +194,11 @@ Overview of connection architecture :
 
 - At the node side, port 8667 as the default port is used to listen for connections and requests, at the same time,  `rpcuser`, `rpcpass`  and certificates is used to  provide identity authentication capabilities.
 
-- At the wallet side, port 8665 as the default port is used to listen for connections and requests, at the same time,  `username`, `password`  and certificates is used to  provide identity authentication capabilities. At the same time,  the wallet establishes a connection with the node by specifying `abecusername` and `abecpassword`, IP address of abelian node, and its certificate.
+- At the wallet side, port 8665 as the default port is used to listen for connections and requests, at the same time,  `username`, `password`  and certificates is used to  provide identity authentication capabilities. At the same time,  the wallet establishes a connection with the node by specifying `abecrpcuser` and `abecrpcpass`, IP address of abelian node, and its certificate.
 
 ​	NOTE: 
 
-- If `abecusername` and `abecpassword` are not specified, the `username` and  `password` are used instead.【TODO discard the bind, rename abecusername/abecpassword to abecrpcuser/abecrpcpass, username/password to rpcuser/rpcpass 】
+- If `abecrpcuser` and `abecrpcpass` are not specified, the `username` and  `password` are used instead.【TODO discard the bind, rename abecrpcuser/abecrpcpass to abecrpcuser/abecrpcpass, username/password to rpcuser/rpcpass 】
 
 - If the wallet runs in the same machine, the `cafile` and `rpcconnect` don't need to be set.
 
