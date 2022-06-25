@@ -4,6 +4,7 @@ go 1.14
 
 require (
 	github.com/abesuite/abec v0.10.2-0.20220605033721-492ea9386bd1
+	github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd // indirect
 	github.com/abesuite/go-spew v1.1.1
 	github.com/golang/protobuf v1.4.2
 	github.com/gorilla/websocket v1.4.2
