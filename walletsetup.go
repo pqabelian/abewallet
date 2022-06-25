@@ -93,7 +93,6 @@ func createWallet(cfg *config) error {
 			return err
 		}
 
-		//w.Manager.Close()
 		w.Manager.Close()
 		fmt.Println("The wallet has been created successfully.")
 	} else if cfg.NonInteractiveCreate {

@@ -73,7 +73,12 @@ var (
 	bucketUTXORing    = []byte("utxoring")
 	bucketRingDetails = []byte("utxoringdetails") //TODO(abe):we should add a block height in database, meaning that the txo in ring had consumed completely .
 
-	bucketUnminedAbe = []byte("unminedtx") // for unmined transaction
+	bucketUnconfirmedTx = []byte("unconfirmedtx") // unconfirmed transaction
+	bucketInvalidTx     = []byte("invalidtx")     // invalid transaction
+	bucketConfirmedTx   = []byte("confirmedtx")   // confirmed transaction
+
+	// map transaction output to transaction hash set
+	bucketRelevantTxs = []byte("relevanttxs") // relevant transaction set
 )
 
 // Root (namespace) bucket keys
@@ -517,10 +522,10 @@ func valueTxRecord(rec *TxRecord) ([]byte, error) {
 	return v, nil
 }
 
-func readRawTxRecordAbe(txHash *chainhash.Hash, v []byte, rec *TxRecord) error {
+func readRawTxRecord(txHash *chainhash.Hash, v []byte, rec *TxRecord, bucketName []byte) error {
 	if len(v) < 8 {
 		str := fmt.Sprintf("%s: short read (expected %d bytes, read %d)",
-			bucketUnminedAbe, 8, len(v))
+			bucketName, 8, len(v))
 		return storeError(ErrData, str, nil)
 	}
 	rec.Hash = *txHash
@@ -528,7 +533,7 @@ func readRawTxRecordAbe(txHash *chainhash.Hash, v []byte, rec *TxRecord) error {
 	err := rec.MsgTx.Deserialize(bytes.NewReader(v[8:]))
 	if err != nil {
 		str := fmt.Sprintf("%s: failed to deserialize transaction %v",
-			bucketUnminedAbe, txHash)
+			bucketUnconfirmedTx, txHash)
 		return storeError(ErrData, str, err)
 	}
 	return nil
@@ -1510,10 +1515,34 @@ func readUnspentBlock(v []byte, block *Block) error {
 //   [0:8]   Received time (8 bytes)
 //   [8:]    Serialized transaction (varies)
 
-func putRawUnmined(ns walletdb.ReadWriteBucket, k, v []byte) error {
-	err := ns.NestedReadWriteBucket(bucketUnminedAbe).Put(k, v)
+func putRawUnconfirmedTx(ns walletdb.ReadWriteBucket, k, v []byte) error {
+	err := ns.NestedReadWriteBucket(bucketUnconfirmedTx).Put(k, v)
 	if err != nil {
-		str := "failt to put unmined transaction"
+		str := "fail to put unconfirmed transaction"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+func putRawInvalidTx(ns walletdb.ReadWriteBucket, k, v []byte) error {
+	err := ns.NestedReadWriteBucket(bucketInvalidTx).Put(k, v)
+	if err != nil {
+		str := "fail to put invalid transaction"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+func putRawConfirmedTx(ns walletdb.ReadWriteBucket, k, v []byte) error {
+	err := ns.NestedReadWriteBucket(bucketConfirmedTx).Put(k, v)
+	if err != nil {
+		str := "fail to put confirmed transaction"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+func putRawRelevantTxs(ns walletdb.ReadWriteBucket, k, v []byte) error {
+	err := ns.NestedReadWriteBucket(bucketRelevantTxs).Put(k, v)
+	if err != nil {
+		str := "fail to put relevant transactions"
 		return storeError(ErrDatabase, str, err)
 	}
 	return nil
@@ -1529,8 +1558,17 @@ func readRawUnminedHash(k []byte, txHash *chainhash.Hash) error {
 	return nil
 }
 
-func existsRawUnmined(ns walletdb.ReadBucket, k []byte) (v []byte) {
-	return ns.NestedReadBucket(bucketUnminedAbe).Get(k)
+func existsRawUnconfirmedTx(ns walletdb.ReadBucket, k []byte) (v []byte) {
+	return ns.NestedReadBucket(bucketUnconfirmedTx).Get(k)
+}
+func existsRawInvalidTx(ns walletdb.ReadBucket, k []byte) (v []byte) {
+	return ns.NestedReadBucket(bucketInvalidTx).Get(k)
+}
+func existsRawConfirmedTx(ns walletdb.ReadBucket, k []byte) (v []byte) {
+	return ns.NestedReadBucket(bucketConfirmedTx).Get(k)
+}
+func existsRawReleventTxs(ns walletdb.ReadBucket, k []byte) (v []byte) {
+	return ns.NestedReadBucket(bucketRelevantTxs).Get(k)
 }
 
 func DeleteRawUnmined(ns walletdb.ReadWriteBucket, tx *wire.MsgTxAbe) error {
@@ -1550,15 +1588,31 @@ func DeleteRawUnmined(ns walletdb.ReadWriteBucket, tx *wire.MsgTxAbe) error {
 		}
 	}
 	txHash := tx.TxHash()
-	return deleteRawUnmined(ns, txHash[:])
+	return deleteRawUnconfirmedTx(ns, txHash[:])
 }
 
 // TODO(abe):when delete the entry in unminedAbe, it must explicit where the corresponding entry in spent but unmined into
 //  SpentAndConfirm or UnspentTXO bucket?
-func deleteRawUnmined(ns walletdb.ReadWriteBucket, k []byte) error {
-	err := ns.NestedReadWriteBucket(bucketUnminedAbe).Delete(k)
+func deleteRawUnconfirmedTx(ns walletdb.ReadWriteBucket, k []byte) error {
+	err := ns.NestedReadWriteBucket(bucketUnconfirmedTx).Delete(k)
 	if err != nil {
-		str := "failed to delete unmined record"
+		str := "failed to delete unconfirmed transaction record"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+func deleteRawInvalidTx(ns walletdb.ReadWriteBucket, k []byte) error {
+	err := ns.NestedReadWriteBucket(bucketInvalidTx).Delete(k)
+	if err != nil {
+		str := "failed to delete invalid transaction record"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+func deleteRawConfirmedTx(ns walletdb.ReadWriteBucket, k []byte) error {
+	err := ns.NestedReadWriteBucket(bucketConfirmedTx).Delete(k)
+	if err != nil {
+		str := "failed to delete confirmed transaction record"
 		return storeError(ErrDatabase, str, err)
 	}
 	return nil
@@ -1900,8 +1954,21 @@ func createBuckets(ns walletdb.ReadWriteBucket) error {
 		return storeError(ErrDatabase, str, err)
 	}
 
-	if _, err := ns.CreateBucket(bucketUnminedAbe); err != nil {
-		str := "failed to create unmined bucket"
+	if _, err := ns.CreateBucket(bucketUnconfirmedTx); err != nil {
+		str := "failed to create unconfirmed transaction bucket"
+		return storeError(ErrDatabase, str, err)
+	}
+	if _, err := ns.CreateBucket(bucketInvalidTx); err != nil {
+		str := "failed to create invalid transaction bucket"
+		return storeError(ErrDatabase, str, err)
+	}
+	if _, err := ns.CreateBucket(bucketConfirmedTx); err != nil {
+		str := "failed to create confirmed transaction bucket"
+		return storeError(ErrDatabase, str, err)
+	}
+
+	if _, err := ns.CreateBucket(bucketRelevantTxs); err != nil {
+		str := "failed to create relevant transactions bucket"
 		return storeError(ErrDatabase, str, err)
 	}
 
@@ -1957,8 +2024,21 @@ func deleteBuckets(ns walletdb.ReadWriteBucket) error {
 		return storeError(ErrDatabase, str, err)
 	}
 
-	if err := ns.DeleteNestedBucket(bucketUnminedAbe); err != nil {
-		str := "failed to delete unmined bucket"
+	if err := ns.DeleteNestedBucket(bucketUnconfirmedTx); err != nil {
+		str := "failed to delete unconfirmed transaction bucket"
+		return storeError(ErrDatabase, str, err)
+	}
+	if err := ns.DeleteNestedBucket(bucketInvalidTx); err != nil {
+		str := "failed to delete invalid transaction bucket"
+		return storeError(ErrDatabase, str, err)
+	}
+	if err := ns.DeleteNestedBucket(bucketConfirmedTx); err != nil {
+		str := "failed to delete confirmed transaction bucket"
+		return storeError(ErrDatabase, str, err)
+	}
+
+	if err := ns.DeleteNestedBucket(bucketRelevantTxs); err != nil {
+		str := "failed to delete relevant transactions bucket"
 		return storeError(ErrDatabase, str, err)
 	}
 

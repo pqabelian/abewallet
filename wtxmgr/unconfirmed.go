@@ -20,11 +20,11 @@ import (
 // that would otherwise result in double spend conflicts if left in the store,
 // and to remove transactions that spend coinbase transactions on reorgs.
 
-// UnminedTxs returns the underlying transactions for all unmined transactions
+// UnconfirmedTxs returns the underlying transactions for all unmined transactions
 // which are not known to have been mined in a block.  Transactions are
 // guaranteed to be sorted by their dependency order.
-func (s *Store) UnminedTxs(ns walletdb.ReadBucket) ([]*wire.MsgTxAbe, error) {
-	recSet, err := s.unminedTxRecords(ns)
+func (s *Store) UnconfirmedTxs(ns walletdb.ReadBucket) ([]*wire.MsgTxAbe, error) {
+	recSet, err := s.unconfirmedTxRecords(ns)
 	if err != nil {
 		return nil, err
 	}
@@ -37,9 +37,9 @@ func (s *Store) UnminedTxs(ns walletdb.ReadBucket) ([]*wire.MsgTxAbe, error) {
 	return txSet, nil
 }
 
-func (s *Store) unminedTxRecords(ns walletdb.ReadBucket) ([]*TxRecord, error) {
+func (s *Store) unconfirmedTxRecords(ns walletdb.ReadBucket) ([]*TxRecord, error) {
 	unmined := make([]*TxRecord, 0)
-	err := ns.NestedReadBucket(bucketUnminedAbe).ForEach(func(k, v []byte) error {
+	err := ns.NestedReadBucket(bucketUnconfirmedTx).ForEach(func(k, v []byte) error {
 		var txHash chainhash.Hash
 		err := readRawUnminedHash(k, &txHash)
 		if err != nil {
@@ -47,7 +47,7 @@ func (s *Store) unminedTxRecords(ns walletdb.ReadBucket) ([]*TxRecord, error) {
 		}
 
 		rec := new(TxRecord)
-		err = readRawTxRecordAbe(&txHash, v, rec)
+		err = readRawTxRecord(&txHash, v, rec, bucketUnconfirmedTx)
 		if err != nil {
 			return err
 		}
@@ -60,12 +60,12 @@ func (s *Store) unminedTxRecords(ns walletdb.ReadBucket) ([]*TxRecord, error) {
 // UnminedTxHashes returns the hashes of all transactions not known to have been
 // mined in a block.
 func (s *Store) UnminedTxHashes(ns walletdb.ReadBucket) ([]*chainhash.Hash, error) {
-	return s.unminedTxHashes(ns)
+	return s.unconfirmedTxHashes(ns)
 }
 
-func (s *Store) unminedTxHashes(ns walletdb.ReadBucket) ([]*chainhash.Hash, error) {
+func (s *Store) unconfirmedTxHashes(ns walletdb.ReadBucket) ([]*chainhash.Hash, error) {
 	var hashes []*chainhash.Hash
-	err := ns.NestedReadBucket(bucketUnminedAbe).ForEach(func(k, v []byte) error {
+	err := ns.NestedReadBucket(bucketUnconfirmedTx).ForEach(func(k, v []byte) error {
 		hash := new(chainhash.Hash)
 		err := readRawUnminedHash(k, hash)
 		if err == nil {

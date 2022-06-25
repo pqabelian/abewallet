@@ -424,7 +424,7 @@ func fetchSpecifiedUTXO(eligible []wtxmgr.UnspentUTXO, utxoSpecified []string) (
 	return selected, nil
 }
 
-func (w *Wallet) txAbePqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, dryRun bool) (
+func (w *Wallet) txPqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, dryRun bool) (
 	unsignedTx *txauthor.AuthoredTxAbe, err error) {
 
 	chainClient, err := w.requireChainClient()

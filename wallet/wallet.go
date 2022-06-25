@@ -635,7 +635,7 @@ out:
 			}
 			// todo(AliceBob): rename the methods
 			//tx, err := w.txAbeToOutputs(txr.txOutDescs, txr.minconf, txr.feeSatPerKB, txr.dryRun)
-			tx, err := w.txAbePqringCTToOutputs(txr.txOutDescs, txr.minconf, txr.feePerKbSpecified, txr.feeSpecified, txr.utxoSpecified, txr.dryRun)
+			tx, err := w.txPqringCTToOutputs(txr.txOutDescs, txr.minconf, txr.feePerKbSpecified, txr.feeSpecified, txr.utxoSpecified, txr.dryRun)
 			heldUnlock.release()
 			txr.resp <- createTxResponse{tx, err}
 		case <-quit:
@@ -1267,7 +1267,7 @@ func (w *Wallet) resendUnminedTx() {
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		var err error
-		txs, err = w.TxStore.UnminedTxs(txmgrNs)
+		txs, err = w.TxStore.UnconfirmedTxs(txmgrNs)
 		return err
 	})
 	if err != nil {
@@ -1635,12 +1635,6 @@ func (w *Wallet) publishTransaction(tx *wire.MsgTxAbe) (*chainhash.Hash, error) 
 	case match(err, "orphan transaction"):
 		fallthrough
 
-	// Error returned from bitcoind when output was spent by other
-	// non-replacable transaction already in the mempool.
-	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L622
-	case match(err, "txn-mempool-conflict"):
-		fallthrough
-
 	// Returned by bitcoind on the RPC when broadcasting a transaction that
 	// is spending either output that is missing or already spent.
 	//
@@ -1652,6 +1646,14 @@ func (w *Wallet) publishTransaction(tx *wire.MsgTxAbe) (*chainhash.Hash, error) 
 		returnErr = &ErrDoubleSpend{
 			backendError: err,
 		}
+
+	// Error returned from bitcoind when output was spent by other
+	// non-replacable transaction already in the mempool.
+	// https://github.com/bitcoin/bitcoin/blob/9bf5768dd628b3a7c30dd42b5ed477a92c4d3540/src/validation.cpp#L622
+	case match(err, "txn-mempool-conflict"):
+		// TODO 20220625: In Abelian, the conflict transaction should be fetched from node
+		// But now, this procedure just wait the transaction packaged into block
+		// In this way, the transaction should be handled when handling the block
 
 	// Returned by bitcoind if the transaction spends outputs that would be
 	// replaced by it.
