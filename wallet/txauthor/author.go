@@ -64,7 +64,8 @@ type AuthoredTx struct {
 }
 
 type AuthoredTxAbe struct {
-	Tx *wire.MsgTxAbe
+	Tx              *wire.MsgTxAbe
+	ChangeAddressNo uint64
 	// TODO 20220611 consumed txo to recover UTXO
 	// when the transaction is invalid
 }

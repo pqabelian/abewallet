@@ -109,6 +109,7 @@ var rpcHandlers = map[string]struct {
 	//"sendmany":               {handler: sendMany},
 	"sendtoaddressesabe": {handler: sendToAddressesAbe},
 	"generateaddressabe": {handler: generateAddressAbe},
+	"addressnumber":      {handler: addressNumber},
 	//"sendtoaddress":          {handler: sendToAddress},
 	//"sendtopayee":            {handler: sendToPayees},
 	"settxfee": {handler: setTxFee}, // TODO
@@ -1008,9 +1009,9 @@ func sendAddressAbe(w *wallet.Wallet, amounts []abejson.Pair,
 		}
 	}
 
-	txHashStr := tx.TxHash().String()
+	txHashStr := tx.Tx.TxHash().String()
 	log.Infof("Successfully sent transaction %v", txHashStr)
-	return txHashStr, nil
+	return txHashStr + fmt.Sprintf("\nCurrent max No. of address is %d", tx.ChangeAddressNo), nil
 }
 
 func sendPairsAbe(w *wallet.Wallet, amounts map[string]abeutil.Amount,
@@ -1040,7 +1041,7 @@ func sendPairsAbe(w *wallet.Wallet, amounts map[string]abeutil.Amount,
 		}
 	}
 
-	txHashStr := tx.TxHash().String()
+	txHashStr := tx.Tx.TxHash().String()
 	log.Infof("Successfully sent transaction %v", txHashStr)
 	return txHashStr, nil
 }
@@ -1121,31 +1122,50 @@ func sendToPayees(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 // or a fee for the miner are sent back to a new address in the wallet.
 // Upon success, the TxID for the created transaction is returned.
 
+type AddressCmd struct{}
+
+func addressNumber(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	_ = icmd.(AddressCmd)
+	addressNum, err := w.AddressNumber()
+	if err != nil {
+		return -1, err
+	}
+	return addressNum, nil
+}
 func generateAddressAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	_ = icmd.(*abejson.GenerateAddressCmd)
+	cmd := icmd.(*abejson.GenerateAddressCmd)
+	number := *cmd.Num
 
 	var err error
-	var numberOrder uint64
-	var address []byte
-	numberOrder, address, err = w.NewAddressKey()
-	if err != nil {
-		return nil, err
+	numberOrder := make([]uint64, number)
+	addresses := make([][]byte, number)
+
+	for i := 0; i < number; i++ {
+		var address []byte
+		numberOrder[i], address, err = w.NewAddressKey()
+		if err != nil {
+			return nil, err
+		}
+		addresses[i] = make([]byte, len(address)+1+32)
+		// TODO: How to know the active net?
+		addresses[i][0] = chaincfg.MainNetParams.PQRingCTID
+		copy(addresses[i][1:], address)
+		// generate the hash of (abecrypto.CryptoSchemePQRINGCT || serialized address)
+		hash := chainhash.DoubleHashB(addresses[i][:len(address)+1])
+		copy(addresses[i][len(address)+1:], hash[:])
 	}
-	b := make([]byte, len(address)+1)
-	// TODO: How to know the active net?
-	b[0] = chaincfg.MainNetParams.PQRingCTID
-	copy(b[1:], address)
-	// generate the hash of (abecrypto.CryptoSchemePQRINGCT || serialized address)
-	hash := chainhash.DoubleHashB(b)
-	b = append(b, hash...)
 	type tt struct {
 		No_  uint64 `json:"No,omitempty"`
 		Addr string `json:"addr,omitempty"`
 	}
-	return &tt{
-		No_:  numberOrder,
-		Addr: hex.EncodeToString(b),
-	}, nil
+	res := make([]*tt, number)
+	for i := 0; i < number; i++ {
+		res[i] = &tt{
+			No_:  numberOrder[i],
+			Addr: hex.EncodeToString(addresses[i]),
+		}
+	}
+	return res, nil
 }
 
 func sendToAddressesAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {

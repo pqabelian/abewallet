@@ -633,8 +633,6 @@ out:
 				txr.resp <- createTxResponse{nil, err}
 				continue
 			}
-			// todo(AliceBob): rename the methods
-			//tx, err := w.txAbeToOutputs(txr.txOutDescs, txr.minconf, txr.feeSatPerKB, txr.dryRun)
 			tx, err := w.txPqringCTToOutputs(txr.txOutDescs, txr.minconf, txr.feePerKbSpecified, txr.feeSpecified, txr.utxoSpecified, txr.dryRun)
 			heldUnlock.release()
 			txr.resp <- createTxResponse{tx, err}
@@ -1308,6 +1306,17 @@ func (w *Wallet) resendUnminedTx() {
 
 // NewAddress returns the next external chained address for a wallet.
 
+func (w *Wallet) AddressNumber() (uint64, error) {
+	var addressNum uint64
+	var err error
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+		addressNum, err = waddrmgr.FetchSeedStatus(addrmgrNs)
+		return err
+	})
+	return addressNum, err
+}
+
 // NewAddressKey returns a new address for a wallet.
 func (w *Wallet) NewAddressKey() (uint64, []byte, error) {
 	var numberOrder uint64
@@ -1404,7 +1413,7 @@ func confirms(txHeight, curHeight int32) int32 {
 
 func (w *Wallet) SendOutputs(outputDescs []*abecrypto.AbeTxOutputDesc,
 	minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount,
-	utxoSpecified []string, label string) (*wire.MsgTxAbe, error) {
+	utxoSpecified []string, label string) (*txauthor.AuthoredTxAbe, error) {
 	// Ensure the outputs to be created adhere to the network's consensus
 	// rules.
 	for _, txOutDesc := range outputDescs {
@@ -1424,7 +1433,7 @@ func (w *Wallet) SendOutputs(outputDescs []*abecrypto.AbeTxOutputDesc,
 	if err != nil {
 		return nil, err
 	}
-	// it means that the transaction is create if successful
+	// it means that the transaction is created successful
 	txHash, err := w.reliablyPublishTransaction(createdTx.Tx, label)
 	if err != nil {
 		return nil, err
@@ -1436,7 +1445,7 @@ func (w *Wallet) SendOutputs(outputDescs []*abecrypto.AbeTxOutputDesc,
 		return nil, errors.New("tx hash mismatch")
 	}
 
-	return createdTx.Tx, nil
+	return createdTx, nil
 }
 
 // SignTransaction uses secrets of the wallet, as well as additional secrets

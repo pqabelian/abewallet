@@ -784,10 +784,11 @@ func (w *Wallet) txPqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc, mi
 			copyedVskBytes,
 			selectedTxos[i].Amount))
 	}
-
+	usedCntNum := uint64(-1)
 	if needChangeFlag {
+		var addrBytes []byte
 		// fetch a change address for the change
-		_, addrBytes, err := w.NewAddressKey()
+		usedCntNum, addrBytes, err = w.NewAddressKey()
 		if err != nil {
 			return nil, err
 		}
@@ -813,7 +814,8 @@ func (w *Wallet) txPqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc, mi
 		return nil, err
 	}
 	resTx := &txauthor.AuthoredTxAbe{
-		Tx: transferTx,
+		Tx:              transferTx,
+		ChangeAddressNo: usedCntNum,
 	}
 	return resTx, nil
 

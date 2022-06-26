@@ -413,6 +413,11 @@ func putMasterKeyParams(ns walletdb.ReadWriteBucket, pubParams, privParams []byt
 // putMasterHDKeys stores the encrypted master HD keys in the top level main
 // bucket. These are required in order to create any new manager scopes, as
 // those are created via hardened derivation of the children of this key.
+
+func FetchSeedStatus(ns walletdb.ReadBucket) (uint64, error) {
+	return fetchSeedStatus(ns)
+}
+
 func fetchSeedStatus(ns walletdb.ReadBucket) (uint64, error) {
 	// As this is the key for the root manager, we don't need to fetch any
 	// particular scope, and can insert directly within the main bucket.
