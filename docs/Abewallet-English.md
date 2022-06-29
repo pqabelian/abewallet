@@ -21,28 +21,30 @@ In other words, wallet obtains data from blockchain, store only the data related
 # 2. Functionalities (User Interface)
 Abewallet provides the following functionalities to the users:
 1. A user can create his/her wallet, and a 24-words mnemonic and an initial (first) address will be returned.
-   **Note that mnemonic words can be used to recover the wallet.**
-2. The wallet owner can create addresses when needed, by running his wallet and using the provided APIs.
-3. Users can use the addresses created by wallet to receive coins, in mining or transfer.
-4. The wallet owner can configure his wallet to connect to a local or remote ABEC node.
+   **Note that mnemonic words can be used to restore the wallet.**
+2. The wallet owner can configure his wallet to connect to a local or remote ABEC node.
+3. The wallet owner can create addresses when needed, by running his wallet and using the provided APIs.
+4. Users can use the addresses created by wallet to receive coins, in mining or transfer.
 5. The wallet owner can run the wallet to synchronize the blockchain data when needed, and the wallet will communicate with the connected (running) ABEC node, scan the blockchain and update its local database.
 6. Users can query wallet status and information through the provided APIs.
 7. When needed, a user can restore his wallet, by using the 24-words mnemonic. 
 
 ## 2.1 Create a new wallet
-A user can run the wallet with flag `--create` such as `./abewallet --create` to create a wallet. In this process, the program would check whether the data directory exists, and exit if so, otherwise enter the process of creating a wallet, the overall process is shown in the figure.
+A user can create a wallet by command `./abewallet --create`. 
+In this process, the program would check whether the data directory exists, and exit if so, otherwise enter the process of creating a wallet, the overall process is shown in the figure.
 
 ![Create Wallet](./images/Create New Wallet (User Interface).svg)
 
 - require the user to enter a **private passphrase** and a **public passphrase**. 
-- output **crypto version** and **mnemonic words** and remind users to remember and protect them.
+- output **crypto version** and **mnemonic words** and remind users to store them in a safe place.
 - create the wallet and output an initial (first) address.
 - exit.
 
 ## 2.2 Configure and run a wallet 
 The command `abewallet --create` will exit after creating a wallet. 
-To run and use the wallet, the user need to make a minimal configuration in **abewallet.conf**, namely configure the **rpcuser** and **rpcpass**, which enable wallet to be accessed by RPC connection.
-In addition, to enable a wallet to synchronize data from blockchain, the user need to configure the wallet to a local or remote wallet. 
+To run and use the wallet, the user need to make a minimal configuration in **abewallet.conf**.
+mamely, (1) configure the **rpcuser** and **rpcpass**, which enable wallet to be accessed by RPC connection,
+and (2) configure a local or remote ABEC node, which will enable a wallet to synchronize data from blockchain.
 
 The configuration items for connecting ABEC node include:
 
@@ -66,7 +68,9 @@ After the configuration, a user can start the wallet by the command
 
 `abewallet --walletpass=[public passphrase] `
 
-**NOTE:** If the configuration items for connecting ABEC node are configured, the running wallet will synchronize blockchain data from the configured ABEC node.
+**NOTE:** At this moment, we provide only online-wallet, i.e., the users must configure a local or remote ABEC node, 
+and when the wallet is started, it will connect the configured ABEC node and catch up the blockchain and stay sychronized.
+Later, we may provide offline wallet.
 
 ## 2.3 Create more addresses
 
