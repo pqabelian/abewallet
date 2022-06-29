@@ -22,9 +22,9 @@ In words, wallet obtains data from blockchain, store only the data related to it
 
 # 2. Functionalities (User Interface)
 Abewallet provides the following functionalities to the users:
-1. A user can create his/her wallet, and a 24-words mnemonic and an initial (first) address will be returned.
-   **Note that mnemonic words can be used to restore the wallet.**
-2. The wallet owner can configure his wallet to connect to a local or remote ABEC node.
+1. A user can create his wallet, then a crypto version, a 24-words mnemonic, and an initial (first) address will be returned.
+   **Note that the crypto version and mnemonic words can be used to restore the wallet.**
+2. The wallet owner can configure his wallet to provide API services and connection to a local or remote ABEC node.
 3. The wallet owner can create addresses when needed, by running his wallet and using the provided APIs.
 4. Users can use the addresses created by wallet to receive coins, in mining or transfer.
 5. The wallet owner can run the wallet to synchronize the blockchain data when needed, and the wallet will communicate with the connected (running) ABEC node, scan the blockchain and update its local database.
@@ -44,9 +44,10 @@ In this process, the program would check whether the data directory exists, and 
 
 ## 2.2 Configure and run a wallet 
 The command `abewallet --create` will exit after creating a wallet. 
-To run and use the wallet, the user need to make a minimal configuration in **abewallet.conf**.
-mamely, (1) configure the **rpcuser** and **rpcpass**, which enable wallet to be accessed by RPC connection,
-and (2) configure a local or remote ABEC node, which will enable a wallet to synchronize data from blockchain.
+To run and use the wallet, the user need to make a minimal configuration in **abewallet.conf**,
+namely, configure the **rpcuser** and **rpcpass**, which enable wallet to be accessed by RPC APIs.
+In addition, if a local or remote ABEC node is configured as below, when the wallet is started, 
+it will synchronize blockchain from the configured ABEC node.
 
 The configuration items for connecting ABEC node include:
 
@@ -70,16 +71,17 @@ After the configuration, a user can start the wallet by the command
 
 `abewallet --walletpass=[public passphrase] `
 
-**NOTE:** At this moment, we provide only online-wallet, i.e., the users must configure a local or remote ABEC node, 
-and when the wallet is started, it will connect the configured ABEC node and catch up the blockchain and stay sychronized.
-Later, we may provide offline wallet.
+**NOTE:** If the ABEC node is not configured, the running wallet will allow API accesses except creating transaction, 
+but the returned results may be inaccurate, since they are based on the local database of wallet rather than the latest blockchain.
+But the owner can make use of this offline feature to create addresses safely. 
+In the future, we may provide creating transaction offline.
 
 ## 2.3 Create more addresses
 
 When a wallet is running, the wallet owner can run the following two commands to generate a new address:
 - unlock the wallet with private passphrase 
 
-  `abewalletctl --rpcuser=[rpc username] --rpcpass=[rpc password] --wallet walletpassphrase [private passphrase] [timeout]` 
+  `abewalletctl --rpcuser=[rpc username] --rpcpass=[rpc password] --wallet unlockwallet [private passphrase] [timeout]` 
 
   **NOTE: *timeout* is in seconds.**
 
@@ -114,11 +116,9 @@ Wallet provides the following APIs for querying wallet status and blockchain inf
 | listunspentabe         | null                    | print all mature txos which belong wallet       |
 | listspendbutunminedabe | null                    | print all unconfirmed txos which belong wallet  |
 | listspentandminedabe   | null                    | print all confirmed txos which belong wallet    |
-| generateaddressabe     | null                    | derive a new address                            |
-| walletpassphrase       | passphrase<br />timeout | keep the wallet unlocked for a specified time   |
 
 ## 2.6 Create Transfer Transactions
-When a wallet is running, the wallet owner can unlock the wallet using private passphrase and then use the following API to create a transfer transaction, which is automatically sent to the connected ABEC node, and then is broadcast to Abelian network.
+When a wallet is running, the owner can unlock the wallet using private passphrase and then use the following API to create a transfer transaction, which is automatically sent to the connected ABEC node, and then is broadcast to Abelian network.
 
 **Note: during the transaction generation, a new address may be generated to store change. When the transaction is created successfully, the *max index number* of address in the wallet would be returned.**
 
@@ -128,10 +128,10 @@ When a wallet is running, the wallet owner can unlock the wallet using private p
 
 ## 2.7 Restore a wallet
 
-A user can recover his/her wallet through the mnemonic words saved when generating the wallet. 
-The process is basically the same as creating a wallet, except that choose to `have seed` and then input the crypto version and mnemonic words (for seed). 
+A user can recover/restore his wallet through the crypto version and mnemonic words saved when generating the wallet. 
+The process is basically the same as creating a wallet, except that choose to **have existing seed** and then input the crypto version and mnemonic words (for seed). 
 
-**Note that the user is also required to input the max index number of recovery addresses.** 
+**Note that the user is also required to input the max index number of addresses to recovered.** 
 
 **During the process of generating addresses and creating transactions, the output will always show the current max index of address in wallet, and users shall notice this information.** 
 
