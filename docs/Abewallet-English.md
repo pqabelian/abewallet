@@ -1,6 +1,7 @@
 # 1. Overview
 
 The main purpose of Abewallet is to manage the Transaction Output (also known as **TXO** or **coin**) of the wallet owner.
+
 The main functions are as follows:
 
 - Create new wallet
@@ -11,12 +12,13 @@ The main functions are as follows:
 
 The architecture is as follows:
 
-Through the connection and interaction with the Abelian blockchain node (referred to as **ABEC node**), the wallet can query and scan the data in blockchain.
-The wallet owner's coins and corresponding keys, as well as related data (e.g., transactions) are stored in wallet database.
-In addition, wallet manages the address, and provides the function of creating transaction.
-In other words, wallet obtains data from blockchain, store only the data related to its owner, and produce (transfer) transactions for the Abelian system.
+![System Design](images/System Design.jpg)
 
-![System Design](images/System Design.svg)
+- Through the connection and interaction with the Abelian blockchain node (referred to as **ABEC node**), the wallet can query and scan the data in blockchain.
+- The wallet owner's coins and corresponding keys, as well as related data (e.g., transactions) are stored in wallet database.
+- In addition, wallet manages the address, and provides the function of creating transaction.
+
+In words, wallet obtains data from blockchain, store only the data related to its owner, and produce (transfer) transactions for the Abelian system.
 
 # 2. Functionalities (User Interface)
 Abewallet provides the following functionalities to the users:
@@ -27,13 +29,13 @@ Abewallet provides the following functionalities to the users:
 4. Users can use the addresses created by wallet to receive coins, in mining or transfer.
 5. The wallet owner can run the wallet to synchronize the blockchain data when needed, and the wallet will communicate with the connected (running) ABEC node, scan the blockchain and update its local database.
 6. Users can query wallet status and information through the provided APIs.
-7. When needed, a user can restore his wallet, by using the 24-words mnemonic. 
+7. When needed, a user can restore his/her wallet, by using the crypto version and  the 24-words mnemonic. 
 
 ## 2.1 Create a new wallet
 A user can create a wallet by command `./abewallet --create`. 
 In this process, the program would check whether the data directory exists, and exit if so, otherwise enter the process of creating a wallet, the overall process is shown in the figure.
 
-![Create Wallet](./images/Create New Wallet (User Interface).svg)
+![Create Wallet](./images/Create New Wallet for User Interface.svg)
 
 - require the user to enter a **private passphrase** and a **public passphrase**. 
 - output **crypto version** and **mnemonic words** and remind users to store them in a safe place.
@@ -87,11 +89,12 @@ When a wallet is running, the wallet owner can run the following two commands to
 
   An **instance address** and its **index number** will be returned.
 
-**NOTE:** We use the term `Instance Address` to denote the addresses that users use to receive coins in mining or transfer.
+**NOTE:** We use the term `instance Address` to denote the addresses that users use to receive coins in mining or transfer.
 
 
 ## 2.4 Synchronize the blockchain
 Suppose the configuration items for connecting ABEC node are configured.
+
 When the wallet is started using the following command with **public passphrase**, 
 the wallet will establish a connection with the configured ABEC node, and synchronize the data from the node and fetch the coins belonging to the wallet.
 
@@ -115,8 +118,7 @@ Wallet provides the following APIs for querying wallet status and blockchain inf
 | walletpassphrase       | passphrase<br />timeout | keep the wallet unlocked for a specified time   |
 
 ## 2.6 Create Transfer Transactions
-When a wallet is running, the wallet owner can unlock the wallet using private passphrase and then use the following API 
-to create a transfer transaction, which is automatically sent to the connected ABEC node, and then is broadcast to Abelian network.
+When a wallet is running, the wallet owner can unlock the wallet using private passphrase and then use the following API to create a transfer transaction, which is automatically sent to the connected ABEC node, and then is broadcast to Abelian network.
 
 **Note: during the transaction generation, a new address may be generated to store change. When the transaction is created successfully, the *max index number* of address in the wallet would be returned.**
 
@@ -126,12 +128,14 @@ to create a transfer transaction, which is automatically sent to the connected A
 
 ## 2.7 Restore a wallet
 
-A user can recover his wallet through the mnemonic words saved when generating the wallet. 
+A user can recover his/her wallet through the mnemonic words saved when generating the wallet. 
 The process is basically the same as creating a wallet, except that choose to `have seed` and then input the crypto version and mnemonic words (for seed). 
-Note that the user is also required to input the **max index number** of recovery addresses. 
-During `create address` and `create transaction`, the output will always show `the current max index of address in wallet`, and users shall notice this information. 
 
-![Create Wallet](./images/Restore Wallet (User Interface).svg)
+**Note that the user is also required to input the max index number of recovery addresses.** 
+
+**During the process of generating addresses and creating transactions, the output will always show the current max index of address in wallet, and users shall notice this information.** 
+
+![Create Wallet](./images/Restore Wallet for User Interface.svg)
 
 
 # 3. Detailed Designs
