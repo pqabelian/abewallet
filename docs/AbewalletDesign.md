@@ -140,44 +140,34 @@ The process is basically the same as creating a wallet, except that choose to **
 
 # 3. Detailed Designs
 
-## 3.1 The start of abewallet
-The ***package abewallet (actually abewallet/abewallet.go)*** is the entrance of the wallet.
-- It loads configuration and parse command line, and if the configuration file does not exist, it will initialize that.
-- The command and options to start abewallet are list as the table below:
-  - `abewallet --create`
-    - start wallet create procedure
-      - initial and fill the database
-      - generate the initial (first) address
-      - scan the genesis block
-  - `abewallet --walletpass=[public passphrase]`
-    - connect the ABEC node to synchronize the blockchain data
-    - start the RPC server to listen the client's requests
-  
-## 3.2 Wallet Create and Address Create
+## 3.1 Wallet Create and Address Generate
 
-#### 3.2.1 Wallet create
+### 3.2.1 Wallet Create
 
 The command `abewallet --create` will trigger the procedure of wallet creation.
 If the wallet database exits, it will just show the warning information and stop.
 Otherwise, it will 
 
-- request the user to input ***private passphrase*** and ***public passphrase***. 
+- request the user to input **private passphrase** and **public passphrase**. 
 
 - request the user to input whether he has a seed to restore the wallet. To create a new wallet, here the user should input 'No'.
 
-- generate the ***seed***, then convert the seed to **mnemonic words** with the wordlists defiend in package `wordlists`.
+- generate the **seed**, then convert the seed to **mnemonic words** with the word lists defined in package `abeallet.wordlists`.
 
-- create buckets relevant to address and transaction. More details would be described below【 TODO reference】.
+- create `buckets` relevant to address and transaction. More details would be described below in 3.?.?【 TODO reference】.
+  
+  **NOTE:** we are using ??? as the underlying database, where buckets are used to store the data in the form of (name, value) pair.
 
-- create the protecting key as shown in the following figure:
+- create the protecting keys as shown in the following figure:
 
   ![Manage Key](images/Manage Key.svg)
 
-  - Three crypto keys are generated randomly with the help of package `snacl` i.e. **public crypto key**, **private crypto key** and **seed crypto key**, which will be used to protect the wallet data.
+  - Three crypto keys are generated randomly with the help of package `abewallet.snacl` i.e. **public crypto key**, **private crypto key** and **seed crypto key**, 
+  which will be used to protect/encrypt the wallet data.
 
   - A **public master key** is generated from public passphrase, and is used to protect the public crypto key.
 
-  - A **private master key** is generated from private passphrase, and is used to protect the private crypto key and **seed crypto key**.
+  - A **private master key** is generated from private passphrase, and is used to protect the private crypto key and seed crypto key.
 
 - derive the seeds as shown in the following figure:
 
@@ -187,80 +177,96 @@ Otherwise, it will
 
     The seed will be wiped while these two derived seeds will be stored in the wallet for address generation. 
 
-- intialize the **index number** of address to be 0.
+- initialize the **index number** of address to be 0.
 
 - generate the initial (first) instance address according to the following process of address generation.
 
-#### 3.2.2 Address generate
+### 3.2.2 Address Generate
 
-To generate an **instance address**, the **instance seed** is firstly generated from the two derived seed and index number. More specifically, the instance seed consists of  two parts, the first part is generated from (the address key, the index number) , and the second part is generated from (the value key seed, the index number). Then, the instance seed is used to call the package `abec/abecrypto`, and an instance address and its keys are returned. The keys includes **crypto address spend key**, **crypto address serial number key**, and **crypto view key**. The index number will be incremented by 1.
+To generate an **instance address**, an **instance seed** is firstly generated from the two derived seeds and the current index number. 
+More specifically, the instance seed consists of two parts, where the first part is generated from (the address key, the index number) and the second part is generated from (the value key seed, the index number). 
+Then, the instance seed is used to call the package `abec.abecrypto`, and an instance address and its keys are returned. 
+The keys include **crypto address spend key**, **crypto address serial number key**, and **crypto view key**. The index number will be incremented by 1.
 
-- **instance address** is used as receiving address such as as mining address or a receiving address for transfer transactions.
-- **crypto address spend key** is used to transfer money, the key would be require when generating the transaction.
-- **crypto address serial number key** is used to generate an unique identification for each transaction ouptut in abelian blockchain.
-- **crypto view key** is used to view the currency information in the transaction output.
+- **instance address** is used as the mining address in mining or receiving address in transfer transactions.
+- **crypto address spend key** is used to transfer coins, which is used to unlock the wallet before creating transfer transactions.
+- **crypto address serial number key** is used to generate a unique identifier for each TXO in Abelian blockchain.
+- **crypto view key** is used to view the currency information in the transaction output. 
 
-NOTE: the address key seed and the value key seed is protected by the seed crypto key; the instance addres, the crypto address serial number key, and the crypto view key are protected by public crypto key; and the crypto address spend key is protected  by private crypto key. 
+NOTE: the address key seed and the value key seed is protected by the seed crypto key;
+the crypto address spend key is protected  by private crypto key;
+the instance address, the crypto address serial number key and the crypto view key are protected by public crypto key.
 
-## 3.3 Configure the connected ABEC node
 
-Overview of connection architecture :
+## 3.3 Configure the Wallet
+
+The overview of the connection between wallet and ABEC node, 
+as well as the services to users is shown as the following figure.
 
 ![Module Connection](images/Module Connection.svg)
 
-- At the node side, port 8667 as the default port is used to listen for connections and requests, at the same time,  `rpcuser`, `rpcpass`  and certificates is used to  provide identity authentication capabilities.
+- At the ABEC node side, port 8667 is used as the default port to listen for connections and requests.
+  At the same time,  `rpcuser`, `rpcpass`  and certificates are used to  provide identity authentication capabilities.
 
-- At the wallet side, port 8665 as the default port is used to listen for connections and requests, at the same time,  `username`, `password`  and certificates is used to  provide identity authentication capabilities. At the same time,  the wallet establishes a connection with the node by specifying `abecrpcuser` and `abecrpcpass`, IP address of abelian node, and its certificate.
+- At the wallet side, to connect a local or remote ABEC node, `abecrpcuser`, `abecrpcpass`, `abecrpcconnect` (for IP address and port (default 8667) of ABEC node), and `abeccafile` (for certificate of ABEC node) need to be configured.
+  On the other side, to provide services to users, wallet must make a minimum configure to configure `rpcuser` and `rpcpass`, which will be used to access the services of wallet.
+  The port 8665 is used as the default port to listen for connections and requests to wallet.
 
-​	NOTE: 
+- At the user side, the owner can access the wallet service by using `rpcuser`, `rpcpass`, `rpcserver` (for IP address and port (default 8665) of wallet), and `rpccert`. For example, by **abewalletctl** or **??** connection.
 
-- If `abecrpcuser` and `abecrpcpass` are not specified, the `username` and  `password` are used instead.【TODO discard the bind, rename abecrpcuser/abecrpcpass to abecrpcuser/abecrpcpass, username/password to rpcuser/rpcpass 】
+**NOTE:** 
+- If the wallet runs in the same machine with the ABEC node, the `abeccafile` and `abecrpcconnect` don't need to be configured.
 
-- If the wallet runs in the same machine, the `cafile` and `rpcconnect` don't need to be set.
-
-At the abewalletctl side, the command terminal establishes a connection with the wallet by specifying `rpcuser`, `rpcpass` , IP address of wallet, and its certificate.
-
-NOTE: 
-
-- If the abewalletctl runs in the same machine, the `rpccert` and `rpcserver` don't need to be set.
+- If the abewalletctl runs in the same machine with the wallet, the `walletrpccert` and `walletrpcserver` don't need to be set.
 
 ## 3.4 Synchronize the blockchain
 
-By scanning the blockchain data, the wallet checks and stores the transaction outputs (also known as  **TXO**s or **coin**s). According to the characteristics of the blockchain, it can be divided into two basic processes, one is that a block is connected to the block chain, and the other is that the block is disconnected from the block chain. Both cases can be realized through the notification mechanism of the node. 
+For a wallet configured to connect a ABEC node, when it is started, it will 
+establish a connection with the configured ABEC node, 
+synchronize the blockchain from the ABEC node to find and fetch its coins and related data,
+and keep synchronized with the ABEC node by receiving and handling the notifications of block-connect and block-disconnect.
+With the synchronized data, the wallet maintains the following data, including
 
-The database of wallet is design as follow:
+- the addresses of the wallet, 
+- the TXO/coin set of the wallet, 
+- the transactions generating or consuming the related to the wallet,
+- and the deduced and related data, such as balance, **txo-ring**, etc. 
 
-The wallet status includes the address and derivative status associated with the wallet, the wallet balance, the TXO set associated with the wallet and its status, the transaction related to the wallet and its status.
+The database of wallet is designed as follows:
+- Wallet maintains an **index number** as a status of the wallet, and each address is generated and associated with a unique index number.
+- Wallet maintains the TXOs associated with the addresses, which are divided into the following five categories, to support query and transfer.
+  - **immature coinbase TXO set**, storing the wallet's TXOs which are generated by coinbase transaction but still unspendable.
+  NOTE: In Abelian, a TXO/coin generated by coinbase transaction in block with height `h` will become matured/spendable only when the blockchain height `H` satisfies `H - h/3 >= 200`. 
+  - **immature transfer TXO set**, storing the wallet's TXOs which are generated by transfer transaction but still unspendable.
+    NOTE: In Abelian, a TXO/coin generated by transfer transaction in block with height `h` will become matured/spendable only when the blockchain height `H` satisfies `H/3 - h/3 >= 1`.
+  - **mature txo set**, storing the spendable TXOs.
+  - **unconfirmed txo set**, storing the TXOs that have been spent but the corresponding transactions have not been confirmed/mined by current synchronized blockchain.
+  - **confirmed txo set**, storing the wallet's TXOs that have been spent and confirmed.
+- Wallet maintains the **UTXORing**s of the wallet, where each UTXORing consists of a set of TXOs, one or more of which belong to the wallet.
+  NOTE: In Abelian, each input of a transfer transaction is a (TXORing, serial number) pair.
 
-- Wallet maintains a index number and derives a new address according to the indexer number
-- Wallet maintains balance information to support query
-- The wallet maintains the wallet-related TXO set, which divides the TXO into five categories and supports querying different status TXO set.
-
-  - Immature coinbase txo set
-  - immature transfer txo set
-  - mature txo set
-  - unconfirmed txo set
-  - confirmed txo set
-
-In the wallet, the processing logic for the block chain transaction output is as follows:
+In the wallet, the processing procedure is described as below:
 
 ![Store UTXOs](images/Store UTXOs.svg)
 
-- When receiving a block connection notification, do the following process:
-  - traverse all the output. If it belongs to you, record it and put it in two buckets (immature coinbase and immature transfer).
-    - generate block output records for quick rollback
-    - Update immature balance and total balance
-  - deal with all input and generate block input records for quick rollback
-  - move matured output/unconfirmed output-> confirmed output
+- When receiving a block-connect notification, fetch the block, and do the following process for each transaction:
+  - traverse all the outputs. 
+  If a TXO belongs to the wallet (depending on the TXO and the wallet's addresses and keys), 
+  then put the TXO into either immature coinbase TXO bucket or the immature transfer TXO bucket.
+    - generate `block output` records **(TODO: name the database/structure explicitly)** for quick rollback
+    - update immature balance and total balance
+  - deal with all inputs. Identify the consumed TXOs and move the corresponding TXO from matured TXO bucket/unconfirmed TXO bucket into confirmed TXO bucket.
+    - generate `block input` records for quick rollback
     - update mature balance, unconfirmed balance and total balance
     - update UTXORing
-  - process coinbase maturity, check immatured coinbase data, and update immature coinbase balances and mature balances
-  - check whether the current height is a special height, and if so, generate a ring.
-    - update and record RingDetail and UTXORing for relevant transaction output
+  - process maturity.
+    - move the new mature coinbase/transfer TXO to the mature bucket, and update the immature coinbase/transfer balance and mature balance.
+  - check whether the current height is a special height, and if so, generate new UTXORings.
+    - update and record `RingDetail` and `UTXORing` for relevant transaction output
     - update immature transfer balances, mature balances
   - storing block and balance
-- When receiving a block disconnection notification, do the following process:
-  - check whether the current height is a special height, and if so, pull out the blockoutput of the three blocks that generate the ring.
+- When receiving a block-disconnect notification, do the following process:
+  - check whether the current height is a special height, and if so, pull out the `blockoutput` of the three blocks that generate the ring.
     - for the corresponding things in mature/unconfirmed/confirmed transaction output, modify their RingHash to zero, and move to immatured transfer output respectively
     - for the only modified utxo.RingHash in immatured coinbase, put it back to immature coinbase output
     - update immature/mature/unconfirm/total balance
@@ -268,13 +274,13 @@ In the wallet, the processing logic for the block chain transaction output is as
   - fetch the block output record, and delete them from immature trasfer/coinbase output, meanwhile update immature/total balance
   - fetch the block input record, update/delete UTXORing, and compare new and old UTXORing
     - put the corresponding UTXO of the serial number back into the mature output, then update mature/total balance
-  - change the coinbase of the corresponding block to immature coinbase, and update the freezed/spendable balance
+  - change the coinbase of the corresponding block to immature coinbase, and update the frozen(**??**)/spendable balance
 
 ## 3.5 Query wallet information
 
 To support querying wallet information, the wallet provides external service through RPC Server, the default port is 8667.
 
-All services are provided by registering the command name and the corresponding handler in package `rpc/legacyrpc`.
+All services are provided by registering the command name and the corresponding handler in package `abewallet.rpc.legacyrpc`.
 
 | Name                   | Paramters               | Description                                                  |
 | ---------------------- | ----------------------- | ------------------------------------------------------------ |
@@ -287,29 +293,35 @@ All services are provided by registering the command name and the corresponding 
 | listspendbutunminedabe | null                    | print all unconfirmed txos which belong wallet by directly querying the sub-bucket in database |
 | listspentandminedabe   | null                    | print all confirmed txos which belong wallet by directly querying the sub-bucket in database |
 | generateaddressabe     | null                    | derive a new address by derived seed and index number which increase by 1 after completion |
-| walletpassphrase       | passphrase<br />timeout | keep the wallet unlocked for a specified time                |
 
-## 3.6 Transfe Transaction Create
 
-Wallet maintains wallet-related transactions. Transactions are divided into three categories. Inquiry transactions will be supported later.
+## 3.6 Transfer Transaction Create
 
-- unconfirmed
-- confirmed
-- invalid
+Wallet maintains the wallet-related transactions, including those generated coins to wallet and those consumed wallet's coins.
+According to the status, the transactions are divided into three categories:
+- unconfirmed transactions
+- confirmed transactions
+- invalid transactions
 
-The transaction status flow is shown in the following figure, more details can be found below.：
+Inquiry transactions will be supported later.
+
+The transaction status flow is described below as shown in the following figure, from the perspectives of the following three events
 
 - When creating a transaction, 
-- When receiving a block connection notification,
-- When receiving a block disconnection notification,
+- When receiving a block-connect notification,
+- When receiving a block-disconnect notification,
 
-![Store Transaction](./images/Store Transaction - English.svg)
+![Store Transaction](./images/Store Transaction.svg)
 
 The logic of managing transaction:
 
-- When creating a transaction, if the transaction is sucessful ,the record it as unconfirmed. Otherwise, if the transaction is rejected due to doule spending, so the conflicted transaction would be queried and record.
-- When receiving a block connection notification,
-  - check UTXORing, update UTXORing if it is related to wallet, and execute following processes
+- When creating a transaction, if the operation is successful, then record it as unconfirmed. 
+  Otherwise, if the transaction is rejected due to double-spending, then query and fetch the conflicted transaction from the ABEC node and store it locally in unconfirmed status.
+- When receiving a block connection notification, fetch the block, and perform the following procedure for each transaction in the block:
+  - check whether the transaction is in `unconfirmed transaction bucket` or `invalid transaction` bucket
+    - If yes, move the corresponding transaction to `conformed transaction bucket`, and move all conflict transactions to `invalid transaction bucket`
+    - **todo**: is it possible that there is no such a transaction or in `confirmed transaction bucket`, but the transaction is related to the wallet's coins?
+  - check UTXORings in wallet. If a  and update UTXORing if the it is related to wallet, and execute following processes
     - [TXO] compare UTXORing's wallet-related SerialNumbers and the Serial Numbers consumed in the transaction, indicating that the TXO in the wallet is related. Then change the corresponding TXO status to confirmed
     - [Tx] if there is no record of trading Tx in the wallet, put it in the wallet and record the status as confirmed. If the transaction Tx is in the wallet, regardless of whether the status is uncofirmed or invalid, modify their status to confirmed.
     - [Relevant Txs] the Unconfirmed Transactions mapped to according to the relevant TXO above. Indicates that the transaction is dependent on the TXO and changes its status to invalid
@@ -322,15 +334,21 @@ The logic of managing transaction:
 
 ## 3.7 Restore Wallet
 
-Users can recover their wallets through the mnemonic words saved when generating the wallet. The process is basically the same as creating a wallet. As shown in the following figure, the main difference is that the user converts active input mnemonic words into seeds rather than automatically created by the wallet and then into mnemonic words. Note that the user is required to input the **max index number** of recovery addresses.
+A user can restore his wallet through the crypto version and mnemonic words saved when generating the wallet. 
+The process is basically the same as creating a new wallet, except choosing to `have seed` to restore the wallet.
+Note that the user is required to input the **max index number** of recovery addresses.
 
-The wallet initializes the database, converts the mnemonic words to the seed, and complete the process of seed derivation, and initialize index at the same time and generates addresses based on the maximum number of addresses entered, and  the genesis block will be scanned.
+The wallet initializes the database, converts the mnemonic words to the seed, 
+and complete the process of seed derivation, 
+and initialize index at the same time and generates addresses based on the maximum number of addresses entered, 
+and the genesis block will be scanned.**todo**: genesis block is hardcoded in wallet?
 
-![Create Wallet](./images/Restore Wallet (User Interface).svg)
+![Create Wallet](./images/Restore Wallet for User Interface.svg)
 
 
 
 # 4. Package and its dependence
+**todo**
 
 An overview of package dependencies is shown in the following figure:
 
