@@ -106,16 +106,16 @@ the wallet will establish a connection with the configured ABEC node, and synchr
 
 Wallet provides the following APIs for querying wallet status and blockchain information:
 
-| Name              | Paramters               | Description                                     |
-|-------------------| ----------------------- |-------------------------------------------------|
-| getbalances       | null                    | get the balance information of the wallet onwer |
-| getbestblockhash  | null                    | get the best synced block hash information      |
-| help              | null                    | print the help information                      |
-| listallutxo       | null                    | print all txos which belong wallet              |
-| listimmaturetxo   | null                    | print all immature txos which belong wallet     |
-| listspendabletxo  | null                    | print all mature txos which belong wallet       |
-| listuncofirmedtxo | null                    | print all unconfirmed txos which belong wallet  |
-| listspenttxo      | null                    | print all confirmed txos which belong wallet    |
+| Name              | Paramters               | Description                                              |
+|-------------------| ----------------------- |----------------------------------------------------------|
+| getbalances       | null                    | get the balance information of the wallet onwer          |
+| getbestblockhash  | null                    | get the best synced block hash information               |
+| help              | null                    | print the help information                               |
+| listallutxo       | null                    | print all txos which belong wallet                       |
+| listimmaturetxo   | null                    | print all immature txos which belong wallet              |
+| listspendabletxo  | null                    | print all mature txos which belong wallet                |
+| listuncofirmedtxo | null                    | print all spent but unconfirmed txos which belong wallet |
+| listspenttxo      | null                    | print all spent and confirmed txos which belong wallet   |
 
 ## 2.6 Create Transfer Transactions
 When a wallet is running, the owner can unlock the wallet using private passphrase and then use the following API to create a transfer transaction, which is automatically sent to the connected ABEC node, and then is broadcast to Abelian network.
