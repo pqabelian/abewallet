@@ -106,16 +106,16 @@ the wallet will establish a connection with the configured ABEC node, and synchr
 
 Wallet provides the following APIs for querying wallet status and blockchain information:
 
-| Name                   | Paramters               | Description                                     |
-| ---------------------- | ----------------------- |-------------------------------------------------|
-| getbalancesabe         | null                    | get the balance information of the wallet onwer |
-| getbestblockhash       | null                    | get the best synced block hash information      |
-| help                   | null                    | print the help information                      |
-| listallutxoabe         | null                    | print all txos which belong wallet              |
-| listunmaturedabe       | null                    | print all immature txos which belong wallet     |
-| listunspentabe         | null                    | print all mature txos which belong wallet       |
-| listspendbutunminedabe | null                    | print all unconfirmed txos which belong wallet  |
-| listspentandminedabe   | null                    | print all confirmed txos which belong wallet    |
+| Name              | Paramters               | Description                                     |
+|-------------------| ----------------------- |-------------------------------------------------|
+| getbalances       | null                    | get the balance information of the wallet onwer |
+| getbestblockhash  | null                    | get the best synced block hash information      |
+| help              | null                    | print the help information                      |
+| listallutxo       | null                    | print all txos which belong wallet              |
+| listimmaturetxo   | null                    | print all immature txos which belong wallet     |
+| listspendabletxo  | null                    | print all mature txos which belong wallet       |
+| listuncofirmedtxo | null                    | print all unconfirmed txos which belong wallet  |
+| listspenttxo      | null                    | print all confirmed txos which belong wallet    |
 
 ## 2.6 Create Transfer Transactions
 When a wallet is running, the owner can unlock the wallet using private passphrase and then use the following API to create a transfer transaction, which is automatically sent to the connected ABEC node, and then is broadcast to Abelian network.
@@ -152,15 +152,15 @@ Otherwise, it will
 
 - request the user to input whether he has a seed to restore the wallet. To create a new wallet, here the user should input 'No'.
 
-- generate the **seed**, then convert the seed to **mnemonic words** with the word lists defined in package `abeallet.wordlists`.
+- generate the **seed**, then convert the seed to **mnemonic words** with the word lists defined in package `abeallet/wordlists`.
 
 - create `buckets` relevant to address and transaction. More details would be described below in 3.?.?【 TODO reference】.
   
-  **NOTE:** we are using ??? as the underlying database, where buckets are used to store the data in the form of (name, value) pair.
+  **NOTE:** we are using `BoltDB` as the underlying database, where buckets are used to store the data in the form of (name, value) pair.
 
 - create the protecting keys as shown in the following figure:
 
-  ![Manage Key](images/Manage Key.svg)
+  ![Manage Key](./images/Manage Key.svg)
 
   - Three crypto keys are generated randomly with the help of package `abewallet.snacl` i.e. **public crypto key**, **private crypto key** and **seed crypto key**, 
   which will be used to protect/encrypt the wallet data.
@@ -171,7 +171,7 @@ Otherwise, it will
 
 - derive the seeds as shown in the following figure:
 
-  ![Derive Address](images/Derive Address.svg)
+  ![Derive Address](./images/Derive Address.svg)
 
   - A **address key seed** and a **value key seed** are generated from the **seed**.
 
@@ -185,7 +185,7 @@ Otherwise, it will
 
 To generate an **instance address**, an **instance seed** is firstly generated from the two derived seeds and the current index number. 
 More specifically, the instance seed consists of two parts, where the first part is generated from (the address key, the index number) and the second part is generated from (the value key seed, the index number). 
-Then, the instance seed is used to call the package `abec.abecrypto`, and an instance address and its keys are returned. 
+Then, the instance seed is used to call the package `abec/abecrypto`, and an instance address and its keys are returned. 
 The keys include **crypto address spend key**, **crypto address serial number key**, and **crypto view key**. The index number will be incremented by 1.
 
 - **instance address** is used as the mining address in mining or receiving address in transfer transactions.
@@ -212,12 +212,12 @@ as well as the services to users is shown as the following figure.
   On the other side, to provide services to users, wallet must make a minimum configure to configure `rpcuser` and `rpcpass`, which will be used to access the services of wallet.
   The port 8665 is used as the default port to listen for connections and requests to wallet.
 
-- At the user side, the owner can access the wallet service by using `rpcuser`, `rpcpass`, `rpcserver` (for IP address and port (default 8665) of wallet), and `rpccert`. For example, by **abewalletctl** or **??** connection.
+- At the user side, the owner can access the wallet service by using `rpcuser`, `rpcpass`, `rpcserver` (for IP address and port (default 8665) of wallet), and `rpccert`. For example, by **abewalletctl** or **http/websocket**  connection.
 
 **NOTE:** 
 - If the wallet runs in the same machine with the ABEC node, the `abeccafile` and `abecrpcconnect` don't need to be configured.
 
-- If the abewalletctl runs in the same machine with the wallet, the `walletrpccert` and `walletrpcserver` don't need to be set.
+- If the abewalletctl runs in the same machine with the wallet, the `rpccert` and `rpcserver` don't need to be set.
 
 ## 3.4 Synchronize the blockchain
 
