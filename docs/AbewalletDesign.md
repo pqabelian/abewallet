@@ -35,7 +35,7 @@ Abewallet provides the following functionalities to the users:
 A user can create a wallet by command `./abewallet --create`. 
 In this process, the program would check whether the data directory exists, and exit if so, otherwise enter the process of creating a wallet, the overall process is shown in the figure.
 
-![Create Wallet](./images/Create New Wallet for User Interface.svg)
+![Create Wallet](https://github.com/abesuite/abewallet/blob/master/docs/images/Create%20New%20Wallet%20for%20User%20Interface.svg)
 
 - require the user to enter a **private passphrase** and a **public passphrase**. 
 - output **crypto version** and **mnemonic words** and remind users to store them in a safe place.
@@ -135,7 +135,7 @@ The process is basically the same as creating a wallet, except that choose to **
 
 **During the process of generating addresses and creating transactions, the output will always show the current max index of address in wallet, and users shall notice this information.** 
 
-![Create Wallet](./images/Restore Wallet for User Interface.svg)
+![Create Wallet](https://github.com/abesuite/abewallet/blob/master/docs/images/Restore%20Wallet%20for%20User%20Interface.svg)
 
 
 # 3. Detailed Designs
@@ -160,7 +160,7 @@ Otherwise, it will
 
 - create the protecting keys as shown in the following figure:
 
-  ![Manage Key](./images/Manage Key.svg)
+  ![Manage Key](https://github.com/abesuite/abewallet/blob/master/docs/images/Manage%20Key.svg)
 
   - Three crypto keys are generated randomly with the help of package `abewallet.snacl` i.e. **public crypto key**, **private crypto key** and **seed crypto key**, 
   which will be used to protect/encrypt the wallet data.
@@ -171,7 +171,7 @@ Otherwise, it will
 
 - derive the seeds as shown in the following figure:
 
-  ![Derive Address](./images/Derive Address.svg)
+  ![Derive Address](https://github.com/abesuite/abewallet/blob/master/docs/images/Derive%20Address.svg)
 
   - A **address key seed** and a **value key seed** are generated from the **seed**.
 
@@ -203,7 +203,7 @@ the instance address, the crypto address serial number key and the crypto view k
 The overview of the connection between wallet and ABEC node, 
 as well as the services to users is shown as the following figure.
 
-![Module Connection](images/Module Connection.svg)
+![Module Connection](https://github.com/abesuite/abewallet/blob/master/docs/images/Module%20Connection.svg)
 
 - At the ABEC node side, port 8667 is used as the default port to listen for connections and requests.
   At the same time,  `rpcuser`, `rpcpass`  and certificates are used to  provide identity authentication capabilities.
@@ -247,12 +247,12 @@ The database of wallet is designed as follows:
 
 In the wallet, the processing procedure is described as below:
 
-![Store UTXOs](images/Store UTXOs.svg)
+![Store UTXOs](https://github.com/abesuite/abewallet/blob/master/docs/images/Store%20UTXOs.svg)
 
 - When receiving a block-connect notification, fetch the block, and do the following process for each transaction:
   - traverse all the outputs. 
-  If a TXO belongs to the wallet (depending on the TXO and the wallet's addresses and keys), 
-  then put the TXO into either immature coinbase TXO bucket or the immature transfer TXO bucket.
+    If a TXO belongs to the wallet (depending on the TXO and the wallet's addresses and keys), 
+    then put the TXO into either immature coinbase TXO bucket or the immature transfer TXO bucket.
     - generate `block output` records **(TODO: name the database/structure explicitly)** for quick rollback
     - update immature balance and total balance
   - deal with all inputs. Identify the consumed TXOs and move the corresponding TXO from matured TXO bucket/unconfirmed TXO bucket into confirmed TXO bucket.
@@ -311,7 +311,7 @@ The transaction status flow is described below as shown in the following figure,
 - When receiving a block-connect notification,
 - When receiving a block-disconnect notification,
 
-![Store Transaction](./images/Store Transaction.svg)
+![Store Transaction](https://github.com/abesuite/abewallet/blob/master/docs/images/Store%20Transaction.svg)
 
 The logic of managing transaction:
 
@@ -343,7 +343,7 @@ and complete the process of seed derivation,
 and initialize index at the same time and generates addresses based on the maximum number of addresses entered, 
 and the genesis block will be scanned.**todo**: genesis block is hardcoded in wallet?
 
-![Create Wallet](./images/Restore Wallet for User Interface.svg)
+![Create Wallet](https://github.com/abesuite/abewallet/blob/master/docs/images/Restore%20Wallet%20for%20User%20Interface.svg)
 
 
 
@@ -352,7 +352,7 @@ and the genesis block will be scanned.**todo**: genesis block is hardcoded in wa
 
 An overview of package dependencies is shown in the following figure:
 
-![package dependency](/Users/ouyangshiyong/go/src/github.com/abesuite/abewallet/docs/images/package dependency.svg)
+![package dependency](https://github.com/abesuite/abewallet/blob/master/docs/images/package%20dependency.svg)
 
 ## Abewallet
 
@@ -446,15 +446,15 @@ Manage the address with the help of the database, provide the function of addres
 
 - Key management
 
-  ![Manage Key](images/Manage Key.jpg)
+  ![Manage Key](https://github.com/abesuite/abewallet/blob/master/docs/images/Manage%20Key.svg)
 
 - Address derivation and Derivation Status
 
-  ![Derive Address](images/Derive Address.jpg)
+  ![Derive Address](https://github.com/abesuite/abewallet/blob/master/docs/images/Derive%20Address.svg)
 
 - Address management
 
-  ![Manage Address](images/Manage Address.svg)
+  ![Manage Address](https://github.com/abesuite/abewallet/blob/master/docs/images/Manage%20Address.svg)
 
 
 
@@ -487,7 +487,7 @@ Walletdb provides storage capabilities for wallet tracking UTXO-related data, in
 The database storage design is as follows：
 
 - Data and state management storage:
-  ![Address Mange](images/Manage Data.svg)
+  ![Address Mange](https://github.com/abesuite/abewallet/blob/master/docs/images/Manage%20Data.svg)
 
 
 
