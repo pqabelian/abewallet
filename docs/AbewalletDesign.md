@@ -12,7 +12,7 @@ The main functions are as follows:
 
 The architecture is as follows:
 
-![System Design](images/System Design.jpg)
+![System Design](./images/System Design.jpg)
 
 - Through the connection and interaction with the Abelian blockchain node (referred to as **ABEC node**), the wallet can query and scan the data in blockchain.
 - The wallet owner's coins and corresponding keys, as well as related data (e.g., transactions) are stored in wallet database.
