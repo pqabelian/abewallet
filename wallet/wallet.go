@@ -965,6 +965,38 @@ func (w *Wallet) FetchSpentAndConfirmedTXOSet() ([]wtxmgr.SpentConfirmedTXO, err
 	})
 	return utxos, err
 }
+func (w *Wallet) FetchConfirmedTxHashs() ([]*chainhash.Hash, error) {
+	var txHashs []*chainhash.Hash
+	var err error
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		txHashs, err = w.TxStore.ConfirmedTxHashes(txmgrNs)
+		return err
+	})
+	return txHashs, err
+}
+
+func (w *Wallet) FetchUnconfirmedTxHashs() ([]*chainhash.Hash, error) {
+	var txHashs []*chainhash.Hash
+	var err error
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		txHashs, err = w.TxStore.UnminedTxHashes(txmgrNs)
+		return err
+	})
+	return txHashs, err
+}
+
+func (w *Wallet) FetchInvalidTxHashs() ([]*chainhash.Hash, error) {
+	var txHashs []*chainhash.Hash
+	var err error
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		txHashs, err = w.TxStore.InvalidTxHashes(txmgrNs)
+		return err
+	})
+	return txHashs, err
+}
 
 func (w *Wallet) FetchDetailedUtxos(confirms int32) (string, error) {
 	var details []string
@@ -1318,12 +1350,17 @@ func (w *Wallet) AddressNumber() (uint64, error) {
 }
 
 // NewAddressKey returns a new address for a wallet.
-func (w *Wallet) NewAddressKey() (uint64, []byte, error) {
+func (w *Wallet) NewAddressKey() ([]byte, uint64, []byte, error) {
 	var numberOrder uint64
 	var addr []byte
+	var netID []byte
 	err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-		addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 		var err error
+		addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+		netID, err = w.Manager.FetchNetID(addrmgrNs)
+		if err != nil {
+			return err
+		}
 		seedEnc, err := w.Manager.FetchSeedEnc(addrmgrNs)
 		if err != nil {
 			return err
@@ -1369,9 +1406,9 @@ func (w *Wallet) NewAddressKey() (uint64, []byte, error) {
 		return err
 	})
 	if err != nil {
-		return 0, nil, err
+		return nil, 0, nil, err
 	}
-	return numberOrder, addr, nil
+	return netID, numberOrder, addr, nil
 }
 
 // newChangeAddress returns a new change address for the wallet.
@@ -1436,6 +1473,13 @@ func (w *Wallet) SendOutputs(outputDescs []*abecrypto.AbeTxOutputDesc,
 	// it means that the transaction is created successful
 	txHash, err := w.reliablyPublishTransaction(createdTx.Tx, label)
 	if err != nil {
+		// the wallet would fetch the transaction
+		// due to error double spending
+		// And then insert the transaction into database
+		// But current do nothing? TODO 202207
+		if _, ok := err.(*ErrDoubleSpend); ok {
+			// do nothing
+		}
 		return nil, err
 	}
 

@@ -424,6 +424,12 @@ func (m *Manager) FetchSeedEnc(ns walletdb.ReadBucket) ([]byte, error) {
 	defer m.mtx.Unlock()
 	return fetchSeedEnc(ns)
 }
+func (m *Manager) FetchNetID(ns walletdb.ReadBucket) ([]byte, error) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	return fetchNetID(ns)
+}
+
 func (m *Manager) PutAddressKeysEnc(ns walletdb.ReadWriteBucket, addrKey []byte, valueSecretKeyEnc,
 	addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc []byte) error {
 	m.mtx.Lock()
@@ -1356,6 +1362,10 @@ func Create(ns walletdb.ReadWriteBucket,
 			return maybeConvertDbError(err)
 		}
 		err = putSeedStatus(ns, startSeedStatus)
+		if err != nil {
+			return maybeConvertDbError(err)
+		}
+		err = putNetID(ns, []byte{chainParams.PQRingCTID})
 		if err != nil {
 			return maybeConvertDbError(err)
 		}

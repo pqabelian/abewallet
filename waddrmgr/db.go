@@ -235,6 +235,7 @@ var (
 	// derived seed and its used status
 	seedKeyName    = []byte("seed")
 	seedStatusName = []byte("sdcnt")
+	netIDName      = []byte("netid")
 
 	// masterHDPubName is the name of the key that stores the master HD
 	// public key. This key is encrypted with the master public crypto
@@ -510,7 +511,11 @@ func fetchAddressKeyEnc(ns walletdb.ReadBucket, addrKey []byte) ([]byte, []byte,
 // fetchMasterHDKeys attempts to fetch both the master HD private and public
 // keys from the database. If this is a watch only wallet, then it's possible
 // that the master private key isn't stored.
+func putNetID(ns walletdb.ReadWriteBucket, netID []byte) error {
+	bucket := ns.NestedReadWriteBucket(mainBucketName)
 
+	return bucket.Put(netIDName, netID)
+}
 func putSeedEnc(ns walletdb.ReadWriteBucket, seedEnc []byte) error {
 	bucket := ns.NestedReadWriteBucket(mainBucketName)
 
@@ -522,6 +527,10 @@ func putSeedEnc(ns walletdb.ReadWriteBucket, seedEnc []byte) error {
 		}
 	}
 	return nil
+}
+func fetchNetID(ns walletdb.ReadBucket) ([]byte, error) {
+	bucket := ns.NestedReadBucket(mainBucketName)
+	return bucket.Get(netIDName), nil
 }
 func fetchSeedEnc(ns walletdb.ReadBucket) ([]byte, error) {
 	bucket := ns.NestedReadBucket(mainBucketName)

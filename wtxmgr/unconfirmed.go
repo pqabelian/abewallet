@@ -75,3 +75,33 @@ func (s *Store) unconfirmedTxHashes(ns walletdb.ReadBucket) ([]*chainhash.Hash, 
 	})
 	return hashes, err
 }
+func (s *Store) ConfirmedTxHashes(ns walletdb.ReadBucket) ([]*chainhash.Hash, error) {
+	return s.confirmedTxHashes(ns)
+}
+func (s *Store) confirmedTxHashes(ns walletdb.ReadBucket) ([]*chainhash.Hash, error) {
+	var hashes []*chainhash.Hash
+	err := ns.NestedReadBucket(bucketConfirmedTx).ForEach(func(k, v []byte) error {
+		hash := new(chainhash.Hash)
+		err := readRawUnminedHash(k, hash)
+		if err == nil {
+			hashes = append(hashes, hash)
+		}
+		return err
+	})
+	return hashes, err
+}
+func (s *Store) InvalidTxHashes(ns walletdb.ReadBucket) ([]*chainhash.Hash, error) {
+	return s.invalidTxHashes(ns)
+}
+func (s *Store) invalidTxHashes(ns walletdb.ReadBucket) ([]*chainhash.Hash, error) {
+	var hashes []*chainhash.Hash
+	err := ns.NestedReadBucket(bucketInvalidTx).ForEach(func(k, v []byte) error {
+		hash := new(chainhash.Hash)
+		err := readRawUnminedHash(k, hash)
+		if err == nil {
+			hashes = append(hashes, hash)
+		}
+		return err
+	})
+	return hashes, err
+}

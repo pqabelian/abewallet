@@ -784,11 +784,11 @@ func (w *Wallet) txPqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc, mi
 			copyedVskBytes,
 			selectedTxos[i].Amount))
 	}
-	usedCntNum := uint64(-1)
+	usedCntNum := ^uint64(0)
 	if needChangeFlag {
 		var addrBytes []byte
 		// fetch a change address for the change
-		usedCntNum, addrBytes, err = w.NewAddressKey()
+		_, usedCntNum, addrBytes, err = w.NewAddressKey()
 		if err != nil {
 			return nil, err
 		}

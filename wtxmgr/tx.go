@@ -813,7 +813,7 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 		if err != nil {
 			return err
 		}
-		err = putUnconfirmedBalance(wtxmgrNs, spendableBal)
+		err = putUnconfirmedBalance(wtxmgrNs, unconfirmedBal)
 		if err != nil {
 			return err
 		}
@@ -833,9 +833,60 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 		if err != nil {
 			return err
 		}
-	}
 
-	// add this function to unminedAbe bucket,and notify the index has spent
+		flag := false
+		relevantTxs := existsRawReleventTxs(wtxmgrNs, k)
+		if len(relevantTxs) != 0 {
+			offset := 0
+			for offset+chainhash.HashSize <= len(relevantTxs) {
+				if bytes.Equal(rec.Hash[:], relevantTxs[offset:offset+chainhash.HashSize]) {
+					flag = true
+					err = deleteRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+					if err != nil {
+						return err
+					}
+					err = deleteRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+					if err != nil {
+						return err
+					}
+					offset += chainhash.HashSize
+					continue
+				}
+				// other conflict transaction should be marked invalid
+				conflictTx := existsRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+				if len(conflictTx) != 0 {
+					err = deleteRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+					if err != nil {
+						return err
+					}
+					err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
+					if err != nil {
+						return err
+					}
+				}
+				conflictTx = existsRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+				if len(conflictTx) != 0 {
+					err = deleteRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+					if err != nil {
+						return err
+					}
+					err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
+					if err != nil {
+						return err
+					}
+				}
+				offset += chainhash.HashSize
+			}
+		}
+		if !flag {
+			relevantTxs = append(relevantTxs, rec.Hash[:]...)
+			err = putRawRelevantTxs(wtxmgrNs, k, relevantTxs)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	// add this transaction to unminedAbe bucket,and notify the index has spent
 	v, err := valueTxRecord(rec)
 	if err != nil {
 		return err
@@ -901,7 +952,7 @@ func (s *Store) InsertGenesisBlock(ns walletdb.ReadWriteBucket, block *BlockReco
 		if err != nil {
 			return err
 		}
-		if valid && v != 0 {
+		if valid {
 			amt := abeutil.Amount(v)
 			log.Infof("(Coinbase) Find my txo at block height %d (hash %s) with value %v", block.Height, block.Hash, amt.ToABE())
 			immatureCBBal += amt
@@ -1057,34 +1108,12 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 	for i := 1; i < len(block.TxRecords); i++ { // trace every tx in this block
 		txi := block.TxRecords[i].MsgTx
 		txhash := txi.TxHash()
-		// delete from unconfirmed transaction set
-		err = deleteRawUnconfirmedTx(txMgrNs, txhash[:])
-		if err != nil {
-			return err
-		}
-		err = deleteRawInvalidTx(txMgrNs, txhash[:])
-		if err != nil {
-			return err
-		}
-
-		// and move to confirmed transaction set
-		txRecord, err := NewTxRecordFromMsgTx(&txi, block.RecvTime)
-		if err != nil {
-			return err
-		}
-		v, err := valueTxRecord(txRecord)
-		if err != nil {
-			return err
-		}
-		err = putRawConfirmedTx(txMgrNs, txhash[:], v)
-		if err != nil {
-			return err
-		}
 
 		// traverse all the inputs of a transaction
 		// 1. add serial number to corresponding ring if needed
 		// 2. move consumed txo to spentconfirmed bucket
 		// TODO:need to check for this section
+		trFlag := false
 		for j := 0; j < len(txi.TxIns); j++ {
 			// compute the ring hash of each input in every transaction to match the utxo in the database
 			ringHash := txi.TxIns[j].PreviousOutPointRing.Hash()
@@ -1094,7 +1123,8 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 				// TODO(abe):why in the bucket utxo ring, this entry which is keyed by ringHash is not found?
 				key, value := existsUTXORing(txMgrNs, ringHash) // if not, check it the bucket
 				if value == nil {                               //if not, it means that this input do not belong to wallet
-					// if there is no value in utxo ring bucket. the pointed output must not belong to the wallet
+					// if there is no value in utxo ring bucket.
+					// the pointed output must not belong to the wallet
 					continue
 				}
 				// if the ring hash exists in the database, fetch the utxo ring
@@ -1124,6 +1154,50 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 				u = oldU.Copy()
 			}
 
+			for index, sn := range u.OriginSerialNumberes {
+				if bytes.Equal(sn, serialNumber) {
+					// it means that the consumed input belongs wallet
+					trFlag = true
+					// add it's hash to relevant bucket
+					k := canonicalOutPointAbe(u.TxHashes[index], index)
+					txiHash := txi.TxHash()
+					// read relevant transaction hashes
+					relevantTxs := existsRawReleventTxs(txMgrNs, k)
+					flag := false
+					if len(relevantTxs) != 0 {
+						offset := 0
+						for offset+chainhash.HashSize <= len(relevantTxs) {
+							if bytes.Equal(txiHash[:], relevantTxs[offset:offset+chainhash.HashSize]) {
+								// it means that the wallet know the transaction
+								flag = true
+								offset += chainhash.HashSize
+								continue
+							}
+							conflictTx := existsRawUnconfirmedTx(txMgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+							if len(conflictTx) != 0 {
+								err = deleteRawUnconfirmedTx(txMgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+								if err != nil {
+									return err
+								}
+								err = putRawInvalidTx(txMgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
+								if err != nil {
+									return err
+								}
+							}
+							offset += chainhash.HashSize
+						}
+					}
+					if !flag {
+						// add relevant relation: outpoint(txHash,Index) -> TxHash
+						relevantTxs = append(relevantTxs, txiHash[:]...)
+						err = putRawRelevantTxs(txMgrNs, k, relevantTxs)
+						if err != nil {
+							return err
+						}
+					}
+					break
+				}
+			}
 			blockInputs.serialNumbers[ringHash] = append(blockInputs.serialNumbers[ringHash], serialNumber)
 			// copy a new utxoring and update the new utxoring variable
 			err := u.AddGotSerialNumber(serialNumber)
@@ -1135,6 +1209,37 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			relevantUTXORings[ringHash] = u
 		}
 
+		if trFlag {
+			// delete from unconfirmed transaction set if exist
+			if len(existsRawUnconfirmedTx(txMgrNs, txhash[:])) != 0 {
+				err = deleteRawUnconfirmedTx(txMgrNs, txhash[:])
+				if err != nil {
+					return err
+				}
+			}
+			// delete from invalid transaction set if exist
+			if len(existsRawUnconfirmedTx(txMgrNs, txhash[:])) != 0 {
+				err = deleteRawInvalidTx(txMgrNs, txhash[:])
+				if err != nil {
+					return err
+				}
+			}
+
+			// and move to confirmed transaction set
+			txRecord, err := NewTxRecordFromMsgTx(&txi, block.RecvTime)
+			if err != nil {
+				return err
+			}
+			v, err := valueTxRecord(txRecord)
+			if err != nil {
+				return err
+			}
+			err = putRawConfirmedTx(txMgrNs, txhash[:], v)
+			if err != nil {
+				return err
+			}
+
+		}
 		// update the utxo ring bucket
 		for k, v := range relevantUTXORings {
 			//  move relevant utxo from unspentTXO or SpentButUnmined bucket to SpentConfirmTXO
@@ -1142,37 +1247,8 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 				// the outpoint owned by wallet is spent
 				// it should be move to spent and confirmed bucket
 				if v.IsMy[t] && v.Spent[t] {
+					// it means that the transaction related to wallet
 					k := canonicalOutPointAbe(v.TxHashes[t], v.OutputIndexes[t])
-
-					// meanwhile, move other conflict transaction to invalid
-					flag := false
-					txiHash := txi.TxHash()
-					relevantTxs := existsRawReleventTxs(txMgrNs, k)
-					if len(relevantTxs) != 0 {
-						offset := 0
-						if bytes.Equal(txiHash[:], relevantTxs[offset:offset+chainhash.HashSize]) {
-							flag = true
-						}
-
-						conflictTx := existsRawUnconfirmedTx(txMgrNs, relevantTxs[offset:offset+chainhash.HashSize])
-						if len(conflictTx) != 0 {
-							err = deleteRawUnconfirmedTx(txMgrNs, relevantTxs[offset:offset+chainhash.HashSize])
-							if err != nil {
-								return err
-							}
-							err = putRawInvalidTx(txMgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
-							if err != nil {
-								return err
-							}
-						}
-					}
-					if flag {
-						relevantTxs = append(relevantTxs, txiHash[:]...)
-						err = putRawRelevantTxs(txMgrNs, k, relevantTxs)
-						if err != nil {
-							return err
-						}
-					}
 					// if this transaction is create by the wallet, the outpoint should be stored
 					// in spentButUnmined bucket.
 					// But if the wallet is restored, the outpoint should be in the matured bucket
@@ -1215,7 +1291,6 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 							return err
 						}
 					}
-
 				}
 			}
 
@@ -1897,33 +1972,25 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						output.Index = 0xFF
 						output.RingSize = 0
 						k := canonicalOutPointAbe(outpoint.TxHash, outpoint.Index)
-						// move the relevant transactions into invalid
+						// mark the all relevant transaction invalid
 						relevantTxs := existsRawReleventTxs(wtxmgrNs, k)
 						if len(relevantTxs) != 0 {
 							offset := 0
-							relevantTx := existsRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
-							if len(relevantTx) != 0 {
-								err = deleteRawUnconfirmedTx(wtxmgrNs, relevantTx[offset:offset+chainhash.HashSize])
-								if err != nil {
-									return err
+							for offset+chainhash.HashSize <= len(relevantTxs) {
+								conflictTx := existsRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+								if len(conflictTx) != 0 {
+									err = deleteRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+									if err != nil {
+										return err
+									}
+									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
+									if err != nil {
+										return err
+									}
 								}
-								err = putRawInvalidTx(wtxmgrNs, relevantTx[offset:offset+chainhash.HashSize], relevantTx)
-								if err != nil {
-									return err
-								}
-							} else {
-								relevantTx = existsRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
-								err = deleteRawConfirmedTx(wtxmgrNs, relevantTx[offset:offset+chainhash.HashSize])
-								if err != nil {
-									return err
-								}
-								err = putRawInvalidTx(wtxmgrNs, relevantTx[offset:offset+chainhash.HashSize], relevantTx)
-								if err != nil {
-									return err
-								}
+								offset += chainhash.HashSize
 							}
 						}
-
 						err = deleteMaturedOutput(wtxmgrNs, k)
 						if err != nil {
 							return err
@@ -1950,34 +2017,25 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						output.Index = 0xFF
 						output.RingSize = 0
 						k := canonicalOutPointAbe(outpoint.TxHash, outpoint.Index)
-
-						// move the relevant transactions into invalid
+						// mark the all relevant transaction invalid
 						relevantTxs := existsRawReleventTxs(wtxmgrNs, k)
 						if len(relevantTxs) != 0 {
 							offset := 0
-							relevantTx := existsRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
-							if len(relevantTx) != 0 {
-								err = deleteRawUnconfirmedTx(wtxmgrNs, relevantTx[offset:offset+chainhash.HashSize])
-								if err != nil {
-									return err
+							for offset+chainhash.HashSize <= len(relevantTxs) {
+								conflictTx := existsRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+								if len(conflictTx) != 0 {
+									err = deleteRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+									if err != nil {
+										return err
+									}
+									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
+									if err != nil {
+										return err
+									}
 								}
-								err = putRawInvalidTx(wtxmgrNs, relevantTx[offset:offset+chainhash.HashSize], relevantTx)
-								if err != nil {
-									return err
-								}
-							} else {
-								relevantTx = existsRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
-								err = deleteRawConfirmedTx(wtxmgrNs, relevantTx[offset:offset+chainhash.HashSize])
-								if err != nil {
-									return err
-								}
-								err = putRawInvalidTx(wtxmgrNs, relevantTx[offset:offset+chainhash.HashSize], relevantTx)
-								if err != nil {
-									return err
-								}
+								offset += chainhash.HashSize
 							}
 						}
-
 						err = deleteSpentButUnminedTXO(wtxmgrNs, k)
 						if err != nil {
 							return err
@@ -2014,34 +2072,36 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						output.Index = 0xFF
 						output.RingSize = 0
 						k := canonicalOutPointAbe(outpoint.TxHash, outpoint.Index)
-
-						// move the relevant transactions into invalid
+						// mark the all relevant transaction invalid
 						relevantTxs := existsRawReleventTxs(wtxmgrNs, k)
 						if len(relevantTxs) != 0 {
 							offset := 0
-							relevantTx := existsRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
-							if len(relevantTx) != 0 {
-								err = deleteRawUnconfirmedTx(wtxmgrNs, relevantTx[offset:offset+chainhash.HashSize])
-								if err != nil {
-									return err
+							for offset+chainhash.HashSize <= len(relevantTxs) {
+								conflictTx := existsRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+								if len(conflictTx) != 0 {
+									err = deleteRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+									if err != nil {
+										return err
+									}
+									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
+									if err != nil {
+										return err
+									}
 								}
-								err = putRawInvalidTx(wtxmgrNs, relevantTx[offset:offset+chainhash.HashSize], relevantTx)
-								if err != nil {
-									return err
+								conflictTx = existsRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+								if len(conflictTx) != 0 {
+									err = deleteRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+									if err != nil {
+										return err
+									}
+									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
+									if err != nil {
+										return err
+									}
 								}
-							} else {
-								relevantTx = existsRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
-								err = deleteRawConfirmedTx(wtxmgrNs, relevantTx[offset:offset+chainhash.HashSize])
-								if err != nil {
-									return err
-								}
-								err = putRawInvalidTx(wtxmgrNs, relevantTx[offset:offset+chainhash.HashSize], relevantTx)
-								if err != nil {
-									return err
-								}
+								offset += chainhash.HashSize
 							}
 						}
-
 						err = deleteSpentConfirmedTXO(wtxmgrNs, k)
 						if err != nil {
 							return err
@@ -2085,7 +2145,7 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 			}
 		}
 
-		//fetch all output in current block, and delete it
+		// fetch all output in current block, and delete it
 		// When the block height hit the condition, the output would be in Immature Bucket base on above operation
 
 		var blockHash *chainhash.Hash
@@ -2125,6 +2185,8 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 				immatureTRBal -= amt
 				balance -= amt
 				log.Infof("(Rollback) Transfer txo in %d (hash %s) with value %v: immature -> null", i, blockHash, amt.ToABE())
+				// TODO(abe) 20220728 whether remove all transaction whose inputs contains this output or not?
+				// when the output is removed from wallet.
 			}
 			err = deleteImmaturedOutput(wtxmgrNs, keysWithHeight[i])
 			if err != nil {
@@ -2142,32 +2204,6 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 				for k := 0; k < len(utxoRings[j].IsMy); k++ {
 					if utxoRings[j].IsMy[k] && !utxoRings[j].Spent[k] { // is my but not spend
 						key := canonicalOutPointAbe(utxoRings[j].TxHashes[k], utxoRings[j].OutputIndexes[k])
-
-						// move the relevant transactions into unconfirmed
-						relevantTxs := existsRawReleventTxs(wtxmgrNs, key)
-						if len(relevantTxs) != 0 {
-							offset := 0
-							relevantTx := existsRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
-							if len(relevantTx) != 0 {
-								err = deleteRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
-								if err != nil {
-									return err
-								}
-							} else {
-								relevantTx = existsRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
-								err = deleteRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
-								if err != nil {
-									return err
-								}
-							}
-							if len(relevantTx) != 0 {
-								err = putRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], relevantTx)
-								if err != nil {
-									return err
-								}
-							}
-						}
-
 						scoutput, err := fetchSpentConfirmedTXO(wtxmgrNs, utxoRings[j].TxHashes[k], utxoRings[j].OutputIndexes[k])
 						err = putRawMaturedOutput(wtxmgrNs, key, valueUnspentTXO(scoutput.FromCoinBase, scoutput.Version, scoutput.Height, scoutput.Amount, scoutput.Index, scoutput.GenerationTime, scoutput.RingHash, scoutput.RingSize))
 						if err != nil {
@@ -2181,6 +2217,37 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						} else {
 							log.Infof("(Rollback) Spent transfer txo in %d (hash %s) with value %v: -> spendable", i, blockHash, amt.ToABE())
 						}
+						outpint := canonicalOutPointAbe(scoutput.TxOutput.TxHash, scoutput.TxOutput.Index)
+						// mark the all relevant transaction invalid
+						relevantTxs := existsRawReleventTxs(wtxmgrNs, outpint)
+						if len(relevantTxs) != 0 {
+							offset := 0
+							for offset+chainhash.HashSize <= len(relevantTxs) {
+								conflictTx := existsRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+								if len(conflictTx) != 0 {
+									err = deleteRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+									if err != nil {
+										return err
+									}
+									err = putRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
+									if err != nil {
+										return err
+									}
+								}
+								conflictTx = existsRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+								if len(conflictTx) != 0 {
+									err = deleteRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+									if err != nil {
+										return err
+									}
+									err = putRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
+									if err != nil {
+										return err
+									}
+								}
+								offset += chainhash.HashSize
+							}
+						}
 						err = deleteSpentConfirmedTXO(wtxmgrNs, key)
 						if err != nil {
 							return err
@@ -2193,31 +2260,6 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 					for m, sn := range u.OriginSerialNumberes {
 						if bytes.Equal(sn, ss[j][k]) && utxoRings[j].IsMy[m] && !utxoRings[j].Spent[m] {
 							key := canonicalOutPointAbe(utxoRings[j].TxHashes[m], utxoRings[j].OutputIndexes[m])
-
-							relevantTxs := existsRawReleventTxs(wtxmgrNs, key)
-							if len(relevantTxs) != 0 {
-								offset := 0
-								relevantTx := existsRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
-								if len(relevantTx) != 0 {
-									err = deleteRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
-									if err != nil {
-										return err
-									}
-								} else {
-									relevantTx = existsRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
-									err = deleteRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
-									if err != nil {
-										return err
-									}
-								}
-								if len(relevantTx) != 0 {
-									err = putRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], relevantTx)
-									if err != nil {
-										return err
-									}
-								}
-							}
-
 							scoutput, err := fetchSpentConfirmedTXO(wtxmgrNs, utxoRings[j].TxHashes[m], utxoRings[j].OutputIndexes[m])
 							err = putRawMaturedOutput(wtxmgrNs, key, valueUnspentTXO(scoutput.FromCoinBase, scoutput.Version, scoutput.Height, scoutput.Amount, scoutput.Index, scoutput.GenerationTime, scoutput.RingHash, scoutput.RingSize))
 							if err != nil {
@@ -2230,6 +2272,37 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 								log.Infof("(Rollback) Coinbase txo spent in %d (hash %s) with value %v: -> spendable", i, blockHash, amt.ToABE())
 							} else {
 								log.Infof("(Rollback) Transfer txo spent in %d (hash %s) with value %v: -> spendable", i, blockHash, amt.ToABE())
+							}
+							outpint := canonicalOutPointAbe(scoutput.TxOutput.TxHash, scoutput.TxOutput.Index)
+							// mark the all relevant transaction invalid
+							relevantTxs := existsRawReleventTxs(wtxmgrNs, outpint)
+							if len(relevantTxs) != 0 {
+								offset := 0
+								for offset+chainhash.HashSize <= len(relevantTxs) {
+									conflictTx := existsRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+									if len(conflictTx) != 0 {
+										err = deleteRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+										if err != nil {
+											return err
+										}
+										err = putRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
+										if err != nil {
+											return err
+										}
+									}
+									conflictTx = existsRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+									if len(conflictTx) != 0 {
+										err = deleteRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+										if err != nil {
+											return err
+										}
+										err = putRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
+										if err != nil {
+											return err
+										}
+									}
+									offset += chainhash.HashSize
+								}
 							}
 							err = deleteSpentConfirmedTXO(wtxmgrNs, key)
 							if err != nil {
@@ -2274,7 +2347,37 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						spendableBal -= amt
 						immatureCBBal += amt
 						log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: spendable -> immature", i-maturity-ii, currentBlockHash, amt.ToABE())
-
+						outpint := canonicalOutPointAbe(output.TxOutput.TxHash, output.TxOutput.Index)
+						// mark the all relevant transaction invalid
+						relevantTxs := existsRawReleventTxs(wtxmgrNs, outpint)
+						if len(relevantTxs) != 0 {
+							offset := 0
+							for offset+chainhash.HashSize <= len(relevantTxs) {
+								conflictTx := existsRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+								if len(conflictTx) != 0 {
+									err = deleteRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+									if err != nil {
+										return err
+									}
+									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
+									if err != nil {
+										return err
+									}
+								}
+								conflictTx = existsRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+								if len(conflictTx) != 0 {
+									err = deleteRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+									if err != nil {
+										return err
+									}
+									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
+									if err != nil {
+										return err
+									}
+								}
+								offset += chainhash.HashSize
+							}
+						}
 						err = deleteMaturedOutput(wtxmgrNs, canonicalOutPointAbe(outpoint.TxHash, outpoint.Index))
 						if err != nil {
 							return err
@@ -2289,6 +2392,37 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						immatureCBBal += amt
 						log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: spent but unmined -> immature", i-maturity-ii, currentBlockHash, amt.ToABE())
 
+						outpint := canonicalOutPointAbe(output.TxOutput.TxHash, output.TxOutput.Index)
+						// mark the all relevant transaction invalid
+						relevantTxs := existsRawReleventTxs(wtxmgrNs, outpint)
+						if len(relevantTxs) != 0 {
+							offset := 0
+							for offset+chainhash.HashSize <= len(relevantTxs) {
+								conflictTx := existsRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+								if len(conflictTx) != 0 {
+									err = deleteRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+									if err != nil {
+										return err
+									}
+									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
+									if err != nil {
+										return err
+									}
+								}
+								conflictTx = existsRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+								if len(conflictTx) != 0 {
+									err = deleteRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+									if err != nil {
+										return err
+									}
+									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
+									if err != nil {
+										return err
+									}
+								}
+								offset += chainhash.HashSize
+							}
+						}
 						err = deleteSpentButUnminedTXO(wtxmgrNs, canonicalOutPointAbe(outpoint.TxHash, outpoint.Index))
 						if err != nil {
 							return err
@@ -2312,7 +2446,37 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						unconfirmedBal += amt
 						balance += amt
 						log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: spent -> unconfirmed", i-maturity-ii, currentBlockHash, amt.ToABE())
-
+						outpint := canonicalOutPointAbe(output.TxOutput.TxHash, output.TxOutput.Index)
+						// mark the all relevant transaction invalid
+						relevantTxs := existsRawReleventTxs(wtxmgrNs, outpint)
+						if len(relevantTxs) != 0 {
+							offset := 0
+							for offset+chainhash.HashSize <= len(relevantTxs) {
+								conflictTx := existsRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+								if len(conflictTx) != 0 {
+									err = deleteRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+									if err != nil {
+										return err
+									}
+									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
+									if err != nil {
+										return err
+									}
+								}
+								conflictTx = existsRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+								if len(conflictTx) != 0 {
+									err = deleteRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+									if err != nil {
+										return err
+									}
+									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
+									if err != nil {
+										return err
+									}
+								}
+								offset += chainhash.HashSize
+							}
+						}
 						err = deleteSpentConfirmedTXO(wtxmgrNs, canonicalOutPointAbe(outpoint.TxHash, outpoint.Index))
 						if err != nil {
 							return err

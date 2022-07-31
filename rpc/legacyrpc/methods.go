@@ -104,7 +104,11 @@ var rpcHandlers = map[string]struct {
 	"listunspentabe":         {handler: listUnspentAbe},
 	"listspentbutunminedabe": {handler: listSpentButUnminedAbe},
 	"listspentandminedabe":   {handler: listSpentAndMinedAbe},
-	"lockunspent":            {handler: lockUnspent},
+	"listconfirmedtxs":       {handler: listConfirmedTxs},
+	"listinvalidtxs":         {handler: listInvalidTxs},
+	"listunconfirmedtxs":     {handler: listUnconfirmedTxs},
+
+	"lockunspent": {handler: lockUnspent},
 	//"sendfrom":               {handlerWithChain: sendFrom},
 	//"sendmany":               {handler: sendMany},
 	"sendtoaddressesabe": {handler: sendToAddressesAbe},
@@ -790,6 +794,7 @@ func listSpentButUnminedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, er
 	t := utxoset(res)
 	sort.Sort(&t)
 	return res, nil
+
 }
 func listSpentAndMinedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	_ = icmd.(*abejson.ListSpentAndMinedAbeCmd)
@@ -810,6 +815,42 @@ func listSpentAndMinedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, erro
 	}
 	t := utxoset(res)
 	sort.Sort(&t)
+	return res, nil
+}
+func listConfirmedTxs(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	_ = icmd.(*abejson.ListConfirmedTxsCmd)
+	confirmedTxHashs, err := w.FetchConfirmedTxHashs()
+	if err != nil {
+		return nil, err
+	}
+	res := make([]string, len(confirmedTxHashs))
+	for i := 0; i < len(confirmedTxHashs); i++ {
+		res[i] = confirmedTxHashs[i].String()
+	}
+	return res, nil
+}
+func listUnconfirmedTxs(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	_ = icmd.(*abejson.ListUnconfirmedTxsCmd)
+	unconfirmedTxHashs, err := w.FetchUnconfirmedTxHashs()
+	if err != nil {
+		return nil, err
+	}
+	res := make([]string, len(unconfirmedTxHashs))
+	for i := 0; i < len(unconfirmedTxHashs); i++ {
+		res[i] = unconfirmedTxHashs[i].String()
+	}
+	return res, nil
+}
+func listInvalidTxs(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	_ = icmd.(*abejson.ListInvalidTxsCmd)
+	invalidTxHashs, err := w.FetchInvalidTxHashs()
+	if err != nil {
+		return nil, err
+	}
+	res := make([]string, len(invalidTxHashs))
+	for i := 0; i < len(invalidTxHashs); i++ {
+		res[i] = invalidTxHashs[i].String()
+	}
 	return res, nil
 }
 
@@ -1142,17 +1183,18 @@ func generateAddressAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 
 	for i := 0; i < number; i++ {
 		var address []byte
-		numberOrder[i], address, err = w.NewAddressKey()
+		var netID []byte
+		netID, numberOrder[i], address, err = w.NewAddressKey()
 		if err != nil {
 			return nil, err
 		}
-		addresses[i] = make([]byte, len(address)+1+32)
+		addresses[i] = make([]byte, len(netID)+len(address)+32)
 		// TODO: How to know the active net?
-		addresses[i][0] = chaincfg.MainNetParams.PQRingCTID
-		copy(addresses[i][1:], address)
+		copy(addresses[i][:len(netID)], netID)
+		copy(addresses[i][len(netID):], address)
 		// generate the hash of (abecrypto.CryptoSchemePQRINGCT || serialized address)
-		hash := chainhash.DoubleHashB(addresses[i][:len(address)+1])
-		copy(addresses[i][len(address)+1:], hash[:])
+		hash := chainhash.DoubleHashB(addresses[i][:len(address)+len(netID)])
+		copy(addresses[i][len(address)+len(netID):], hash[:])
 	}
 	type tt struct {
 		No_  uint64 `json:"No,omitempty"`
