@@ -99,14 +99,14 @@ var rpcHandlers = map[string]struct {
 	//"listsinceblock": {handlerWithChain: listSinceBlock},
 	//"listtransactions":       {handler: listTransactions},
 	//"listunspent":            {handler: listUnspent},
-	"listallutxoabe":         {handler: listAllUTXOAbe},
-	"listunmaturedabe":       {handler: listUnmaturedUTXOAbe},
-	"listunspentabe":         {handler: listUnspentAbe},
-	"listspentbutunminedabe": {handler: listSpentButUnminedAbe},
-	"listspentandminedabe":   {handler: listSpentAndMinedAbe},
-	"listconfirmedtxs":       {handler: listConfirmedTxs},
-	"listinvalidtxs":         {handler: listInvalidTxs},
-	"listunconfirmedtxs":     {handler: listUnconfirmedTxs},
+	"listallutxoabe":        {handler: listAllUTXOAbe},
+	"listimmaturetxoabe":    {handler: listUnmaturedUTXOAbe},
+	"listmaturetxoabe":      {handler: listUnspentAbe},
+	"listunconfirmedtxoabe": {handler: listSpentButUnminedAbe},
+	"listconfirmedtxoabe":   {handler: listSpentAndMinedAbe},
+	"listconfirmedtxs":      {handler: listConfirmedTxs},
+	"listinvalidtxs":        {handler: listInvalidTxs},
+	"listunconfirmedtxs":    {handler: listUnconfirmedTxs},
 
 	"lockunspent": {handler: lockUnspent},
 	//"sendfrom":               {handlerWithChain: sendFrom},
@@ -123,7 +123,7 @@ var rpcHandlers = map[string]struct {
 	//"verifymessage":          {handler: verifyMessage},
 	"walletlock": {handler: walletLock},
 	//"freshen":                {handler: freshen},
-	"walletpassphrase":       {handler: walletPassphrase},
+	"walletunlock":           {handler: walletPassphrase},
 	"walletpassphrasechange": {handler: walletPassphraseChange},
 
 	// Reference implementation methods (still unimplemented)
@@ -1229,7 +1229,10 @@ func sendToAddressesAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 	}
 
 	//	todo: the fee policy
-	feeSatPerKb := txrules.DefaultRelayFeePerKb // todo: AliceBobScorpio, should use the feeSatPerKb received from abec
+	feeSatPerKb, err := abeutil.NewAmountAbe(*cmd.FeeSpecified) // todo: AliceBobScorpio, should use the feeSatPerKb received from abec
+	if err != nil {
+		return nil, err
+	}
 	scaleToFeeSatPerKb := *cmd.ScaleToFeeSatPerKb
 	feeSpecified, err := abeutil.NewAmountAbe(*cmd.FeeSpecified)
 	if err != nil {

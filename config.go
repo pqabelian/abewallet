@@ -8,7 +8,6 @@ import (
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abewallet/internal/cfgutil"
 	"github.com/abesuite/abewallet/netparams"
-	"github.com/abesuite/abewallet/wallet"
 	"github.com/abesuite/abewallet/wordlists"
 	"github.com/jessevdk/go-flags"
 	"io"
@@ -265,11 +264,11 @@ func parseAndSetDebugLevels(debugLevel string) error {
 func loadConfig() (*config, []string, error) {
 	// Default config.
 	cfg := config{
-		DebugLevel:             defaultLogLevel,
-		ConfigFile:             cfgutil.NewExplicitString(defaultConfigFile),
-		AppDataDir:             cfgutil.NewExplicitString(defaultAppDataDir),
-		LogDir:                 defaultLogDir,
-		WalletPass:             wallet.InsecurePubPassphrase,
+		DebugLevel: defaultLogLevel,
+		ConfigFile: cfgutil.NewExplicitString(defaultConfigFile),
+		AppDataDir: cfgutil.NewExplicitString(defaultAppDataDir),
+		LogDir:     defaultLogDir,
+		//WalletPass:             wallet.InsecurePubPassphrase,
 		CAFile:                 cfgutil.NewExplicitString(""),
 		RPCKey:                 cfgutil.NewExplicitString(defaultRPCKeyFile),
 		RPCCert:                cfgutil.NewExplicitString(defaultRPCCertFile),
