@@ -1229,10 +1229,7 @@ func sendToAddressesAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 	}
 
 	//	todo: the fee policy
-	feeSatPerKb, err := abeutil.NewAmountAbe(*cmd.FeeSpecified) // todo: AliceBobScorpio, should use the feeSatPerKb received from abec
-	if err != nil {
-		return nil, err
-	}
+	feeSatPerKb := txrules.DefaultRelayFeePerKb //default
 	scaleToFeeSatPerKb := *cmd.ScaleToFeeSatPerKb
 	feeSpecified, err := abeutil.NewAmountAbe(*cmd.FeeSpecified)
 	if err != nil {
@@ -1244,7 +1241,7 @@ func sendToAddressesAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 		feeSatPerKb = feeSatPerKb.MulF64(scaleToFeeSatPerKb)
 		feeSpecified = abeutil.Amount(0)
 	} else if feeSpecified != 0 && scaleToFeeSatPerKb == 1 {
-		//	if neither scaleToFeeSatPerKb or feeSpecified is specified, the use scaleToFeeSatPerKb = 1
+		//	if neither scaleToFeeSatPerKb nor feeSpecified is specified, the use scaleToFeeSatPerKb = 1
 		//	feeSatPerKb = feeSatPerKb
 		//	feeSpecified = 0
 		//	i.e. nothing to do
