@@ -18,7 +18,7 @@ The architecture is as follows:
 - The wallet owner's coins and corresponding keys, as well as related data (e.g., transactions) are stored in wallet database.
 - In addition, wallet manages the address, and provides the function of creating transaction.
 
-In words, wallet obtains data from blockchain, store only the data related to its owner, and produce (transfer) transactions for the Abelian system.
+In summary, wallet obtains data from blockchain, store only the data related to its owner, and produce (transfer) transactions for the Abelian system.
 
 # 2. Functionalities (User Interface)
 Abewallet provides the following functionalities to the users:
@@ -29,7 +29,7 @@ Abewallet provides the following functionalities to the users:
 4. Users can use the addresses created by wallet to receive coins, in mining or transfer.
 5. The wallet owner can run the wallet to synchronize the blockchain data when needed, and the wallet will communicate with the connected (running) ABEC node, scan the blockchain and update its local database.
 6. Users can query wallet status and information through the provided APIs.
-7. When needed, a user can restore his/her wallet, by using the crypto version and  the 24-words mnemonic. 
+7. When needed, a user can restore his wallet, by using the crypto version and the 24-words mnemonic. 
 
 ## 2.1 Create a new wallet
 A user can create a wallet by command `./abewallet --create`. 
@@ -53,11 +53,9 @@ The configuration items for connecting ABEC node include:
 
 - `abecrpcuser=[abec node rpc username]`
 
-  `abecrpcuser` should be configured to be the value of  `rpcuser` in abec.conf of abelian node side.
-
 -  `abecrpcpass=[abec node rpc password]`
 
-  `abecrpcpass` should be configured to be the value of  `rpcpass` in abec.conf of abelian node side.
+  `abecrpcuser/abecrpcpass` should be configured to be the value of  `rpcuser/rpcpass` in abec.conf of abelian node side.
 
 - `rpcconnect=[abec node ip,default localhost]`
 
@@ -81,13 +79,13 @@ In the future, we may provide creating transaction offline.
 When a wallet is running, the wallet owner can run the following two commands to generate a new address:
 - unlock the wallet with private passphrase 
 
-  `abewalletctl --rpcuser=[rpc username] --rpcpass=[rpc password] --wallet unlockwallet [private passphrase] [timeout]` 
+  `abectl --rpcuser=[rpc username] --rpcpass=[rpc password] --wallet walletunlock [private passphrase] [timeout]` 
 
   **NOTE: *timeout* is in seconds.**
 
 - generate a new address 
 
-  `abewalletctl --rpcuser=[rpc username] --rpcpass=[rpc password] --wallet generateaddressabe `
+  `abectl --rpcuser=[rpc username] --rpcpass=[rpc password] --wallet generateaddressabe `
 
   An **instance address** and its **index number** will be returned.
 
@@ -106,25 +104,33 @@ the wallet will establish a connection with the configured ABEC node, and synchr
 
 Wallet provides the following APIs for querying wallet status and blockchain information:
 
-| Name              | Paramters               | Description                                              |
-|-------------------| ----------------------- |----------------------------------------------------------|
-| getbalances       | null                    | get the balance information of the wallet onwer          |
-| getbestblockhash  | null                    | get the best synced block hash information               |
-| help              | null                    | print the help information                               |
-| listallutxo       | null                    | print all txos which belong wallet                       |
-| listimmaturetxo   | null                    | print all immature txos which belong wallet              |
-| listspendabletxo  | null                    | print all mature txos which belong wallet                |
-| listuncofirmedtxo | null                    | print all spent but unconfirmed txos which belong wallet |
-| listspenttxo      | null                    | print all spent and confirmed txos which belong wallet   |
+| Name                  | Paramters | Description                                                     |
+|-----------------------|-----------|-----------------------------------------------------------------|
+| getbalancesabe        | null      | get the balance information of the wallet onwer                 |
+| getbestblockhash      | null      | get the best synced block hash information                      |
+| help                  | null      | print the help information                                      |
+| listallutxoabe        | null      | print all txos which belong wallet                              |
+| listimmaturetxoabe    | null      | print all immature txos which belong wallet                     |
+| listmaturetxoabe      | null      | print all mature txos which belong wallet                       |
+| listunconfirmedtxoabe | null      | print all unconfirmed txos which belong wallet                  |
+| listconfirmedtxoabe   | null      | print all confirmed txos which belong wallet                    |
+| listconfirmedtxs      | null      | print all confirmed transaction which consumes txos of wallet   |
+| listunconfirmedtxs    | null      | print all unconfirmed transaction which consumes txos of wallet |
+| listinvalidtxs        | null      | print all invalid transaction which consumes txos of wallet     |
+| addressnumber         | null      | print the max number of address in wallet                       |
+
+When accessing the above wallet APIs, rpcuser and rpcpass should be provided.
+
+For example, `abectl --rpcuser=[rpcuser in abewallet.conf] --rpcpass=[rpcpass in abewallet.conf] --wallet getbalancesabe`
 
 ## 2.6 Create Transfer Transactions
 When a wallet is running, the owner can unlock the wallet using private passphrase and then use the following API to create a transfer transaction, which is automatically sent to the connected ABEC node, and then is broadcast to Abelian network.
 
 **Note: during the transaction generation, a new address may be generated to store change. When the transaction is created successfully, the *max index number* of address in the wallet would be returned.**
 
-| Name               | Paramaters                        | Description                                                  |
-| ------------------ | --------------------------------- | ------------------------------------------------------------ |
-| sendtoaddressesabe | [<br />address<br />amount<br />] | create a transction with assigned pairs of address and amount |
+| Name               | Paramaters                                                                                             | Description                                                    |
+|--------------------|--------------------------------------------------------------------------------------------------------|----------------------------------------------------------------|
+| sendtoaddressesabe | [{"address":"address string","amount":value},<br/>...<br/>{"address":"address string","amount":value}] | create a transaction with assigned pairs of address and amount |
 
 ## 2.7 Restore a wallet
 
@@ -138,7 +144,7 @@ The process is basically the same as creating a wallet, except that choose to **
 ![Create Wallet](https://github.com/abesuite/abewallet/blob/master/docs/images/Restore%20Wallet%20for%20User%20Interface.svg)
 
 
-# 3. Detailed Designs
+# 3. Detailed Designs[TODO]
 
 ## 3.1 Wallet Create and Address Generate
 
@@ -212,12 +218,12 @@ as well as the services to users is shown as the following figure.
   On the other side, to provide services to users, wallet must make a minimum configure to configure `rpcuser` and `rpcpass`, which will be used to access the services of wallet.
   The port 8665 is used as the default port to listen for connections and requests to wallet.
 
-- At the user side, the owner can access the wallet service by using `rpcuser`, `rpcpass`, `rpcserver` (for IP address and port (default 8665) of wallet), and `rpccert`. For example, by **abewalletctl** or **http/websocket**  connection.
+- At the user side, the owner can access the wallet service by using `rpcuser`, `rpcpass`, `rpcserver` (for IP address and port (default 8665) of wallet), and `rpccert`. For example, by **abectl** or **http/websocket**  connection.
 
 **NOTE:** 
 - If the wallet runs in the same machine with the ABEC node, the `abeccafile` and `abecrpcconnect` don't need to be configured.
 
-- If the abewalletctl runs in the same machine with the wallet, the `rpccert` and `rpcserver` don't need to be set.
+- If the abectl runs in the same machine with the wallet, the `rpccert` and `rpcserver` don't need to be set.
 
 ## 3.4 Synchronize the blockchain
 
