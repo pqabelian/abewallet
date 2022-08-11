@@ -117,7 +117,7 @@ Wallet provides the following APIs for querying wallet status and blockchain inf
 | listconfirmedtxs      | null      | print all confirmed transaction which consumes txos of wallet   |
 | listunconfirmedtxs    | null      | print all unconfirmed transaction which consumes txos of wallet |
 | listinvalidtxs        | null      | print all invalid transaction which consumes txos of wallet     |
-| addressnumber         | null      | print the max number of address in wallet                       |
+| addressnumber         | null      | print the current max number of address in wallet               |
 
 When accessing the above wallet APIs, rpcuser and rpcpass should be provided.
 
