@@ -1,7 +1,7 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/abesuite/abec v0.11.1 h1:ZrXCG0tUzbHsxHaYOUahkpd8RhQBkEHlHG4AFVtbfAE=
-github.com/abesuite/abec v0.11.1/go.mod h1:1eMl/YhL9UQfFVVb3rItnD7JuCfLLsKn5nyE4M5bevk=
+github.com/abesuite/abec v0.11.2-0.20220922153028-0964bb2e271a h1:Xh241R2JYdNTV/HmldmAJ3bQIuWQ2+tS+eO2u0G2lWE=
+github.com/abesuite/abec v0.11.2-0.20220922153028-0964bb2e271a/go.mod h1:soG2As2vDE+7xc3A+kFqUCigThELruvyzCPVFtc8vMI=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd h1:BNI2MkhhtofxM0sTP8WmdcT4chaAKZOsyhspB58DSrM=
 github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd/go.mod h1:eo8+6JwPaqdnrzzGmGXEH3nOYknOkk8GtuXw7Bo+f08=
 github.com/abesuite/go-spew v1.1.1/go.mod h1:hLFuB0AyzUx1yB66EbNZcsinwdgIV6/WUECUEhEy3M8=
@@ -14,8 +14,8 @@ github.com/cryptosuite/kyber-go v0.0.2-alpha h1:JHvNqZho24qJq7c4JnyKGtyQuF03VOeE
 github.com/cryptosuite/kyber-go v0.0.2-alpha/go.mod h1:1G0Jh7bXJGSUCTrC6ZB9lFpmCF+VFQehDqIwm9dJU3s=
 github.com/cryptosuite/liboqs-go v0.9.5-alpha h1:mmCyD1gZRnm6sD214ylg0h17I37BmY8wDDbcvpW4fDc=
 github.com/cryptosuite/liboqs-go v0.9.5-alpha/go.mod h1:LzuvuQAJHbED51lHoYr91rBbKRdv2MewGcVCwjE1JCk=
-github.com/cryptosuite/pqringct v0.9.5-alpha h1:Ard03HFH0U7VW9EQ2GiFjXuPT6NUrnpgFbxKGORkV5U=
-github.com/cryptosuite/pqringct v0.9.5-alpha/go.mod h1:LVtvih9kNVHzAX60qzOqO6TAIjurfNKYWICRDUegjkg=
+github.com/cryptosuite/pqringct v0.9.5-alpha.0.20220922141902-1224e315095a h1:3cRM0kEgqQsCOaDamMb0sveokdBz5o6noQ5QcRMl24c=
+github.com/cryptosuite/pqringct v0.9.5-alpha.0.20220922141902-1224e315095a/go.mod h1:LVtvih9kNVHzAX60qzOqO6TAIjurfNKYWICRDUegjkg=
 github.com/cryptosuite/salrs-go v0.0.0-20200918155434-c02eea3b36d1 h1:vN3Cibtye7f3YuPvrJWG4Kp/jrb/XfxS5oIwl8XZBQY=
 github.com/cryptosuite/salrs-go v0.0.0-20200918155434-c02eea3b36d1/go.mod h1:mJeCa86eOqj3kCJO+O4245Wnq5U07P9K9RfJplI8bQ4=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

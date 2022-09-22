@@ -1309,7 +1309,7 @@ func Create(ns walletdb.ReadWriteBucket,
 			end = 0
 
 			b := make([]byte, len(serializedCryptoAddress)+1)
-			b[0] = chainParams.PQRingCTID
+			b[0] = chainParams.AbelAddressNetId
 			copy(b[1:], serializedCryptoAddress)
 			// generate the hash of (abecrypto.CryptoSchemePQRINGCT || serialized address)
 			hash := chainhash.DoubleHashB(b)

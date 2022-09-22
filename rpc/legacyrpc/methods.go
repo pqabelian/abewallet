@@ -111,9 +111,9 @@ var rpcHandlers = map[string]struct {
 	"lockunspent": {handler: lockUnspent},
 	//"sendfrom":               {handlerWithChain: sendFrom},
 	//"sendmany":               {handler: sendMany},
-	"sendtoaddressesabe": {handler: sendToAddressesAbe},
-	"generateaddressabe": {handler: generateAddressAbe},
-	"addressnumber":      {handler: addressNumber},
+	"sendtoaddressesabe":       {handler: sendToAddressesAbe},
+	"generateaddressabe":       {handler: generateAddressAbe},
+	"addressmaxsequencenumber": {handler: addressMaxSequenceNumber},
 	//"sendtoaddress":          {handler: sendToAddress},
 	//"sendtopayee":            {handler: sendToPayees},
 	"settxfee": {handler: setTxFee}, // TODO
@@ -1163,15 +1163,13 @@ func sendToPayees(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 // or a fee for the miner are sent back to a new address in the wallet.
 // Upon success, the TxID for the created transaction is returned.
 
-type AddressCmd struct{}
-
-func addressNumber(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	_ = icmd.(AddressCmd)
-	addressNum, err := w.AddressNumber()
+func addressMaxSequenceNumber(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	_ = icmd.(*abejson.AddressMaxSequenceNumberCmd)
+	addressMaxSN, err := w.AddressMaxSequenceNumber()
 	if err != nil {
 		return -1, err
 	}
-	return addressNum, nil
+	return addressMaxSN, nil
 }
 func generateAddressAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.GenerateAddressCmd)

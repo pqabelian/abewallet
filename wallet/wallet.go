@@ -1338,7 +1338,7 @@ func (w *Wallet) resendUnminedTx() {
 
 // NewAddress returns the next external chained address for a wallet.
 
-func (w *Wallet) AddressNumber() (uint64, error) {
+func (w *Wallet) AddressMaxSequenceNumber() (uint64, error) {
 	var addressNum uint64
 	var err error
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {

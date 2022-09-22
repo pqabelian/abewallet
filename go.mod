@@ -3,7 +3,7 @@ module github.com/abesuite/abewallet
 go 1.14
 
 require (
-	github.com/abesuite/abec v0.11.1
+	github.com/abesuite/abec v0.11.2-0.20220922153028-0964bb2e271a
 	github.com/abesuite/go-socks v0.0.0-20170105172521-4720035b7bfd
 	github.com/golang/protobuf v1.4.2
 	github.com/gorilla/websocket v1.4.2
