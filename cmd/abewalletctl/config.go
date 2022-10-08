@@ -22,13 +22,13 @@ const (
 )
 
 var (
-	abecHomeDir           = abeutil.AppDataDir("abec", false)
-	abectlHomeDir         = abeutil.AppDataDir("abewalletctl", false)
-	abewalletHomeDir      = abeutil.AppDataDir("abewallet", false)
-	defaultConfigFile     = filepath.Join(abectlHomeDir, "abewalletctl.conf")
-	defaultRPCServer      = "localhost"
-	defaultRPCCertFile    = filepath.Join(abecHomeDir, "rpc.cert")
-	defaultWalletCertFile = filepath.Join(abewalletHomeDir, "rpc.cert")
+	abecHomeDir             = abeutil.AppDataDir("abec", false)
+	abectlHomeDir           = abeutil.AppDataDir("abewalletctl", false)
+	abewalletHomeDir        = abeutil.AppDataDir("abewallet", false)
+	defaultConfigFile       = filepath.Join(abewalletHomeDir, "abewalletctl.conf")
+	defaultRPCServer        = "localhost"
+	defaultRPCCertFile      = filepath.Join(abewalletHomeDir, "rpc.cert")
+	defaultChainRPCCertFile = filepath.Join(abecHomeDir, "rpc.cert")
 )
 
 // listCommands categorizes and lists all of the usable commands along with
@@ -73,8 +73,8 @@ func listCommands() {
 
 	// Display the command according to their categories.
 	categoryTitles := make([]string, numCategories)
-	categoryTitles[categoryChain] = "Chain Server Commands:"
-	categoryTitles[categoryWallet] = "Wallet Server Commands (--wallet):"
+	categoryTitles[categoryChain] = "Chain Server Commands (--chain):"
+	categoryTitles[categoryWallet] = "Wallet Server Commands:"
 	for category := uint8(0); category < numCategories; category++ {
 		fmt.Println(categoryTitles[category])
 		for _, usage := range categorized[category] {
@@ -104,29 +104,30 @@ type config struct {
 	TestNet3       bool   `long:"testnet" description:"Connect to testnet"`
 	ShowVersion    bool   `short:"V" long:"version" description:"Display version information and exit"`
 	Wallet         bool   `long:"wallet" description:"Connect to wallet"`
+	Chain          bool   `long:"chain" description:"Connect to chain"`
 }
 
 // normalizeAddress returns addr with the passed default port appended if
 // there is not already a port specified.
-func normalizeAddress(addr string, chain *chaincfg.Params, useWallet bool) (string, error) {
+func normalizeAddress(addr string, chain *chaincfg.Params, useChain bool) (string, error) {
 	_, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		var defaultPort string
 		switch chain {
 		case &chaincfg.TestNet3Params:
-			if useWallet {
-				defaultPort = "18665"
-			} else {
+			if useChain {
 				defaultPort = "18667"
+			} else {
+				defaultPort = "18665"
 			}
 		case &chaincfg.SimNetParams:
-			if useWallet {
-				defaultPort = "18887"
-			} else {
+			if useChain {
 				defaultPort = "18889"
+			} else {
+				defaultPort = "18887"
 			}
 		case &chaincfg.RegressionNetParams:
-			if useWallet {
+			if useChain {
 				// TODO: add port once regtest is supported in wallet
 				paramErr := fmt.Errorf("cannot use -wallet with -regtest, wallet not yet compatible with regtest")
 				return "", paramErr
@@ -134,10 +135,10 @@ func normalizeAddress(addr string, chain *chaincfg.Params, useWallet bool) (stri
 				defaultPort = "18667"
 			}
 		default:
-			if useWallet {
-				defaultPort = "8665"
-			} else {
+			if useChain {
 				defaultPort = "8667"
+			} else {
+				defaultPort = "8665"
 			}
 		}
 
@@ -164,10 +165,10 @@ func cleanAndExpandPath(path string) string {
 // line options.
 //
 // The configuration proceeds as follows:
-// 	1) Start with a default config with sane settings
-// 	2) Pre-parse the command line to check for an alternative config file
-// 	3) Load configuration file overwriting defaults with any specified options
-// 	4) Parse CLI options and overwrite/add any specified options
+//  1. Start with a default config with sane settings
+//  2. Pre-parse the command line to check for an alternative config file
+//  3. Load configuration file overwriting defaults with any specified options
+//  4. Parse CLI options and overwrite/add any specified options
 //
 // The above results in functioning properly without any config settings
 // while still allowing the user to override settings with config files and
@@ -218,10 +219,10 @@ func loadConfig() (*config, []string, error) {
 	if _, err := os.Stat(preCfg.ConfigFile); os.IsNotExist(err) {
 		// Use config file for RPC server to create default abewalletctl config
 		var serverConfigPath string
-		if preCfg.Wallet {
-			serverConfigPath = filepath.Join(abewalletHomeDir, "abewallet.conf")
-		} else {
+		if preCfg.Chain {
 			serverConfigPath = filepath.Join(abecHomeDir, "abec.conf")
+		} else {
+			serverConfigPath = filepath.Join(abewalletHomeDir, "abewallet.conf")
 		}
 
 		err := createDefaultConfigFile(preCfg.ConfigFile, serverConfigPath)
@@ -277,18 +278,18 @@ func loadConfig() (*config, []string, error) {
 		return nil, nil, err
 	}
 
-	// Override the RPC certificate if the --wallet flag was specified and
+	// Override the RPC certificate if the --chain flag was specified and
 	// the user did not specify one.
-	if cfg.Wallet && cfg.RPCCert == defaultRPCCertFile {
-		cfg.RPCCert = defaultWalletCertFile
+	if cfg.Chain && cfg.RPCCert == defaultRPCCertFile {
+		cfg.RPCCert = defaultChainRPCCertFile
 	}
 
 	// Handle environment variable expansion in the RPC certificate path.
 	cfg.RPCCert = cleanAndExpandPath(cfg.RPCCert)
 
-	// Add default port to RPC server based on --testnet and --wallet flags
+	// Add default port to RPC server based on --testnet and --chain flags
 	// if needed.
-	cfg.RPCServer, err = normalizeAddress(cfg.RPCServer, network, cfg.Wallet)
+	cfg.RPCServer, err = normalizeAddress(cfg.RPCServer, network, cfg.Chain)
 	if err != nil {
 		return nil, nil, err
 	}
