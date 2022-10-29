@@ -150,7 +150,8 @@ var rpcHandlers = map[string]struct {
 	//"listaddresstransactions": {handler: listAddressTransactions},
 	//"listalltransactions":     {handler: listAllTransactions},
 	//"renameaccount":           {handler: renameAccount},
-	"walletislocked": {handler: walletIsLocked},
+	"walletislocked":    {handler: walletIsLocked},
+	"notifytransaction": {}, /*handleNotifyTransactionAccepted*/
 }
 
 // unimplemented handles an unimplemented RPC request with the

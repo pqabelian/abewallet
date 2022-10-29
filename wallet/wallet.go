@@ -46,6 +46,26 @@ const (
 	recoveryBatchSize = 2000
 )
 
+const (
+	NTTransactionAccepted NotificationType = iota
+	NTTransactionRollback
+)
+
+// NotificationType represents the type of a notification message.
+type NotificationType int
+
+// NotificationCallback is used for a caller to provide a callback for
+// notifications about various events.
+type NotificationCallback func(*Notification)
+
+// Notification defines notification that is sent to the caller via the callback
+// function provided during the call to New and consists of a notification type
+// as well as associated data.
+type Notification struct {
+	Type NotificationType
+	Data interface{}
+}
+
 var (
 	// ErrNotSynced describes an error where an operation cannot complete
 	// due wallet being out of sync (and perhaps currently syncing with)
@@ -118,6 +138,9 @@ type Wallet struct {
 	// like a hook?
 	NtfnServer *NotificationServer
 
+	notificationsLock sync.RWMutex
+	notifications     []NotificationCallback
+
 	chainParams *chaincfg.Params
 	wg          sync.WaitGroup
 
@@ -150,6 +173,20 @@ func (w *Wallet) Start() {
 	w.wg.Add(2)
 	go w.txCreator()
 	go w.walletLocker()
+}
+func (w *Wallet) Subscribe(callback NotificationCallback) {
+	w.notificationsLock.Lock()
+	w.notifications = append(w.notifications, callback)
+	w.notificationsLock.Unlock()
+}
+func (w *Wallet) sendNotification(typ NotificationType, data interface{}) {
+	// Generate and send the notification.
+	n := Notification{Type: typ, Data: data}
+	w.notificationsLock.RLock()
+	for _, callback := range w.notifications {
+		callback(&n)
+	}
+	w.notificationsLock.RUnlock()
 }
 
 // SynchronizeRPC associates the wallet with the consensus RPC client,
@@ -1905,6 +1942,11 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 	w.TxStore.NotifyUnspent = func(hash *chainhash.Hash, index uint32) {
 		w.NtfnServer.notifyUnspentOutput(0, hash, index)
 	}
-
+	w.TxStore.NotifyTransactionAccepted = func(txInfo *wtxmgr.TransactionInfo) {
+		w.sendNotification(NTTransactionAccepted, txInfo)
+	}
+	w.TxStore.NotifyTransactionRollback = func(txInfo *wtxmgr.TransactionInfo) {
+		w.sendNotification(NTTransactionRollback, txInfo)
+	}
 	return w, nil
 }

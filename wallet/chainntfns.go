@@ -289,6 +289,17 @@ func (w *Wallet) disconnectBlock(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
 
+	block, err := w.chainClient.GetBlockAbe(&b.Hash)
+	if err != nil {
+		return err
+	}
+
+	for i := 0; i < len(block.Transactions); i++ {
+		w.TxStore.NotifyTransactionRollback(&wtxmgr.TransactionInfo{
+			Tx:     block.Transactions[i],
+			Height: b.Height,
+		})
+	}
 	//if !w.ChainSynced() { // if the wallet is syncing with backend, wait for it...
 	//	return nil
 	//}
@@ -341,7 +352,7 @@ func (w *Wallet) disconnectBlock(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) 
 	return nil
 }
 
-//	todo(ABE): Wallet adds transactions to wallet db.
+// todo(ABE): Wallet adds transactions to wallet db.
 func (w *Wallet) addRelevantTx(dbtx walletdb.ReadWriteTx, rec *wtxmgr.TxRecord, block *wtxmgr.BlockMeta) error {
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
 	//addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)

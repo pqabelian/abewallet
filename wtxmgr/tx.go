@@ -322,7 +322,7 @@ type SpentConfirmedTXO struct { //TODO(abe):should add a field to denote which t
 	ConfirmTime    time.Time
 }
 
-//TODO(osy)20210608 change the serialize and deserialize
+// TODO(osy)20210608 change the serialize and deserialize
 type Ring struct {
 	Version     uint32
 	BlockHashes []chainhash.Hash // three block hashes
@@ -721,7 +721,13 @@ type Store struct {
 
 	// Event callbacks.  These execute in the same goroutine as the wtxmgr
 	// caller.
-	NotifyUnspent func(hash *chainhash.Hash, index uint32)
+	NotifyUnspent             func(hash *chainhash.Hash, index uint32)
+	NotifyTransactionAccepted func(txInfo *TransactionInfo)
+	NotifyTransactionRollback func(txInfo *TransactionInfo)
+}
+type TransactionInfo struct {
+	Tx     *wire.MsgTxAbe
+	Height int32
 }
 
 // Open opens the wallet transaction store from a walletdb namespace.  If the
@@ -734,7 +740,7 @@ func Open(addrMgr *waddrmgr.Manager, ns walletdb.ReadBucket, chainParams *chainc
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{addrMgr, chainParams, clock.NewDefaultClock(), nil} // TODO: set callbacks
+	s := &Store{addrMgr, chainParams, clock.NewDefaultClock(), nil, nil, nil} // TODO: set callbacks
 	return s, nil
 }
 
@@ -1058,6 +1064,14 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 	}
 
 	coinbaseTx := block.TxRecords[0].MsgTx
+	// For test
+	txInf := &TransactionInfo{
+		Tx:     &coinbaseTx,
+		Height: block.Height,
+	}
+	s.NotifyTransactionAccepted(txInf)
+	log.Infof("send notification %v", txInf)
+
 	coinbaseOutput := make(map[wire.OutPointAbe]*UnspentUTXO)
 	blockOutputs := make(map[Block][]wire.OutPointAbe)
 
@@ -1108,6 +1122,11 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 	for i := 1; i < len(block.TxRecords); i++ { // trace every tx in this block
 		txi := block.TxRecords[i].MsgTx
 		txhash := txi.TxHash()
+		s.NotifyTransactionAccepted(
+			&TransactionInfo{
+				Tx:     &txi,
+				Height: block.Height,
+			})
 
 		// traverse all the inputs of a transaction
 		// 1. add serial number to corresponding ring if needed
@@ -1854,7 +1873,7 @@ func (s *Store) Rollback(managerAbe *waddrmgr.Manager, waddrmgr walletdb.ReadWri
 
 // TODO(abe): we center with block not transaction, because we do not support single transaction
 // TODO(abe): need to update the balance in the function.
-//TODO(abe):this function need to be test
+// TODO(abe):this function need to be test
 // we will delete the block after given height in database
 func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWriteBucket, wtxmgrNs walletdb.ReadWriteBucket, height int32) error {
 	balance, err := fetchMinedBalance(wtxmgrNs)

@@ -22,14 +22,15 @@ import (
 )
 
 const (
-	defaultCAFilename       = "abec.cert"
-	defaultConfigFilename   = "abewallet.conf"
-	defaultLogLevel         = "info"
-	defaultLogDirname       = "logs"
-	defaultLogFilename      = "abewallet.log"
-	defaultRPCMaxClients    = 10
-	defaultRPCMaxWebsockets = 25
-	sampleConfigFilename    = "sample-abewallet.conf"
+	defaultCAFilename           = "abec.cert"
+	defaultConfigFilename       = "abewallet.conf"
+	defaultLogLevel             = "info"
+	defaultLogDirname           = "logs"
+	defaultLogFilename          = "abewallet.log"
+	defaultRPCMaxClients        = 10
+	defaultRPCMaxWebsockets     = 25
+	defaultRPCMaxConcurrentReqs = 5
+	sampleConfigFilename        = "sample-abewallet.conf"
 
 	walletDbName = "wallet.db"
 )
@@ -90,15 +91,16 @@ type config struct {
 	//
 	// Usernames can also be used for the consensus RPC client, so they
 	// aren't considered legacy.
-	RPCCert                *cfgutil.ExplicitString `long:"rpccert" description:"File containing the certificate file"`
-	RPCKey                 *cfgutil.ExplicitString `long:"rpckey" description:"File containing the certificate key"`
-	OneTimeTLSKey          bool                    `long:"onetimetlskey" description:"Generate a new TLS certpair at startup, but only write the certificate to disk"`
-	DisableServerTLS       bool                    `long:"noservertls" description:"Disable TLS for the RPC server -- NOTE: This is only allowed if the RPC server is bound to localhost"`
-	LegacyRPCListeners     []string                `long:"rpclisten" description:"Listen for legacy RPC connections on this interface/port (default port: 8332, testnet: 18332, simnet: 18554)"`
-	LegacyRPCMaxClients    int64                   `long:"rpcmaxclients" description:"Max number of legacy RPC clients for standard connections"`
-	LegacyRPCMaxWebsockets int64                   `long:"rpcmaxwebsockets" description:"Max number of legacy RPC websocket connections"`
-	Rpcuser                string                  `short:"u" long:"rpcuser" description:"Username for legacy RPC and abec authentication (if abecrpcuser is unset)"`
-	Rpcpass                string                  `short:"P" long:"rpcpass" default-mask:"-" description:"Password for legacy RPC and abec authentication (if abecrpcpass is unset)"`
+	RPCCert                    *cfgutil.ExplicitString `long:"rpccert" description:"File containing the certificate file"`
+	RPCKey                     *cfgutil.ExplicitString `long:"rpckey" description:"File containing the certificate key"`
+	OneTimeTLSKey              bool                    `long:"onetimetlskey" description:"Generate a new TLS certpair at startup, but only write the certificate to disk"`
+	DisableServerTLS           bool                    `long:"noservertls" description:"Disable TLS for the RPC server -- NOTE: This is only allowed if the RPC server is bound to localhost"`
+	LegacyRPCListeners         []string                `long:"rpclisten" description:"Listen for legacy RPC connections on this interface/port (default port: 8332, testnet: 18332, simnet: 18554)"`
+	LegacyRPCMaxClients        int64                   `long:"rpcmaxclients" description:"Max number of legacy RPC clients for standard connections"`
+	LegacyRPCMaxConcurrentReqs int                     `long:"rpcmaxconcurrentreqs" description:"Max number of concurrent RPC requests that may be processed concurrently"`
+	LegacyRPCMaxWebsockets     int64                   `long:"rpcmaxwebsockets" description:"Max number of legacy RPC websocket connections"`
+	Rpcuser                    string                  `short:"u" long:"rpcuser" description:"Username for legacy RPC and abec authentication (if abecrpcuser is unset)"`
+	Rpcpass                    string                  `short:"P" long:"rpcpass" default-mask:"-" description:"Password for legacy RPC and abec authentication (if abecrpcpass is unset)"`
 
 	// EXPERIMENTAL RPC server options
 	//
@@ -253,10 +255,10 @@ func parseAndSetDebugLevels(debugLevel string) error {
 // line options.
 //
 // The configuration proceeds as follows:
-//      1) Start with a default config with sane settings
-//      2) Pre-parse the command line to check for an alternative config file
-//      3) Load configuration file overwriting defaults with any specified options
-//      4) Parse CLI options and overwrite/add any specified options
+//  1. Start with a default config with sane settings
+//  2. Pre-parse the command line to check for an alternative config file
+//  3. Load configuration file overwriting defaults with any specified options
+//  4. Parse CLI options and overwrite/add any specified options
 //
 // The above results in abewallet functioning properly without any config
 // settings while still allowing the user to override settings with config files
@@ -268,17 +270,18 @@ func loadConfig() (*config, []string, error) {
 		ConfigFile: cfgutil.NewExplicitString(defaultConfigFile),
 		AppDataDir: cfgutil.NewExplicitString(defaultAppDataDir),
 		LogDir:     defaultLogDir,
-		//WalletPass:             wallet.InsecurePubPassphrase,
-		CAFile:                 cfgutil.NewExplicitString(""),
-		RPCKey:                 cfgutil.NewExplicitString(defaultRPCKeyFile),
-		RPCCert:                cfgutil.NewExplicitString(defaultRPCCertFile),
-		LegacyRPCMaxClients:    defaultRPCMaxClients,
-		LegacyRPCMaxWebsockets: defaultRPCMaxWebsockets,
-		UseSPV:                 false,
-		AddPeers:               []string{},
-		ConnectPeers:           []string{},
-		WordList:               wordlists.English,
-		WordMap:                map[string]int{},
+		//WalletRPCPass:             wallet.InsecurePubPassphrase,
+		CAFile:                     cfgutil.NewExplicitString(""),
+		RPCKey:                     cfgutil.NewExplicitString(defaultRPCKeyFile),
+		RPCCert:                    cfgutil.NewExplicitString(defaultRPCCertFile),
+		LegacyRPCMaxClients:        defaultRPCMaxClients,
+		LegacyRPCMaxWebsockets:     defaultRPCMaxWebsockets,
+		LegacyRPCMaxConcurrentReqs: defaultRPCMaxConcurrentReqs,
+		UseSPV:                     false,
+		AddPeers:                   []string{},
+		ConnectPeers:               []string{},
+		WordList:                   wordlists.English,
+		WordMap:                    map[string]int{},
 		//	todo(ABE): ABE does not support neutrino in lighting
 		//MaxPeers:               neutrino.MaxPeers,
 		//BanDuration:            neutrino.BanDuration,

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/abesuite/abe-miningpool-server/pooljson"
 	"github.com/abesuite/abec/abejson"
 	"io"
 	"io/ioutil"
@@ -29,17 +30,6 @@ type websocketClient struct {
 	responses     chan []byte
 	quit          chan struct{} // closed on disconnect
 	wg            sync.WaitGroup
-}
-
-func newWebsocketClient(c *websocket.Conn, authenticated bool, remoteAddr string) *websocketClient {
-	return &websocketClient{
-		conn:          c,
-		authenticated: authenticated,
-		remoteAddr:    remoteAddr,
-		allRequests:   make(chan []byte),
-		responses:     make(chan []byte),
-		quit:          make(chan struct{}),
-	}
 }
 
 func (c *websocketClient) send(b []byte) error {
@@ -67,12 +57,14 @@ type Server struct {
 
 	maxPostClients      int64 // Max concurrent HTTP POST clients.
 	maxWebsocketClients int64 // Max concurrent websocket clients.
+	maxConcurrentReqs   int
 
 	wg      sync.WaitGroup
 	quit    chan struct{}
 	quitMtx sync.Mutex
 
 	requestShutdownChan chan struct{}
+	ntfnMgr             *wsNotificationManager
 }
 
 // jsonAuthFail sends a message back to the client if the http auth is rejected.
@@ -98,6 +90,7 @@ func NewServer(opts *Options, walletLoader *wallet.Loader, listeners []net.Liste
 		walletLoader:        walletLoader,
 		maxPostClients:      opts.MaxPOSTClients,
 		maxWebsocketClients: opts.MaxWebsocketClients,
+		maxConcurrentReqs:   opts.MaxConcurrentReqs,
 		listeners:           listeners,
 		// A hash of the HTTP basic auth string is used for a constant
 		// time comparison.
@@ -109,6 +102,7 @@ func NewServer(opts *Options, walletLoader *wallet.Loader, listeners []net.Liste
 		quit:                make(chan struct{}),
 		requestShutdownChan: make(chan struct{}, 1),
 	}
+	server.ntfnMgr = newWsNotificationManager(server)
 
 	serveMux.Handle("/", throttledFn(opts.MaxPOSTClients,
 		func(w http.ResponseWriter, r *http.Request) {
@@ -149,13 +143,14 @@ func NewServer(opts *Options, walletLoader *wallet.Loader, listeners []net.Liste
 					r.RemoteAddr, err)
 				return
 			}
-			wsc := newWebsocketClient(conn, authenticated, r.RemoteAddr)
-			server.websocketClientRPC(wsc)
+
+			server.WebsocketHandler(conn, r.RemoteAddr, authenticated)
 		}))
 
 	for _, lis := range listeners {
 		server.serve(lis)
 	}
+	server.ntfnMgr.Start()
 
 	return server
 }
@@ -163,7 +158,7 @@ func NewServer(opts *Options, walletLoader *wallet.Loader, listeners []net.Liste
 // httpBasicAuth returns the UTF-8 bytes of the HTTP Basic authentication
 // string:
 //
-//   "Basic " + base64(username + ":" + password)
+//	"Basic " + base64(username + ":" + password)
 func httpBasicAuth(username, password string) []byte {
 	const header = "Basic "
 	base64 := base64.StdEncoding
@@ -197,6 +192,7 @@ func (s *Server) serve(lis net.Listener) {
 func (s *Server) RegisterWallet(w *wallet.Wallet) {
 	s.handlerMu.Lock()
 	s.wallet = w
+	w.Subscribe(s.ntfnMgr.HandleMinerManagerNotification)
 	s.handlerMu.Unlock()
 }
 
@@ -216,6 +212,7 @@ func (s *Server) Stop() {
 	s.handlerMu.Lock()
 	wallet := s.wallet
 	chainClient := s.chainClient
+	ntfnMgr := s.ntfnMgr
 	s.handlerMu.Unlock()
 	if wallet != nil {
 		wallet.Stop()
@@ -244,6 +241,10 @@ func (s *Server) Stop() {
 	}
 	if chainClient != nil {
 		chainClient.WaitForShutdown()
+	}
+	if ntfnMgr != nil {
+		ntfnMgr.Shutdown()
+		ntfnMgr.WaitForShutdown()
 	}
 
 	// Wait for all remaining goroutines to exit.
@@ -635,4 +636,48 @@ func (s *Server) requestProcessShutdown() {
 // client requests remote shutdown.
 func (s *Server) RequestProcessShutdown() <-chan struct{} {
 	return s.requestShutdownChan
+}
+
+// createMarshalledReply returns a new marshalled JSON-RPC response given the
+// passed parameters.  It will automatically convert errors that are not of
+// the type *abejson.RPCError to the appropriate type as needed.
+func createMarshalledReply(id, result interface{}, replyErr error) ([]byte, error) {
+	var jsonErr *abejson.RPCError
+	if replyErr != nil {
+		if jErr, ok := replyErr.(*abejson.RPCError); ok {
+			jsonErr = jErr
+		} else {
+			jsonErr = internalRPCError(replyErr.Error(), "")
+		}
+	}
+
+	return abejson.MarshalResponse(id, result, jsonErr)
+}
+
+// internalRPCError is a convenience function to convert an internal error to
+// an RPC error with the appropriate code set.  It also logs the error to the
+// RPC server subsystem since internal errors really should not occur.  The
+// context parameter is only used in the log message and may be empty if it's
+// not needed.
+func internalRPCError(errStr, context string) *abejson.RPCError {
+	logStr := errStr
+	if context != "" {
+		logStr = context + ": " + errStr
+	}
+	log.Error(logStr)
+	return abejson.NewRPCError(abejson.ErrRPCInternal.Code, errStr)
+}
+
+// standardCmdResult checks that a parsed command is a standard JSON-RPC
+// command and runs the appropriate handler to reply to the command.  Any
+// commands which are not recognized or not implemented will return an error
+// suitable for use in replies.
+func (s *Server) standardCmdResult(cmd *parsedRPCCmd, closeChan <-chan struct{}) (interface{}, error) {
+	handler, ok := rpcHandlers[cmd.method]
+	if ok {
+		goto handled
+	}
+	return nil, pooljson.ErrRPCMethodNotFound
+handled:
+	return handler.handler(cmd.cmd, s.wallet)
 }

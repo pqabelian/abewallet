@@ -7,4 +7,6 @@ type Options struct {
 
 	MaxPOSTClients      int64
 	MaxWebsocketClients int64
+
+	MaxConcurrentReqs int
 }
