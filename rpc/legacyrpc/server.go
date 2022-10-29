@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/abesuite/abe-miningpool-server/pooljson"
 	"github.com/abesuite/abec/abejson"
 	"io"
 	"io/ioutil"
@@ -677,7 +676,7 @@ func (s *Server) standardCmdResult(cmd *parsedRPCCmd, closeChan <-chan struct{})
 	if ok {
 		goto handled
 	}
-	return nil, pooljson.ErrRPCMethodNotFound
+	return nil, abejson.ErrRPCMethodNotFound
 handled:
 	return handler.handler(cmd.cmd, s.wallet)
 }
