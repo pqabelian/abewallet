@@ -49,6 +49,7 @@ const (
 const (
 	NTTransactionAccepted NotificationType = iota
 	NTTransactionRollback
+	NTTransactionInvalid
 )
 
 // NotificationType represents the type of a notification message.
@@ -1943,10 +1944,16 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 		w.NtfnServer.notifyUnspentOutput(0, hash, index)
 	}
 	w.TxStore.NotifyTransactionAccepted = func(txInfo *wtxmgr.TransactionInfo) {
+		log.Debugf("send transaction accepted notification with hash %s and height %d", txInfo.TxHash, txInfo.Height)
 		w.sendNotification(NTTransactionAccepted, txInfo)
 	}
 	w.TxStore.NotifyTransactionRollback = func(txInfo *wtxmgr.TransactionInfo) {
+		log.Debugf("send transaction rollback notification with hash %s and height %d", txInfo.TxHash, txInfo.Height)
 		w.sendNotification(NTTransactionRollback, txInfo)
+	}
+	w.TxStore.NotifyTransactionInvalid = func(txInfo *wtxmgr.TransactionInfo) {
+		log.Debugf("send transaction invalid notification with hash %s and height %d", txInfo.TxHash, txInfo.Height)
+		w.sendNotification(NTTransactionInvalid, txInfo)
 	}
 	return w, nil
 }

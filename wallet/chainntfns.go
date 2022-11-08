@@ -288,18 +288,6 @@ func (w *Wallet) connectBlock(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) err
 func (w *Wallet) disconnectBlock(dbtx walletdb.ReadWriteTx, b wtxmgr.BlockMeta) error {
 	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
-
-	block, err := w.chainClient.GetBlockAbe(&b.Hash)
-	if err != nil {
-		return err
-	}
-
-	for i := 0; i < len(block.Transactions); i++ {
-		w.TxStore.NotifyTransactionRollback(&wtxmgr.TransactionInfo{
-			Tx:     block.Transactions[i],
-			Height: b.Height,
-		})
-	}
 	//if !w.ChainSynced() { // if the wallet is syncing with backend, wait for it...
 	//	return nil
 	//}

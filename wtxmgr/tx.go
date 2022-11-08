@@ -165,8 +165,8 @@ type indexedIncidence struct {
 type TxRecord struct {
 	MsgTx        wire.MsgTxAbe
 	Hash         chainhash.Hash
-	Received     time.Time
-	SerializedTx []byte // Optional: may be nil
+	Received     time.Time // record the record status
+	SerializedTx []byte    // Optional: may be nil
 }
 
 // NewTxRecord creates a new transaction record that may be inserted into the
@@ -724,9 +724,10 @@ type Store struct {
 	NotifyUnspent             func(hash *chainhash.Hash, index uint32)
 	NotifyTransactionAccepted func(txInfo *TransactionInfo)
 	NotifyTransactionRollback func(txInfo *TransactionInfo)
+	NotifyTransactionInvalid  func(txInfo *TransactionInfo)
 }
 type TransactionInfo struct {
-	Tx     *wire.MsgTxAbe
+	TxHash *chainhash.Hash
 	Height int32
 }
 
@@ -740,7 +741,7 @@ func Open(addrMgr *waddrmgr.Manager, ns walletdb.ReadBucket, chainParams *chainc
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{addrMgr, chainParams, clock.NewDefaultClock(), nil, nil, nil} // TODO: set callbacks
+	s := &Store{addrMgr, chainParams, clock.NewDefaultClock(), nil, nil, nil, nil} // TODO: set callbacks
 	return s, nil
 }
 
@@ -856,6 +857,13 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 						return err
 					}
 					offset += chainhash.HashSize
+					txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+					txInfo := &TransactionInfo{
+						TxHash: txHash,
+						Height: block.Height,
+					}
+					s.NotifyTransactionRollback(txInfo)
+					log.Infof("send rollback transaction notification %v at height %d", txInfo.TxHash, txInfo.Height)
 					continue
 				}
 				// other conflict transaction should be marked invalid
@@ -869,6 +877,14 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 					if err != nil {
 						return err
 					}
+					txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+					txInfo := &TransactionInfo{
+						TxHash: txHash,
+						Height: block.Height,
+					}
+					s.NotifyTransactionInvalid(txInfo)
+					log.Infof("send rollback transaction notification %v at height %d", txInfo.TxHash, txInfo.Height)
+
 				}
 				conflictTx = existsRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
 				if len(conflictTx) != 0 {
@@ -880,6 +896,13 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 					if err != nil {
 						return err
 					}
+					txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+					txInfo := &TransactionInfo{
+						TxHash: txHash,
+						Height: block.Height,
+					}
+					s.NotifyTransactionInvalid(txInfo)
+					log.Infof("send rollback transaction notification %v at height %d", txInfo.TxHash, txInfo.Height)
 				}
 				offset += chainhash.HashSize
 			}
@@ -1064,13 +1087,6 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 	}
 
 	coinbaseTx := block.TxRecords[0].MsgTx
-	// For test
-	txInf := &TransactionInfo{
-		Tx:     &coinbaseTx,
-		Height: block.Height,
-	}
-	s.NotifyTransactionAccepted(txInf)
-	log.Infof("send notification %v", txInf)
 
 	coinbaseOutput := make(map[wire.OutPointAbe]*UnspentUTXO)
 	blockOutputs := make(map[Block][]wire.OutPointAbe)
@@ -1122,12 +1138,6 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 	for i := 1; i < len(block.TxRecords); i++ { // trace every tx in this block
 		txi := block.TxRecords[i].MsgTx
 		txhash := txi.TxHash()
-		s.NotifyTransactionAccepted(
-			&TransactionInfo{
-				Tx:     &txi,
-				Height: block.Height,
-			})
-
 		// traverse all the inputs of a transaction
 		// 1. add serial number to corresponding ring if needed
 		// 2. move consumed txo to spentconfirmed bucket
@@ -1182,6 +1192,8 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 					txiHash := txi.TxHash()
 					// read relevant transaction hashes
 					relevantTxs := existsRawReleventTxs(txMgrNs, k)
+					// check the current transaction is included or not in relevant transaction
+					// remove the relevant except current transaction in unconfirmed bucket into invalid transaction bucket
 					flag := false
 					if len(relevantTxs) != 0 {
 						offset := 0
@@ -1198,6 +1210,12 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 								if err != nil {
 									return err
 								}
+								txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+								// TODO(202211) send invalid notification to registered client
+								s.NotifyTransactionInvalid(&TransactionInfo{
+									TxHash: txHash,
+									Height: block.Height,
+								})
 								err = putRawInvalidTx(txMgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
 								if err != nil {
 									return err
@@ -1228,6 +1246,8 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			relevantUTXORings[ringHash] = u
 		}
 
+		// it means current transaction consumes some txo belongs wallet
+		// move it from unconfirmed/invalid bucket to confirmed bucket
 		if trFlag {
 			// delete from unconfirmed transaction set if exist
 			if len(existsRawUnconfirmedTx(txMgrNs, txhash[:])) != 0 {
@@ -1237,13 +1257,14 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 				}
 			}
 			// delete from invalid transaction set if exist
-			if len(existsRawUnconfirmedTx(txMgrNs, txhash[:])) != 0 {
+			if len(existsRawInvalidTx(txMgrNs, txhash[:])) != 0 {
 				err = deleteRawInvalidTx(txMgrNs, txhash[:])
 				if err != nil {
 					return err
 				}
 			}
 
+			// TODO(202211) send confirmed notification to registered client
 			// and move to confirmed transaction set
 			txRecord, err := NewTxRecordFromMsgTx(&txi, block.RecvTime)
 			if err != nil {
@@ -1257,7 +1278,11 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			if err != nil {
 				return err
 			}
-
+			txHash := txi.TxHash()
+			s.NotifyTransactionAccepted(&TransactionInfo{
+				TxHash: &txHash,
+				Height: block.Height,
+			})
 		}
 		// update the utxo ring bucket
 		for k, v := range relevantUTXORings {
@@ -2002,10 +2027,16 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 									if err != nil {
 										return err
 									}
+									// TODO(202211) send invalid notification to registered client
 									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
 									if err != nil {
 										return err
 									}
+									txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+									s.NotifyTransactionInvalid(&TransactionInfo{
+										TxHash: txHash,
+										Height: i,
+									})
 								}
 								offset += chainhash.HashSize
 							}
@@ -2047,10 +2078,16 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 									if err != nil {
 										return err
 									}
+									// TODO(202211) send invalid notification to registered client
 									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
 									if err != nil {
 										return err
 									}
+									txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+									s.NotifyTransactionInvalid(&TransactionInfo{
+										TxHash: txHash,
+										Height: i,
+									})
 								}
 								offset += chainhash.HashSize
 							}
@@ -2102,10 +2139,16 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 									if err != nil {
 										return err
 									}
+									// TODO(202211) send invalid notification to registered client
 									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
 									if err != nil {
 										return err
 									}
+									txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+									s.NotifyTransactionInvalid(&TransactionInfo{
+										TxHash: txHash,
+										Height: i,
+									})
 								}
 								conflictTx = existsRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
 								if len(conflictTx) != 0 {
@@ -2113,10 +2156,16 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 									if err != nil {
 										return err
 									}
+									// TODO(202211) send invalid notification to registered client
 									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
 									if err != nil {
 										return err
 									}
+									txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+									s.NotifyTransactionInvalid(&TransactionInfo{
+										TxHash: txHash,
+										Height: i,
+									})
 								}
 								offset += chainhash.HashSize
 							}
@@ -2248,10 +2297,16 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 									if err != nil {
 										return err
 									}
+									// TODO(202211) send unconfirmed notification to registered client
 									err = putRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
 									if err != nil {
 										return err
 									}
+									txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+									s.NotifyTransactionRollback(&TransactionInfo{
+										TxHash: txHash,
+										Height: i,
+									})
 								}
 								conflictTx = existsRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
 								if len(conflictTx) != 0 {
@@ -2259,10 +2314,16 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 									if err != nil {
 										return err
 									}
+									// TODO(202211) send unconfirmed notification to registered client
 									err = putRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
 									if err != nil {
 										return err
 									}
+									txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+									s.NotifyTransactionRollback(&TransactionInfo{
+										TxHash: txHash,
+										Height: i,
+									})
 								}
 								offset += chainhash.HashSize
 							}
@@ -2304,10 +2365,16 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 										if err != nil {
 											return err
 										}
+										// TODO(202211) send unconfirmed notification to registered client
 										err = putRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
 										if err != nil {
 											return err
 										}
+										txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+										s.NotifyTransactionRollback(&TransactionInfo{
+											TxHash: txHash,
+											Height: i,
+										})
 									}
 									conflictTx = existsRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
 									if len(conflictTx) != 0 {
@@ -2315,10 +2382,16 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 										if err != nil {
 											return err
 										}
+										// TODO(202211) send unconfirmed notification to registered client
 										err = putRawUnconfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
 										if err != nil {
 											return err
 										}
+										txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+										s.NotifyTransactionRollback(&TransactionInfo{
+											TxHash: txHash,
+											Height: i,
+										})
 									}
 									offset += chainhash.HashSize
 								}
@@ -2378,10 +2451,16 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 									if err != nil {
 										return err
 									}
+									// TODO(202211) send invalid notification to registered client
 									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
 									if err != nil {
 										return err
 									}
+									txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+									s.NotifyTransactionInvalid(&TransactionInfo{
+										TxHash: txHash,
+										Height: i,
+									})
 								}
 								conflictTx = existsRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
 								if len(conflictTx) != 0 {
@@ -2389,10 +2468,16 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 									if err != nil {
 										return err
 									}
+									// TODO(202211) send invalid notification to registered client
 									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
 									if err != nil {
 										return err
 									}
+									txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+									s.NotifyTransactionInvalid(&TransactionInfo{
+										TxHash: txHash,
+										Height: i,
+									})
 								}
 								offset += chainhash.HashSize
 							}
@@ -2423,10 +2508,16 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 									if err != nil {
 										return err
 									}
+									// TODO(202211) send invalid notification to registered client
 									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
 									if err != nil {
 										return err
 									}
+									txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+									s.NotifyTransactionInvalid(&TransactionInfo{
+										TxHash: txHash,
+										Height: i,
+									})
 								}
 								conflictTx = existsRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
 								if len(conflictTx) != 0 {
@@ -2434,10 +2525,16 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 									if err != nil {
 										return err
 									}
+									// TODO(202211) send invalid notification to registered client
 									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
 									if err != nil {
 										return err
 									}
+									txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+									s.NotifyTransactionInvalid(&TransactionInfo{
+										TxHash: txHash,
+										Height: i,
+									})
 								}
 								offset += chainhash.HashSize
 							}
@@ -2477,10 +2574,16 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 									if err != nil {
 										return err
 									}
+									// TODO(202211) send invalid notification to registered client
 									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
 									if err != nil {
 										return err
 									}
+									txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+									s.NotifyTransactionInvalid(&TransactionInfo{
+										TxHash: txHash,
+										Height: i,
+									})
 								}
 								conflictTx = existsRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
 								if len(conflictTx) != 0 {
@@ -2488,10 +2591,16 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 									if err != nil {
 										return err
 									}
+									// TODO(202211) send invalid notification to registered client
 									err = putRawInvalidTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
 									if err != nil {
 										return err
 									}
+									txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+									s.NotifyTransactionInvalid(&TransactionInfo{
+										TxHash: txHash,
+										Height: i,
+									})
 								}
 								offset += chainhash.HashSize
 							}

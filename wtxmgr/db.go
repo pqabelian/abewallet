@@ -78,7 +78,7 @@ var (
 	bucketConfirmedTx   = []byte("confirmedtx")   // confirmed transaction
 
 	// map transaction output to transaction hash set
-	bucketRelevantTxs = []byte("relevanttxs") // relevant transaction set
+	bucketRelevantTxs = []byte("relevanttxs") // relevant transaction set: (txhash,index) -> [relevant transaction hashes]
 )
 
 // Root (namespace) bucket keys
@@ -250,8 +250,8 @@ func readCanonicalOutPoint(k []byte, op *wire.OutPoint) error {
 
 // The canonical outpoint serialization format is:
 //
-//   [0:32]  Trasaction hash (32 bytes)
-//   [32:36] Output index (4 bytes)
+//	[0:32]  Trasaction hash (32 bytes)
+//	[32:36] Output index (4 bytes)
 //
 // The canonical transaction hash serialization is simply the hash.
 func canonicalOutPointAbe(txHash chainhash.Hash, index uint8) []byte {
@@ -296,13 +296,16 @@ func readCanonicalBlock(k []byte, b *Block) error {
 
 // Details regarding raw block are saved as k/v pairs in the rawblock bucket.
 // rawblock are keyed by their height and hash.
-//The key is serialized as such:
-//	 [0:4] Height(4 bytes)
-//   [4:36]  Hash (32 bytes)
-//The value is serialized as such:
-//	 [0:80] Header(80 bytes)
-//   [80:84]Number of transaction (32 bytes)
-//   [84:] transactions?
+// The key is serialized as such:
+//
+//		 [0:4] Height(4 bytes)
+//	  [4:36]  Hash (32 bytes)
+//
+// The value is serialized as such:
+//
+//		 [0:80] Header(80 bytes)
+//	  [80:84]Number of transaction (32 bytes)
+//	  [84:] transactions?
 func valueBlock(block wire.MsgBlockAbe) []byte {
 	buf := bytes.NewBuffer(make([]byte, 0, block.SerializeSize()))
 	err := block.Serialize(buf)
@@ -658,7 +661,7 @@ func putBlockOutput(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	return nil
 }
 
-//TODO(abe):integrated function
+// TODO(abe):integrated function
 func fetchBlockOutputWithHeight(ns walletdb.ReadBucket, height int32) ([]byte, []*wire.OutPointAbe, error) {
 	k := make([]byte, 36)
 	var v []byte
@@ -748,7 +751,7 @@ func deleteBlockOutput(ns walletdb.ReadWriteBucket, k []byte) error {
 	return nil
 }
 
-//BlockInputs: block height||block hash => [](utxoRing ||[]serialNumbers)
+// BlockInputs: block height||block hash => [](utxoRing ||[]serialNumbers)
 // For the utxoRing, it is before processing the block, and the serialNumber slice
 // is the releavant Ring which contains at least one relevant output in this Ring
 func valueBlockInput(blockInputs *RingHashSerialNumbers) []byte {
@@ -1066,7 +1069,7 @@ func deleteMaturedOutput(ns walletdb.ReadWriteBucket, k []byte) error {
 	return nil
 }
 
-//UnspentTXO: store the relevant output which is unspent by current wallet
+// UnspentTXO: store the relevant output which is unspent by current wallet
 // its key is transaction hash with the output index
 // its value is relevant information : From height,Fromcoinbase,amount,generation time, rinhash
 func valueUnspentTXO(fromCoinBase bool, version uint32, height int32, amount uint64, index uint8, generationTime time.Time, ringHash chainhash.Hash, ringSize uint8) []byte {
@@ -1097,7 +1100,7 @@ func valueUnspentTXO(fromCoinBase bool, version uint32, height int32, amount uin
 	return v
 }
 
-//UnspentButUnminedTXO: store the relevant output which is spent by current wallet but now not contained in a block
+// UnspentButUnminedTXO: store the relevant output which is spent by current wallet but now not contained in a block
 // its key is transaction hash with the output index
 // its value is relevant information :
 // height, from coinbase,amount,generation time, rinhash,serialNumber，spentBy, spentTime,
@@ -1337,10 +1340,10 @@ func ConfirmSpentTXO(ns walletdb.ReadWriteBucket, txHash chainhash.Hash, index u
 	return putMinedBalance(ns, balance)
 }
 
-//All the relevant UTXORing are keyed as such:
+// All the relevant UTXORing are keyed as such:
 //
-//    [0:32] RingHash(32 bytes)
-//    value see the serialize method of Ring
+//	[0:32] RingHash(32 bytes)
+//	value see the serialize method of Ring
 func keyRingDetails(ring *Ring) []byte {
 	return ring.Hash()
 }
@@ -1394,10 +1397,10 @@ func updateDeletedHeightRingDetails(ns walletdb.ReadWriteBucket, k []byte, heigh
 	return nil
 }
 
-//All the relevant ring are keyed as such:
+// All the relevant ring are keyed as such:
 //
-//    [0:32] RingHash(32 bytes)
-//    value see the serialize method of UTXORing
+//	[0:32] RingHash(32 bytes)
+//	value see the serialize method of UTXORing
 func valueUTXORing(u *UTXORing) []byte {
 	return u.Serialize()[:]
 }
@@ -1516,7 +1519,11 @@ func readUnspentBlock(v []byte, block *Block) error {
 //   [8:]    Serialized transaction (varies)
 
 func putRawUnconfirmedTx(ns walletdb.ReadWriteBucket, k, v []byte) error {
-	err := ns.NestedReadWriteBucket(bucketUnconfirmedTx).Put(k, v)
+	// update the update time
+	newBytes := make([]byte, 8, len(v))
+	byteOrder.PutUint64(newBytes, uint64(time.Now().Unix()))
+	newBytes = append(newBytes, v[8:]...)
+	err := ns.NestedReadWriteBucket(bucketUnconfirmedTx).Put(k, newBytes)
 	if err != nil {
 		str := "fail to put unconfirmed transaction"
 		return storeError(ErrDatabase, str, err)
@@ -1524,7 +1531,11 @@ func putRawUnconfirmedTx(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	return nil
 }
 func putRawInvalidTx(ns walletdb.ReadWriteBucket, k, v []byte) error {
-	err := ns.NestedReadWriteBucket(bucketInvalidTx).Put(k, v)
+	// update the update time
+	newBytes := make([]byte, 8, len(v))
+	byteOrder.PutUint64(newBytes, uint64(time.Now().Unix()))
+	newBytes = append(newBytes, v[8:]...)
+	err := ns.NestedReadWriteBucket(bucketInvalidTx).Put(k, newBytes)
 	if err != nil {
 		str := "fail to put invalid transaction"
 		return storeError(ErrDatabase, str, err)
@@ -1532,6 +1543,7 @@ func putRawInvalidTx(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	return nil
 }
 func putRawConfirmedTx(ns walletdb.ReadWriteBucket, k, v []byte) error {
+	// Do not update the time, because confirm transaction just be put by receiving block
 	err := ns.NestedReadWriteBucket(bucketConfirmedTx).Put(k, v)
 	if err != nil {
 		str := "fail to put confirmed transaction"
@@ -1548,7 +1560,7 @@ func putRawRelevantTxs(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	return nil
 }
 
-//TODO(abe):this function will be reused for unminedAbe
+// TODO(abe):this function will be reused for unminedAbe
 func readRawUnminedHash(k []byte, txHash *chainhash.Hash) error {
 	if len(k) < 32 {
 		str := "short unmined key"
@@ -1592,7 +1604,8 @@ func DeleteRawUnmined(ns walletdb.ReadWriteBucket, tx *wire.MsgTxAbe) error {
 }
 
 // TODO(abe):when delete the entry in unminedAbe, it must explicit where the corresponding entry in spent but unmined into
-//  SpentAndConfirm or UnspentTXO bucket?
+//
+//	SpentAndConfirm or UnspentTXO bucket?
 func deleteRawUnconfirmedTx(ns walletdb.ReadWriteBucket, k []byte) error {
 	err := ns.NestedReadWriteBucket(bucketUnconfirmedTx).Delete(k)
 	if err != nil {

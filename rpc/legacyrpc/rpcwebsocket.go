@@ -218,7 +218,7 @@ func (m *wsNotificationManager) HandleMinerManagerNotification(notification *wal
 		if !ok {
 			break
 		}
-		n := &notificationTxAccepted{tx: txInfo.Tx, Height: txInfo.Height}
+		n := &notificationTxAccepted{tx: txInfo.TxHash, Height: txInfo.Height}
 
 		select {
 		case m.queueNotification <- n:
@@ -229,7 +229,18 @@ func (m *wsNotificationManager) HandleMinerManagerNotification(notification *wal
 		if !ok {
 			break
 		}
-		n := &notificationTxRollback{tx: txInfo.Tx, Height: txInfo.Height}
+		n := &notificationTxRollback{tx: txInfo.TxHash, Height: txInfo.Height}
+
+		select {
+		case m.queueNotification <- n:
+		case <-m.quit:
+		}
+	case wallet.NTTransactionInvalid:
+		txInfo, ok := notification.Data.(*wtxmgr.TransactionInfo)
+		if !ok {
+			break
+		}
+		n := &notificationTxInvalid{tx: txInfo.TxHash, Height: txInfo.Height}
 
 		select {
 		case m.queueNotification <- n:
@@ -241,11 +252,15 @@ func (m *wsNotificationManager) HandleMinerManagerNotification(notification *wal
 
 // todo (ABE):
 type notificationTxAccepted struct {
-	tx     *wire.MsgTxAbe
+	tx     *chainhash.Hash
 	Height int32
 }
 type notificationTxRollback struct {
-	tx     *wire.MsgTxAbe
+	tx     *chainhash.Hash
+	Height int32
+}
+type notificationTxInvalid struct {
+	tx     *chainhash.Hash
 	Height int32
 }
 
@@ -306,11 +321,15 @@ out:
 			switch n := n.(type) {
 			case *notificationTxAccepted:
 				if len(txNotifications) != 0 {
-					m.notifyTransactionAccepted(txNotifications, n.tx.TxHash(), n.Height)
+					m.notifyTransactionAccepted(txNotifications, *n.tx, n.Height)
 				}
 			case *notificationTxRollback:
 				if len(txNotifications) != 0 {
-					m.notifyTransactionRollback(txNotifications, n.tx.TxHash(), n.Height)
+					m.notifyTransactionRollback(txNotifications, *n.tx, n.Height)
+				}
+			case *notificationTxInvalid:
+				if len(txNotifications) != 0 {
+					m.notifyTransactionInvalid(txNotifications, *n.tx, n.Height)
 				}
 
 			case *notificationRegisterClient:
@@ -391,6 +410,22 @@ func (m *wsNotificationManager) notifyTransactionAccepted(clients map[chan struc
 func (m *wsNotificationManager) notifyTransactionRollback(clients map[chan struct{}]*wsClient, txHash chainhash.Hash, height int32) {
 	txHashStr := txHash.String()
 	ntfn := abejson.NewTxRollbackNtfn(txHashStr, height)
+	marshalledJSON, err := abejson.MarshalCmd(nil, ntfn)
+	if err != nil {
+		log.Errorf("Failed to marshal tx notification: %s", err.Error())
+		return
+	}
+	for _, wsc := range clients {
+		err = wsc.QueueNotification(marshalledJSON)
+		if err != nil {
+			log.Errorf("Failed to send tx notification: %s", err.Error())
+			return
+		}
+	}
+}
+func (m *wsNotificationManager) notifyTransactionInvalid(clients map[chan struct{}]*wsClient, txHash chainhash.Hash, height int32) {
+	txHashStr := txHash.String()
+	ntfn := abejson.NewTxInvalidNtfn(txHashStr, height)
 	marshalledJSON, err := abejson.MarshalCmd(nil, ntfn)
 	if err != nil {
 		log.Errorf("Failed to marshal tx notification: %s", err.Error())
