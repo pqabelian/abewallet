@@ -769,7 +769,7 @@ func Create(ns walletdb.ReadWriteBucket) error {
 func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block *BlockMeta) error {
 	//TODO(abe):remove the outputs of the wallet spent by given tx from UnspentTXObucket to SpentButUmined bucket
 	if block != nil {
-		return fmt.Errorf("InsertTx just consideates the unconfirmed transaction")
+		return fmt.Errorf("InsertTx just considerates the unconfirmed transaction")
 	}
 	v := existsRawUnconfirmedTx(wtxmgrNs, rec.Hash[:])
 	if v != nil { // it means that has exists unmined transaction bucket
@@ -857,13 +857,6 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 						return err
 					}
 					offset += chainhash.HashSize
-					txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
-					txInfo := &TransactionInfo{
-						TxHash: txHash,
-						Height: block.Height,
-					}
-					s.NotifyTransactionRollback(txInfo)
-					log.Infof("send rollback transaction notification %v at height %d", txInfo.TxHash, txInfo.Height)
 					continue
 				}
 				// other conflict transaction should be marked invalid
@@ -880,11 +873,10 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 					txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
 					txInfo := &TransactionInfo{
 						TxHash: txHash,
-						Height: block.Height,
+						Height: s.manager.SyncedTo().Height,
 					}
 					s.NotifyTransactionInvalid(txInfo)
 					log.Infof("send invalid transaction notification %v at height %d", txInfo.TxHash, txInfo.Height)
-
 				}
 				conflictTx = existsRawConfirmedTx(wtxmgrNs, relevantTxs[offset:offset+chainhash.HashSize])
 				if len(conflictTx) != 0 {
@@ -899,7 +891,7 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 					txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
 					txInfo := &TransactionInfo{
 						TxHash: txHash,
-						Height: block.Height,
+						Height: s.manager.SyncedTo().Height,
 					}
 					s.NotifyTransactionInvalid(txInfo)
 					log.Infof("send invalid transaction notification %v at height %d", txInfo.TxHash, txInfo.Height)
@@ -926,7 +918,7 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 	}
 	txInfo := &TransactionInfo{
 		TxHash: &rec.Hash,
-		Height: block.Height,
+		Height: s.manager.SyncedTo().Height,
 	}
 	s.NotifyTransactionRollback(txInfo)
 	log.Infof("send unconfirmed transaction notification %v at height %d", txInfo.TxHash, txInfo.Height)
