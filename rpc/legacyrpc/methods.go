@@ -106,6 +106,7 @@ var rpcHandlers = map[string]struct {
 	"listconfirmedtxoabe":   {handler: listSpentAndMinedAbe},
 	"listconfirmedtxs":      {handler: listConfirmedTxs},
 	"listinvalidtxs":        {handler: listInvalidTxs},
+	"transactionstatus":     {handler: txStatus},
 	"listunconfirmedtxs":    {handler: listUnconfirmedTxs},
 
 	"lockunspent": {handler: lockUnspent},
@@ -853,6 +854,19 @@ func listInvalidTxs(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 		res[i] = invalidTxHashs[i].String()
 	}
 	return res, nil
+}
+
+func txStatus(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.TxStatusCmd)
+	txHash, err := chainhash.NewHashFromStr(cmd.TxHash)
+	if err != nil {
+		return -1, err
+	}
+	status, err := w.TransactionStatus(txHash)
+	if err != nil {
+		return nil, err
+	}
+	return status, nil
 }
 
 // lockUnspent handles the lockunspent command.

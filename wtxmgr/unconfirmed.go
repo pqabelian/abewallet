@@ -1,6 +1,7 @@
 package wtxmgr
 
 import (
+	"fmt"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/wire"
 	"github.com/abesuite/abewallet/walletdb"
@@ -104,4 +105,23 @@ func (s *Store) invalidTxHashes(ns walletdb.ReadBucket) ([]*chainhash.Hash, erro
 		return err
 	})
 	return hashes, err
+}
+
+func (s *Store) TxStatus(ns walletdb.ReadBucket, hash *chainhash.Hash) (int, error) {
+	k := hash.CloneBytes()
+	v := existsRawUnconfirmedTx(ns, k)
+	if v != nil && len(v) != 0 {
+		return 0, nil
+	}
+
+	v = existsRawConfirmedTx(ns, k)
+	if v != nil && len(v) != 0 {
+		return 1, nil
+	}
+
+	v = existsRawInvalidTx(ns, k)
+	if v != nil && len(v) != 0 {
+		return 2, nil
+	}
+	return -1, fmt.Errorf("not exist given transaction")
 }

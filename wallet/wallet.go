@@ -1036,6 +1036,17 @@ func (w *Wallet) FetchInvalidTxHashs() ([]*chainhash.Hash, error) {
 	return txHashs, err
 }
 
+func (w *Wallet) TransactionStatus(hash *chainhash.Hash) (int, error) {
+	var status int
+	var err error
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		status, err = w.TxStore.TxStatus(txmgrNs, hash)
+		return err
+	})
+	return status, err
+}
+
 func (w *Wallet) FetchDetailedUtxos(confirms int32) (string, error) {
 	var details []string
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
@@ -1521,6 +1532,9 @@ func (w *Wallet) SendOutputs(outputDescs []*abecrypto.AbeTxOutputDesc,
 		return nil, err
 	}
 
+	for i := 0; i < len(createdTx.Tx.TxOuts); i++ {
+		log.Debugf("tx output [%d] = %x\n", i, createdTx.Tx.TxOuts[i].TxoScript)
+	}
 	// Sanity check on the returned tx hash.
 	// something error ?
 	if *txHash != createdTx.Tx.TxHash() {
