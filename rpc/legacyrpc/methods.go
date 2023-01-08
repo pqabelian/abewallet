@@ -99,15 +99,16 @@ var rpcHandlers = map[string]struct {
 	//"listsinceblock": {handlerWithChain: listSinceBlock},
 	//"listtransactions":       {handler: listTransactions},
 	//"listunspent":            {handler: listUnspent},
-	"listallutxoabe":        {handler: listAllUTXOAbe},
-	"listimmaturetxoabe":    {handler: listUnmaturedUTXOAbe},
-	"listmaturetxoabe":      {handler: listUnspentAbe},
-	"listunconfirmedtxoabe": {handler: listSpentButUnminedAbe},
-	"listconfirmedtxoabe":   {handler: listSpentAndMinedAbe},
-	"listconfirmedtxs":      {handler: listConfirmedTxs},
-	"listinvalidtxs":        {handler: listInvalidTxs},
-	"transactionstatus":     {handler: txStatus},
-	"listunconfirmedtxs":    {handler: listUnconfirmedTxs},
+	"listallutxoabe":           {handler: listAllUTXOAbe},
+	"listimmaturetxoabe":       {handler: listUnmaturedUTXOAbe},
+	"listmaturetxoabe":         {handler: listUnspentAbe},
+	"listmaturecoinbasetxoabe": {handler: listUnspentCoinbaseAbe},
+	"listunconfirmedtxoabe":    {handler: listSpentButUnminedAbe},
+	"listconfirmedtxoabe":      {handler: listSpentAndMinedAbe},
+	"listconfirmedtxs":         {handler: listConfirmedTxs},
+	"listinvalidtxs":           {handler: listInvalidTxs},
+	"transactionstatus":        {handler: txStatus},
+	"listunconfirmedtxs":       {handler: listUnconfirmedTxs},
 
 	"lockunspent": {handler: lockUnspent},
 	//"sendfrom":               {handlerWithChain: sendFrom},
@@ -684,6 +685,7 @@ type utxo struct {
 	FromCoinbase bool
 	Amount       uint64
 	Height       int32
+	UTXOHash     chainhash.Hash
 }
 type utxoset []utxo
 
@@ -717,6 +719,7 @@ func listAllUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 			FromCoinbase: utxos[i].FromCoinBase,
 			Amount:       utxos[i].Amount,
 			Height:       utxos[i].Height,
+			UTXOHash:     utxos[i].Hash(),
 		})
 	}
 	for i := 0; i < len(unmatureds); i++ {
@@ -727,6 +730,7 @@ func listAllUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 			FromCoinbase: unmatureds[i].FromCoinBase,
 			Amount:       unmatureds[i].Amount,
 			Height:       unmatureds[i].Height,
+			UTXOHash:     unmatureds[i].Hash(),
 		})
 	}
 	t := utxoset(res)
@@ -748,6 +752,7 @@ func listUnmaturedUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, erro
 			FromCoinbase: unmatureds[i].FromCoinBase,
 			Amount:       unmatureds[i].Amount,
 			Height:       unmatureds[i].Height,
+			UTXOHash:     unmatureds[i].Hash(),
 		})
 	}
 	t := utxoset(res)
@@ -770,12 +775,40 @@ func listUnspentAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 			FromCoinbase: utxos[i].FromCoinBase,
 			Amount:       utxos[i].Amount,
 			Height:       utxos[i].Height,
+			UTXOHash:     utxos[i].Hash(),
 		})
 	}
 	t := utxoset(res)
 	sort.Sort(&t)
 	return res, nil
 }
+
+func listUnspentCoinbaseAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	_ = icmd.(*abejson.ListUnspentCoinbaseAbeCmd)
+	utxos, err := w.FetchUnspentUTXOSet()
+	if err != nil {
+		return nil, err
+	}
+	res := make([]utxo, 0, len(utxos))
+	for i := 0; i < len(utxos); i++ {
+		if utxos[i].FromCoinBase {
+			res = append(res, utxo{
+				RingHash:     utxos[i].RingHash.String(),
+				TxHash:       utxos[i].TxOutput.TxHash.String(),
+				Index:        utxos[i].TxOutput.Index,
+				FromCoinbase: utxos[i].FromCoinBase,
+				Amount:       utxos[i].Amount,
+				Height:       utxos[i].Height,
+				UTXOHash:     utxos[i].Hash(),
+			})
+		}
+
+	}
+	t := utxoset(res)
+	sort.Sort(&t)
+	return res, nil
+}
+
 func listSpentButUnminedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	_ = icmd.(*abejson.ListSpentButUnminedAbeCmd)
 	sbutxos, err := w.FetchSpentButUnminedTXOSet()

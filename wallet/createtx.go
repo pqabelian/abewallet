@@ -489,6 +489,7 @@ func (w *Wallet) txPqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc, mi
 					inputRingVersions = append(inputRingVersions, txo.Version)
 					selectedRingSizes = append(selectedRingSizes, txo.RingSize)
 				}
+				log.Infof("utxoSpecified: targetValue %d, feeSpecified %d, currentTotal %d", targetValue, feeSpecified, currentTotal)
 				if currentTotal >= targetValue+feeSpecified {
 					txFee = feeSpecified
 					if currentTotal > targetValue+feeSpecified {
@@ -885,7 +886,7 @@ func (w *Wallet) findEligibleOutputsAbe(txmgrNs walletdb.ReadBucket, minconf int
 	return eligible, rings, nil
 }
 
-//	todo (AliceBob): This method just read the eligible Txos from WalletDB
+// todo (AliceBob): This method just read the eligible Txos from WalletDB
 func (w *Wallet) findEligibleTxosAbe(txmgrNs walletdb.ReadBucket, minconf int32, bs *waddrmgr.BlockStamp) ([]wtxmgr.UnspentUTXO, error) {
 	unspent, err := w.TxStore.UnspentOutputs(txmgrNs) // In ABE, this result will be spendable for the logic of store
 	if err != nil {
