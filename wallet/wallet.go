@@ -112,6 +112,10 @@ type Wallet struct {
 
 	lockedOutpoints map[wire.OutPoint]struct{}
 
+	unminedTxs              sync.Map
+	resendUnminedTxFlag     bool
+	resendUnminedTxFlagLock sync.RWMutex
+
 	recoveryWindow uint32
 
 	// Channels for rescan processing.  Requests are added and merged with
@@ -1358,28 +1362,40 @@ func (w *Wallet) resendUnminedTx() {
 		return
 	}
 
-	for _, tx := range txs {
+	for i := 0; i < len(txs); i++ {
+		if _, ok := w.unminedTxs.Load(txs[i].TxHash()); !ok {
+			w.unminedTxs.Store(txs[i].TxHash(), txs[i])
+		}
+	}
+	if !w.resendUnminedTxFlagLock.TryLock() {
+		return
+	}
+	w.resendUnminedTxFlag = !w.resendUnminedTxFlag
+
+	w.unminedTxs.Range(func(key, value interface{}) bool {
+		tx := value.(*wire.MsgTxAbe)
 		txHash, err := w.publishTransaction(tx)
 		// TODO 20220611 according to the response to handle
 		// not all delete the unmined transaction
 		if err != nil {
 			log.Debugf("Unable to rebroadcast transaction %v: %v",
 				tx.TxHash(), err)
-			err = walletdb.Update(w.db, func(dbtx walletdb.ReadWriteTx) error {
-				txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
-				return wtxmgr.DeleteRawUnmined(txmgrNs, tx)
-			})
-			if err != nil {
-				log.Errorf("Unable to retrieve unconfirmed transactions to "+
-					"resend: %v", err)
-				return
-			}
-			continue
+			return true
 		}
-
+		err = walletdb.Update(w.db, func(dbtx walletdb.ReadWriteTx) error {
+			txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
+			return wtxmgr.DeleteRawUnmined(txmgrNs, tx)
+		})
+		if err != nil {
+			log.Errorf("Unable to retrieve unconfirmed transactions to "+
+				"resend: %v", err)
+			return false
+		}
+		w.unminedTxs.Delete(key)
 		log.Debugf("Successfully rebroadcast unconfirmed transaction %v",
 			txHash)
-	}
+		return true
+	})
 }
 
 // SortedActivePaymentAddresses returns a slice of all active payment
@@ -1940,6 +1956,7 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 		Manager:            addrMgr,
 		TxStore:            txMgr,
 		lockedOutpoints:    map[wire.OutPoint]struct{}{},
+		unminedTxs:         sync.Map{},
 		recoveryWindow:     recoveryWindow,
 		createTxRequests:   make(chan createTxRequest),
 		unlockRequests:     make(chan unlockRequest),
