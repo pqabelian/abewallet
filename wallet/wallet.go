@@ -1367,10 +1367,11 @@ func (w *Wallet) resendUnminedTx() {
 			w.unminedTxs.Store(txs[i].TxHash(), txs[i])
 		}
 	}
-	if !w.resendUnminedTxFlagLock.TryLock() {
+	if !w.resendUnminedTxFlag {
 		return
 	}
-	w.resendUnminedTxFlag = !w.resendUnminedTxFlag
+	w.resendUnminedTxFlagLock.Lock()
+	w.resendUnminedTxFlag = true
 
 	w.unminedTxs.Range(func(key, value interface{}) bool {
 		tx := value.(*wire.MsgTxAbe)
@@ -1397,7 +1398,7 @@ func (w *Wallet) resendUnminedTx() {
 		return true
 	})
 
-	w.resendUnminedTxFlag = !w.resendUnminedTxFlag
+	w.resendUnminedTxFlag = false
 	w.resendUnminedTxFlagLock.Unlock()
 }
 
