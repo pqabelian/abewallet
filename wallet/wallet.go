@@ -1396,6 +1396,9 @@ func (w *Wallet) resendUnminedTx() {
 			txHash)
 		return true
 	})
+
+	w.resendUnminedTxFlag = !w.resendUnminedTxFlag
+	w.resendUnminedTxFlagLock.Unlock()
 }
 
 // SortedActivePaymentAddresses returns a slice of all active payment
