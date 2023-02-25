@@ -3,6 +3,7 @@ package legacyrpc
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -113,6 +114,8 @@ var rpcHandlers = map[string]struct {
 	"lockunspent": {handler: lockUnspent},
 	//"sendfrom":               {handlerWithChain: sendFrom},
 	//"sendmany":               {handler: sendMany},
+	"gettxhashfromreqeust": {handler: getTxHashFromRequest},
+
 	"sendtoaddressesabe":       {handler: sendToAddressesAbe},
 	"generateaddressabe":       {handler: generateAddressAbe},
 	"addressmaxsequencenumber": {handler: addressMaxSequenceNumber},
@@ -686,6 +689,7 @@ type utxo struct {
 	Amount       uint64
 	Height       int32
 	UTXOHash     chainhash.Hash
+	UTXOHashStr  string
 }
 type utxoset []utxo
 
@@ -720,6 +724,7 @@ func listAllUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 			Amount:       utxos[i].Amount,
 			Height:       utxos[i].Height,
 			UTXOHash:     utxos[i].Hash(),
+			UTXOHashStr:  utxos[i].Hash().String(),
 		})
 	}
 	for i := 0; i < len(unmatureds); i++ {
@@ -731,6 +736,7 @@ func listAllUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 			Amount:       unmatureds[i].Amount,
 			Height:       unmatureds[i].Height,
 			UTXOHash:     unmatureds[i].Hash(),
+			UTXOHashStr:  utxos[i].Hash().String(),
 		})
 	}
 	t := utxoset(res)
@@ -753,6 +759,7 @@ func listUnmaturedUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, erro
 			Amount:       unmatureds[i].Amount,
 			Height:       unmatureds[i].Height,
 			UTXOHash:     unmatureds[i].Hash(),
+			UTXOHashStr:  unmatureds[i].Hash().String(),
 		})
 	}
 	t := utxoset(res)
@@ -776,6 +783,7 @@ func listUnspentAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 			Amount:       utxos[i].Amount,
 			Height:       utxos[i].Height,
 			UTXOHash:     utxos[i].Hash(),
+			UTXOHashStr:  utxos[i].Hash().String(),
 		})
 	}
 	t := utxoset(res)
@@ -800,6 +808,7 @@ func listUnspentCoinbaseAbe(icmd interface{}, w *wallet.Wallet) (interface{}, er
 				Amount:       utxos[i].Amount,
 				Height:       utxos[i].Height,
 				UTXOHash:     utxos[i].Hash(),
+				UTXOHashStr:  utxos[i].Hash().String(),
 			})
 		}
 
@@ -824,6 +833,8 @@ func listSpentButUnminedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, er
 			FromCoinbase: sbutxos[i].FromCoinBase,
 			Amount:       sbutxos[i].Amount,
 			Height:       sbutxos[i].Height,
+			UTXOHash:     sbutxos[i].Hash(),
+			UTXOHashStr:  sbutxos[i].Hash().String(),
 		})
 	}
 	t := utxoset(res)
@@ -846,6 +857,8 @@ func listSpentAndMinedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, erro
 			FromCoinbase: sctxos[i].FromCoinBase,
 			Amount:       sctxos[i].Amount,
 			Height:       sctxos[i].Height,
+			UTXOHash:     sctxos[i].Hash(),
+			UTXOHashStr:  sctxos[i].Hash().String(),
 		})
 	}
 	t := utxoset(res)
@@ -924,6 +937,15 @@ func lockUnspent(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 		}
 	}
 	return true, nil
+}
+func getTxHashFromRequest(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.GetTxHashFromReqeustCmd)
+
+	if !w.RecordRequestFlag {
+		return nil, errors.New("please enable the record request flag for wallet first")
+	}
+
+	return w.GetTxHashRequestHash(cmd.RequestHashStr)
 }
 
 // makeOutputs creates a slice of transaction outputs from a pair of address
@@ -1079,7 +1101,22 @@ func sendAddressAbe(w *wallet.Wallet, amounts []abejson.Pair,
 	if err != nil {
 		return "", err
 	}
-	tx, err := w.SendOutputs(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, "") // TODO(abe): what's label?
+	var requestHash *chainhash.Hash
+	if w.RecordRequestFlag {
+		var requestContent []byte
+		for i := 0; i < len(outputDescs); i++ {
+			requestContent = append(requestContent, []byte(amounts[i].Address)...)
+			requestContent = binary.AppendVarint(requestContent, int64(amounts[i].Amount))
+		}
+		for i := 0; i < len(utxoSpecified); i++ {
+			requestContent = append(requestContent, []byte(utxoSpecified[i])...)
+		}
+		requestContent = binary.AppendVarint(requestContent, int64(feeSpecified))
+		tmp := chainhash.HashH(requestContent)
+		requestHash = &tmp
+		log.Infof("generate request hash:%s", requestHash)
+	}
+	tx, err := w.SendOutputs(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, "", requestHash) // TODO(abe): what's label?
 	if err != nil {
 		if err == txrules.ErrAmountNegative {
 			return "", ErrNeedPositiveAmount
@@ -1097,7 +1134,6 @@ func sendAddressAbe(w *wallet.Wallet, amounts []abejson.Pair,
 			Message: err.Error(),
 		}
 	}
-
 	txHashStr := tx.Tx.TxHash().String()
 	log.Infof("Successfully sent transaction %v", txHashStr)
 	return txHashStr + fmt.Sprintf("\nCurrent max No. of address is %d", tx.ChangeAddressNo), nil
@@ -1111,7 +1147,7 @@ func sendPairsAbe(w *wallet.Wallet, amounts map[string]abeutil.Amount,
 	if err != nil {
 		return "", err
 	}
-	tx, err := w.SendOutputs(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, "") // TODO(abe): what's label?
+	tx, err := w.SendOutputs(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, "", nil) // TODO(abe): what's label?
 	if err != nil {
 		if err == txrules.ErrAmountNegative {
 			return "", ErrNeedPositiveAmount

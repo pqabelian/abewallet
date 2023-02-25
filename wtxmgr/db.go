@@ -56,6 +56,8 @@ const NUMBERBLOCK = 24 //TODO(abe):this value need to think about
 
 // Bucket names
 var (
+	bucketRequestRecord = []byte("request")
+
 	bucketTxLabels      = []byte("l")  // not support now, but it may be supported
 	bucketLockedOutputs = []byte("lo") // not support now, but it may be supported
 

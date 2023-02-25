@@ -23,6 +23,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -112,9 +113,9 @@ type Wallet struct {
 
 	lockedOutpoints map[wire.OutPoint]struct{}
 
-	unminedTxs              sync.Map
-	resendUnminedTxFlag     bool
-	resendUnminedTxFlagLock sync.RWMutex
+	resendUnminedTxFlag atomic.Value
+
+	RecordRequestFlag bool
 
 	recoveryWindow uint32
 
@@ -1346,6 +1347,12 @@ func (w *Wallet) ReleaseOutput(id wtxmgr.LockID, op wire.OutPoint) error {
 // credits that are not known to have been mined into a block, and attempts
 // to send each to the chain server for relay.
 func (w *Wallet) resendUnminedTx() {
+	if w.resendUnminedTxFlag.Load().(bool) {
+		return
+	}
+	if !w.resendUnminedTxFlag.CompareAndSwap(false, true) {
+		return
+	}
 	var txs []*wire.MsgTxAbe
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
@@ -1363,43 +1370,27 @@ func (w *Wallet) resendUnminedTx() {
 	}
 
 	for i := 0; i < len(txs); i++ {
-		if _, ok := w.unminedTxs.Load(txs[i].TxHash()); !ok {
-			w.unminedTxs.Store(txs[i].TxHash(), txs[i])
-		}
-	}
-	if !w.resendUnminedTxFlag {
-		return
-	}
-	w.resendUnminedTxFlagLock.Lock()
-	w.resendUnminedTxFlag = true
-
-	w.unminedTxs.Range(func(key, value interface{}) bool {
-		tx := value.(*wire.MsgTxAbe)
-		txHash, err := w.publishTransaction(tx)
+		tx := txs[i]
+		_, err = w.publishTransaction(tx)
 		// TODO 20220611 according to the response to handle
 		// not all delete the unmined transaction
 		if err != nil {
 			log.Debugf("Unable to rebroadcast transaction %v: %v",
 				tx.TxHash(), err)
-			return true
 		}
 		err = walletdb.Update(w.db, func(dbtx walletdb.ReadWriteTx) error {
 			txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
 			return wtxmgr.DeleteRawUnmined(txmgrNs, tx)
 		})
 		if err != nil {
-			log.Errorf("Unable to retrieve unconfirmed transactions to "+
-				"resend: %v", err)
-			return false
+			log.Errorf("Unable to delete unconfirmed transactions %s which is "+
+				"resended: %v", tx.TxHash(), err)
 		}
-		w.unminedTxs.Delete(key)
 		log.Debugf("Successfully rebroadcast unconfirmed transaction %v",
-			txHash)
-		return true
-	})
+			tx.TxHash())
+	}
 
-	w.resendUnminedTxFlag = false
-	w.resendUnminedTxFlagLock.Unlock()
+	w.resendUnminedTxFlag.CompareAndSwap(true, false)
 }
 
 // SortedActivePaymentAddresses returns a slice of all active payment
@@ -1519,7 +1510,7 @@ func confirms(txHeight, curHeight int32) int32 {
 
 func (w *Wallet) SendOutputs(outputDescs []*abecrypto.AbeTxOutputDesc,
 	minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount,
-	utxoSpecified []string, label string) (*txauthor.AuthoredTxAbe, error) {
+	utxoSpecified []string, label string, requestHash *chainhash.Hash) (*txauthor.AuthoredTxAbe, error) {
 	// Ensure the outputs to be created adhere to the network's consensus
 	// rules.
 	for _, txOutDesc := range outputDescs {
@@ -1539,8 +1530,9 @@ func (w *Wallet) SendOutputs(outputDescs []*abecrypto.AbeTxOutputDesc,
 	if err != nil {
 		return nil, err
 	}
+
 	// it means that the transaction is created successful
-	txHash, err := w.reliablyPublishTransaction(createdTx.Tx, label)
+	txHash, err := w.reliablyPublishTransaction(createdTx.Tx, label, requestHash)
 	if err != nil {
 		// the wallet would fetch the transaction
 		// due to error double spending
@@ -1618,7 +1610,7 @@ func (e *ErrReplacement) Unwrap() error {
 // This function is unstable and will be removed once syncing code is moved out
 // of the wallet.
 func (w *Wallet) PublishTransaction(tx *wire.MsgTxAbe, label string) error {
-	_, err := w.reliablyPublishTransaction(tx, label)
+	_, err := w.reliablyPublishTransaction(tx, label, nil)
 	return err
 }
 
@@ -1628,12 +1620,13 @@ func (w *Wallet) PublishTransaction(tx *wire.MsgTxAbe, label string) error {
 // the database (along with cleaning up all inputs used, and outputs created) if
 // the transaction is rejected by the backend.
 func (w *Wallet) reliablyPublishTransaction(tx *wire.MsgTxAbe,
-	label string) (*chainhash.Hash, error) {
+	label string, requestHash *chainhash.Hash) (*chainhash.Hash, error) {
 	// firstly, send the transaction to the backend
 	hash, err := w.publishTransaction(tx)
 	// if failed, do nothing
 	if err != nil {
 		// failed
+		log.Errorf("publish transaction %s err %s", tx.TxHash(), err)
 		return nil, err
 	}
 	// if successfully, add the transaction into unmined bucket
@@ -1641,11 +1634,28 @@ func (w *Wallet) reliablyPublishTransaction(tx *wire.MsgTxAbe,
 	if err != nil {
 		return nil, err
 	}
+	log.Infof("insert transaction %s into unmined bucket", tx.TxHash())
 	// add the transaction into unmined bucket
 	err = walletdb.Update(w.db, func(dbTx walletdb.ReadWriteTx) error {
 		if err := w.addRelevantTx(dbTx, txRec, nil); err != nil {
+			log.Errorf("add the transaction %s err %s", hash, err)
 			return err
 		}
+
+		if w.RecordRequestFlag {
+			if requestHash == nil {
+				log.Errorf("request hash is nil but the record request flag is enabled")
+				return errors.New("request hash is nil but the record request flag is enabled")
+			}
+			txmgrNs := dbTx.ReadWriteBucket(wtxmgrNamespaceKey)
+			err = w.TxStore.PutRequestHashAndTxHash(txmgrNs, requestHash.String(), hash.String())
+			if err != nil {
+				log.Errorf("Fail to record the request hash %s and transaction hash %s", requestHash, hash.String())
+				return err
+			}
+			log.Infof("map request hash %s to tx hash %s", requestHash, hash)
+		}
+
 		// If the tx label is empty, we can return early.
 		if len(label) == 0 {
 			return nil
@@ -1653,7 +1663,7 @@ func (w *Wallet) reliablyPublishTransaction(tx *wire.MsgTxAbe,
 		// If there is a label we should write, get the namespace key
 		// and record it in the tx store.
 		txmgrNs := dbTx.ReadWriteBucket(wtxmgrNamespaceKey)
-		return w.TxStore.PutTxLabel(txmgrNs, tx.TxHash(), label) // use the label to explain the tx?
+		return w.TxStore.PutTxLabel(txmgrNs, *hash, label) // use the label to explain the tx?
 	})
 	if err != nil {
 		return nil, err
@@ -1839,6 +1849,24 @@ func (w *Wallet) Database() walletdb.DB {
 	return w.db
 }
 
+func (w *Wallet) GetTxHashRequestHash(requestHash string) (res map[string]interface{}, err error) {
+	var txHashStr string
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		txHashStr, err = w.TxStore.GetTxHashRequestHash(txmgrNs, requestHash)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	txHash, _ := chainhash.NewHashFromStr(txHashStr)
+	status, err := w.TransactionStatus(txHash)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{"txHash": txHash.String(), "status": status}, nil
+}
+
 // Create creates an new wallet, writing it to an empty database.  If the passed
 // seed is non-nil, it is used.  Otherwise, a secure random seed of the
 // recommended length is generated.
@@ -1955,23 +1983,24 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 	log.Infof("Opened wallet") // TODO: log balance? last sync height?
 
 	w := &Wallet{
-		publicPassphrase:   pubPass,
-		db:                 db,
-		Manager:            addrMgr,
-		TxStore:            txMgr,
-		lockedOutpoints:    map[wire.OutPoint]struct{}{},
-		unminedTxs:         sync.Map{},
-		recoveryWindow:     recoveryWindow,
-		createTxRequests:   make(chan createTxRequest),
-		unlockRequests:     make(chan unlockRequest),
-		lockRequests:       make(chan struct{}),
-		holdUnlockRequests: make(chan chan heldUnlock),
-		lockState:          make(chan bool),
-		changePassphrase:   make(chan changePassphraseRequest),
-		changePassphrases:  make(chan changePassphrasesRequest),
-		chainParams:        params,
-		quit:               make(chan struct{}),
+		publicPassphrase:    pubPass,
+		db:                  db,
+		Manager:             addrMgr,
+		TxStore:             txMgr,
+		lockedOutpoints:     map[wire.OutPoint]struct{}{},
+		resendUnminedTxFlag: atomic.Value{},
+		recoveryWindow:      recoveryWindow,
+		createTxRequests:    make(chan createTxRequest),
+		unlockRequests:      make(chan unlockRequest),
+		lockRequests:        make(chan struct{}),
+		holdUnlockRequests:  make(chan chan heldUnlock),
+		lockState:           make(chan bool),
+		changePassphrase:    make(chan changePassphraseRequest),
+		changePassphrases:   make(chan changePassphrasesRequest),
+		chainParams:         params,
+		quit:                make(chan struct{}),
 	}
+	w.resendUnminedTxFlag.Store(false)
 
 	//	todo(ABE): ABE does not support spent and unspent notifications.
 	w.NtfnServer = newNotificationServer(w)

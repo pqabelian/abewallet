@@ -59,10 +59,11 @@ type config struct {
 	Profile       string                  `long:"profile" description:"Enable HTTP profiling on given port -- NOTE port must be between 1024 and 65536"`
 
 	// Wallet options
-	WalletPass string         `long:"walletpass" default-mask:"-" description:"The public wallet password"`
-	WordList   []string       `long:"wordlist" description:"The mnemonic code for generating deterministic keys"`
-	WordMap    map[string]int `long:"wordmap" description:"The map of mnemonic code for generating deterministic keys"`
-	SyncFrom   int32          `long:"syncfrom" description:"Sync start height"`
+	WalletPass        string         `long:"walletpass" default-mask:"-" description:"The public wallet password"`
+	WordList          []string       `long:"wordlist" description:"The mnemonic code for generating deterministic keys"`
+	WordMap           map[string]int `long:"wordmap" description:"The map of mnemonic code for generating deterministic keys"`
+	SyncFrom          int32          `long:"syncfrom" description:"Sync start height"`
+	RecordRequestFlag bool           `long:"recordrequest" description:"Record the request for generate transaction"`
 
 	// RPC client options
 	RPCConnect       string                  `short:"c" long:"rpcconnect" description:"Hostname/IP and port of abec RPC server to connect to (default localhost:8667, testnet: localhost:18667, simnet: localhost:18889)"`

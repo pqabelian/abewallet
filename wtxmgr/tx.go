@@ -303,7 +303,29 @@ type SpentButUnminedTXO struct { //TODO(abe):should add a field to denote which 
 	RingSize       uint8          // set together with RingHash
 	SpentByHash    chainhash.Hash
 	SpentTime      time.Time
+	UTXOHash       chainhash.Hash
 }
+
+func (utxo *SpentButUnminedTXO) Hash() chainhash.Hash {
+	if !utxo.UTXOHash.IsEqual(&chainhash.ZeroHash) {
+		return utxo.UTXOHash
+	}
+
+	// Version + Height + TxOutput.TxHash + TxOutput.Index + Amount + Index + RingHash + RingSize
+	buf := make([]byte, 83)
+	binary.LittleEndian.PutUint32(buf[0:4], utxo.Version)
+	binary.LittleEndian.PutUint32(buf[4:8], uint32(utxo.Height))
+	copy(buf[8:40], utxo.TxOutput.TxHash[0:32])
+	buf[40] = utxo.TxOutput.Index
+	binary.LittleEndian.PutUint64(buf[41:49], utxo.Amount)
+	buf[49] = utxo.Index
+	copy(buf[50:82], utxo.RingHash[0:32])
+	buf[82] = utxo.RingSize
+
+	utxo.UTXOHash = chainhash.DoubleHashH(buf)
+	return utxo.UTXOHash
+}
+
 type SpentConfirmedTXO struct { //TODO(abe):should add a field to denote which tx spent this utxo
 	Version uint32 // todo: added by AliceBob 20210616, the version of corresponding Txo in blockchain, and the same as that of the ring
 	Height  int32
@@ -320,6 +342,27 @@ type SpentConfirmedTXO struct { //TODO(abe):should add a field to denote which t
 	SpentByHash    chainhash.Hash
 	SpentTime      time.Time
 	ConfirmTime    time.Time
+	UTXOHash       chainhash.Hash
+}
+
+func (utxo *SpentConfirmedTXO) Hash() chainhash.Hash {
+	if !utxo.UTXOHash.IsEqual(&chainhash.ZeroHash) {
+		return utxo.UTXOHash
+	}
+
+	// Version + Height + TxOutput.TxHash + TxOutput.Index + Amount + Index + RingHash + RingSize
+	buf := make([]byte, 83)
+	binary.LittleEndian.PutUint32(buf[0:4], utxo.Version)
+	binary.LittleEndian.PutUint32(buf[4:8], uint32(utxo.Height))
+	copy(buf[8:40], utxo.TxOutput.TxHash[0:32])
+	buf[40] = utxo.TxOutput.Index
+	binary.LittleEndian.PutUint64(buf[41:49], utxo.Amount)
+	buf[49] = utxo.Index
+	copy(buf[50:82], utxo.RingHash[0:32])
+	buf[82] = utxo.RingSize
+
+	utxo.UTXOHash = chainhash.DoubleHashH(buf)
+	return utxo.UTXOHash
 }
 
 // TODO(osy)20210608 change the serialize and deserialize
@@ -3013,6 +3056,27 @@ func (s *Store) PutTxLabel(ns walletdb.ReadWriteBucket, txid chainhash.Hash,
 	}
 
 	return PutTxLabel(labelBucket, txid, label)
+}
+
+func (s *Store) PutRequestHashAndTxHash(ns walletdb.ReadWriteBucket, requestHash string, txHash string) error {
+	requestBucket, err := ns.CreateBucketIfNotExists(bucketRequestRecord)
+	if err != nil {
+		return err
+	}
+
+	return requestBucket.Put([]byte(requestHash), []byte(txHash))
+}
+func (s *Store) GetTxHashRequestHash(ns walletdb.ReadBucket, requestHash string) (string, error) {
+	requestBucket := ns.NestedReadBucket(bucketRequestRecord)
+	// when the bucket is nil, it means that there no content
+	if requestBucket == nil {
+		return "", nil
+	}
+	txHashBytes := requestBucket.Get([]byte(requestHash))
+	if len(txHashBytes) == 0 {
+		return "", errors.New("not exist")
+	}
+	return string(txHashBytes), nil
 }
 
 // PutTxLabel writes a label for a tx to the bucket provided. Note that it does

@@ -73,6 +73,7 @@ func walletMain() error {
 
 	loader.RunAfterLoad(func(w *wallet.Wallet) {
 		setSyncFrom(w, cfg.SyncFrom)
+		setRecordRequestFlag(w, cfg.RecordRequestFlag)
 	})
 
 	// Create and start chain RPC client so it's ready to connect to
@@ -274,4 +275,8 @@ func startChainRPC(certs []byte) (*chain.RPCClient, error) {
 
 func setSyncFrom(w *wallet.Wallet, height int32) {
 	w.SyncFrom = height - height%3 // TODO 20220611 use the function or constant to replace a number
+}
+
+func setRecordRequestFlag(w *wallet.Wallet, recordRequestFlag bool) {
+	w.RecordRequestFlag = recordRequestFlag
 }
