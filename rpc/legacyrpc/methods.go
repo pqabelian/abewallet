@@ -3,7 +3,6 @@ package legacyrpc
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -1103,16 +1102,16 @@ func sendAddressAbe(w *wallet.Wallet, amounts []abejson.Pair,
 	}
 	var requestHash *chainhash.Hash
 	if w.RecordRequestFlag {
-		var requestContent []byte
+		requestContentBuff := &bytes.Buffer{}
 		for i := 0; i < len(outputDescs); i++ {
-			requestContent = append(requestContent, []byte(amounts[i].Address)...)
-			requestContent = binary.AppendVarint(requestContent, int64(amounts[i].Amount))
+			requestContentBuff.WriteString(amounts[i].Address)
+			wire.WriteVarInt(requestContentBuff, 0, uint64(amounts[i].Amount))
 		}
 		for i := 0; i < len(utxoSpecified); i++ {
-			requestContent = append(requestContent, []byte(utxoSpecified[i])...)
+			requestContentBuff.WriteString(utxoSpecified[i])
 		}
-		requestContent = binary.AppendVarint(requestContent, int64(feeSpecified))
-		tmp := chainhash.HashH(requestContent)
+		wire.WriteVarInt(requestContentBuff, 0, uint64(feeSpecified))
+		tmp := chainhash.HashH(requestContentBuff.Bytes())
 		requestHash = &tmp
 		log.Infof("generate request hash:%s", requestHash)
 	}
