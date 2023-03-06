@@ -1596,7 +1596,17 @@ func DeleteRawUnmined(ns walletdb.ReadWriteBucket, tx *wire.MsgTxAbe) error {
 		for idx, sn := range utxoRing.OriginSerialNumberes {
 			if bytes.Equal(sn, input.SerialNumber) {
 				k := canonicalOutPoint(&utxoRing.TxHashes[idx], uint32(utxoRing.OutputIndexes[idx]))
-				_ = deleteSpentButUnminedTXO(ns, k)
+				v := existsRawSpentButUnminedTXO(ns, k)
+				if err = deleteSpentButUnminedTXO(ns, k); err != nil {
+					log.Errorf("can not move unconfirmed txo to matured txo due to error:%s in DeleteRawUnmined", err)
+					return err
+				}
+				if len(v) != 0 {
+					if err = putRawMaturedOutput(ns, k, v); err != nil {
+						log.Errorf("can not move unconfirmed txo to matured txo due to error:%s in DeleteRawUnmined", err)
+						return err
+					}
+				}
 				break
 			}
 		}

@@ -1348,9 +1348,11 @@ func (w *Wallet) ReleaseOutput(id wtxmgr.LockID, op wire.OutPoint) error {
 // to send each to the chain server for relay.
 func (w *Wallet) resendUnminedTx() {
 	if w.resendUnminedTxFlag.Load().(bool) {
+		log.Debug("resendUnminedTxFlag is set true, return...")
 		return
 	}
 	if !w.resendUnminedTxFlag.CompareAndSwap(false, true) {
+		log.Debug("fail to set resendUnminedTxFlag  true, return...")
 		return
 	}
 	var txs []*wire.MsgTxAbe
@@ -1363,6 +1365,7 @@ func (w *Wallet) resendUnminedTx() {
 	if err != nil {
 		log.Errorf("Unable to retrieve unconfirmed transactions to "+
 			"resend: %v", err)
+		w.resendUnminedTxFlag.CompareAndSwap(true, false)
 		return
 	}
 	if txs == nil || len(txs) == 0 {
@@ -1375,16 +1378,17 @@ func (w *Wallet) resendUnminedTx() {
 		// TODO 20220611 according to the response to handle
 		// not all delete the unmined transaction
 		if err != nil {
-			log.Debugf("Unable to rebroadcast transaction %v: %v",
+			log.Errorf("Unable to rebroadcast transaction %v: %v",
 				tx.TxHash(), err)
-		}
-		err = walletdb.Update(w.db, func(dbtx walletdb.ReadWriteTx) error {
-			txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
-			return wtxmgr.DeleteRawUnmined(txmgrNs, tx)
-		})
-		if err != nil {
-			log.Errorf("Unable to delete unconfirmed transactions %s which is "+
-				"resended: %v", tx.TxHash(), err)
+
+			err = walletdb.Update(w.db, func(dbtx walletdb.ReadWriteTx) error {
+				txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
+				return wtxmgr.DeleteRawUnmined(txmgrNs, tx)
+			})
+			if err != nil {
+				log.Errorf("Unable to delete unconfirmed transactions %s which is "+
+					"resended: %v", tx.TxHash(), err)
+			}
 		}
 		log.Debugf("Successfully rebroadcast unconfirmed transaction %v",
 			tx.TxHash())
@@ -1528,6 +1532,7 @@ func (w *Wallet) SendOutputs(outputDescs []*abecrypto.AbeTxOutputDesc,
 	// been confirmed.
 	createdTx, err := w.CreateSimpleTx(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, false)
 	if err != nil {
+
 		return nil, err
 	}
 

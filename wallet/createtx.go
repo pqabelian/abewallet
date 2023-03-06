@@ -431,6 +431,9 @@ func (w *Wallet) txPqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc, mi
 	if err != nil {
 		return nil, err
 	}
+	if !chainClient.IsCurrent() {
+		return nil, errors.New("waiting for chain backend to sync to tip")
+	}
 	bs, err := chainClient.BlockStamp()
 	if err != nil {
 		return nil, err
@@ -457,9 +460,9 @@ func (w *Wallet) txPqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc, mi
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
 		eligible, err := w.findEligibleTxosAbe(txmgrNs, minconf, bs)
-		log.Debugf("Find eligible: ")
+		log.Tracef("Find eligible: ")
 		for idx, txo := range eligible {
-			log.Debugf("(%d) Height: %d, Value: %v", idx, txo.Height, float64(txo.Amount)/math.Pow10(7))
+			log.Tracef("(%d) Height: %d, Value: %v", idx, txo.Height, float64(txo.Amount)/math.Pow10(7))
 		}
 		if err != nil {
 			return err

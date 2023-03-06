@@ -64,6 +64,14 @@ func (s *Store) UnminedTxHashes(ns walletdb.ReadBucket) ([]*chainhash.Hash, erro
 	return s.unconfirmedTxHashes(ns)
 }
 
+func (s *Store) unconfirmedTxCount(ns walletdb.ReadBucket) (int64, error) {
+	var count int64
+	err := ns.NestedReadBucket(bucketUnconfirmedTx).ForEach(func(k, v []byte) error {
+		count++
+		return nil
+	})
+	return count, err
+}
 func (s *Store) unconfirmedTxHashes(ns walletdb.ReadBucket) ([]*chainhash.Hash, error) {
 	var hashes []*chainhash.Hash
 	err := ns.NestedReadBucket(bucketUnconfirmedTx).ForEach(func(k, v []byte) error {
