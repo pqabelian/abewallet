@@ -431,8 +431,12 @@ func (w *Wallet) txPqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc, mi
 	if err != nil {
 		return nil, err
 	}
-	if !chainClient.IsCurrent() {
-		return nil, errors.New("waiting for chain backend to sync to tip")
+	if !w.isDevEnv() {
+		log.Debug("Waiting for chain backend to sync to tip")
+		if err := w.waitUntilBackendSynced(chainClient); err != nil {
+			return nil, err
+		}
+		log.Debug("Chain backend synced to tip!")
 	}
 	bs, err := chainClient.BlockStamp()
 	if err != nil {
@@ -483,8 +487,10 @@ func (w *Wallet) txPqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc, mi
 			selectedRingSizes := make([]uint8, 0, len(eligible))
 
 			if utxoSpecified != nil {
+				log.Infof("create transaction for specified utxo %s", utxoSpecified)
 				selectedTxos, err = fetchSpecifiedUTXO(eligible, utxoSpecified)
 				if err != nil {
+					log.Errorf("can not create transaction for specified utxo %s due to %s", utxoSpecified, err)
 					return err
 				}
 				for _, txo := range selectedTxos {

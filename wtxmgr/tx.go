@@ -3066,17 +3066,17 @@ func (s *Store) PutRequestHashAndTxHash(ns walletdb.ReadWriteBucket, requestHash
 
 	return requestBucket.Put([]byte(requestHash), []byte(txHash))
 }
-func (s *Store) GetTxHashRequestHash(ns walletdb.ReadBucket, requestHash string) (string, error) {
+func (s *Store) GetTxHashRequestHash(ns walletdb.ReadBucket, requestHash string) (*chainhash.Hash, error) {
 	requestBucket := ns.NestedReadBucket(bucketRequestRecord)
 	// when the bucket is nil, it means that there no content
 	if requestBucket == nil {
-		return "", nil
+		return nil, errors.New("request bucket is empty")
 	}
-	txHashBytes := requestBucket.Get([]byte(requestHash))
-	if len(txHashBytes) == 0 {
-		return "", errors.New("not exist")
+	txHashStrBytes := requestBucket.Get([]byte(requestHash))
+	if len(txHashStrBytes) == 0 {
+		return nil, errors.New("not exist")
 	}
-	return string(txHashBytes), nil
+	return chainhash.NewHashFromStr(string(txHashStrBytes))
 }
 
 // PutTxLabel writes a label for a tx to the bucket provided. Note that it does

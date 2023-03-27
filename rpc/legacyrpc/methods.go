@@ -1114,6 +1114,14 @@ func sendAddressAbe(w *wallet.Wallet, amounts []abejson.Pair,
 		tmp := chainhash.HashH(requestContentBuff.Bytes())
 		requestHash = &tmp
 		log.Infof("generate request hash:%s", requestHash)
+		// if the record request flag is enabled, then query the database
+		requestMap, err := w.GetTxHashRequestHash(requestHash.String())
+		if err == nil {
+			txHashStr, ok := requestMap["txHash"].(string)
+			if ok {
+				return txHashStr, nil
+			}
+		}
 	}
 	tx, err := w.SendOutputs(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, "", requestHash) // TODO(abe): what's label?
 	if err != nil {
@@ -1310,6 +1318,9 @@ func sendToAddressesAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 	}
 
 	//	todo: the fee policy
+	// TODO: abec use perhkb to replace perkb to allow users to use smaller tx fee
+	// but here it seems to keep a larger one
+	// TODO 20230323 use perhkb to replace the perkb
 	feeSatPerKb := txrules.DefaultRelayFeePerKb //default
 	scaleToFeeSatPerKb := *cmd.ScaleToFeeSatPerKb
 	feeSpecified, err := abeutil.NewAmountAbe(*cmd.FeeSpecified)

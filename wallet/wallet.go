@@ -1042,6 +1042,9 @@ func (w *Wallet) FetchInvalidTxHashs() ([]*chainhash.Hash, error) {
 }
 
 func (w *Wallet) TransactionStatus(hash *chainhash.Hash) (int, error) {
+	if hash == nil {
+		return -2, errors.New("invalid transaction hash")
+	}
 	var status int
 	var err error
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
@@ -1355,6 +1358,7 @@ func (w *Wallet) resendUnminedTx() {
 		log.Debug("fail to set resendUnminedTxFlag  true, return...")
 		return
 	}
+	log.Debug("working for resend transaction")
 	var txs []*wire.MsgTxAbe
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
@@ -1369,6 +1373,7 @@ func (w *Wallet) resendUnminedTx() {
 		return
 	}
 	if txs == nil || len(txs) == 0 {
+		w.resendUnminedTxFlag.CompareAndSwap(true, false)
 		return
 	}
 
@@ -1395,6 +1400,7 @@ func (w *Wallet) resendUnminedTx() {
 	}
 
 	w.resendUnminedTxFlag.CompareAndSwap(true, false)
+	log.Debug("Done for resend transaction")
 }
 
 // SortedActivePaymentAddresses returns a slice of all active payment
@@ -1532,7 +1538,9 @@ func (w *Wallet) SendOutputs(outputDescs []*abecrypto.AbeTxOutputDesc,
 	// been confirmed.
 	createdTx, err := w.CreateSimpleTx(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, false)
 	if err != nil {
-
+		if w.RecordRequestFlag {
+			log.Errorf("can not create a transaction for request hash %s with specified utxo %s", requestHash, utxoSpecified)
+		}
 		return nil, err
 	}
 
@@ -1856,20 +1864,21 @@ func (w *Wallet) Database() walletdb.DB {
 
 func (w *Wallet) GetTxHashRequestHash(requestHash string) (res map[string]interface{}, err error) {
 	var txHashStr string
+	var status int
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
-		txHashStr, err = w.TxStore.GetTxHashRequestHash(txmgrNs, requestHash)
+		txHash, err := w.TxStore.GetTxHashRequestHash(txmgrNs, requestHash)
+		if err != nil || txHash == nil || txHash.IsEqual(&chainhash.ZeroHash) {
+			return err
+		}
+		txHashStr = txHash.String()
+		status, err = w.TxStore.TxStatus(txmgrNs, txHash)
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	txHash, _ := chainhash.NewHashFromStr(txHashStr)
-	status, err := w.TransactionStatus(txHash)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]interface{}{"txHash": txHash.String(), "status": status}, nil
+	return map[string]interface{}{"txHash": txHashStr, "status": status}, nil
 }
 
 // Create creates an new wallet, writing it to an empty database.  If the passed
