@@ -419,6 +419,13 @@ func (m *Manager) FetchAddressKeyEnc(ns walletdb.ReadBucket, coinAddrBytes []byt
 	return fetchAddressKeyEnc(ns, addrKey)
 }
 
+// FetchAddressKeyEnc got addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc,
+func (m *Manager) FetchAddressKeyEncByAddressKey(ns walletdb.ReadBucket, addrKey []byte) ([]byte, []byte, []byte, []byte, error) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	return fetchAddressKeyEnc(ns, addrKey)
+}
+
 func (m *Manager) FetchSeedEnc(ns walletdb.ReadBucket) ([]byte, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
@@ -430,11 +437,11 @@ func (m *Manager) FetchNetID(ns walletdb.ReadBucket) ([]byte, error) {
 	return fetchNetID(ns)
 }
 
-func (m *Manager) PutAddressKeysEnc(ns walletdb.ReadWriteBucket, addrKey []byte, valueSecretKeyEnc,
+func (m *Manager) PutAddressKeysEnc(ns walletdb.ReadWriteBucket, idx uint64, addrKey []byte, valueSecretKeyEnc,
 	addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc []byte) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
-	return putAddressKeysEnc(ns, addrKey, valueSecretKeyEnc, addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
+	return putAddressKeysEnc(ns, idx, addrKey, valueSecretKeyEnc, addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
 
 }
 func (m *Manager) GenerateAddressKeys(ns walletdb.ReadWriteBucket, seed []byte) (uint64, []byte, []byte, []byte, []byte, error) {
@@ -1272,9 +1279,10 @@ func Create(ns walletdb.ReadWriteBucket,
 			return maybeConvertDbError(err)
 		}
 		if end == prompt.MAXCOUNTERADDRESS {
+			cnt := uint64(0)
 			// create and generate an address and print it
 			// generate an address and information for spending
-			serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, err := generateAddressSk(usedSeed, 2*seedLength, 0)
+			serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, err := generateAddressSk(usedSeed, 2*seedLength, cnt)
 			if err != nil {
 				return fmt.Errorf("failed to generate address and key")
 			}
@@ -1300,7 +1308,7 @@ func Create(ns walletdb.ReadWriteBucket,
 				return maybeConvertDbError(err)
 			}
 
-			err = putAddressKeysEnc(ns, addKey, valueSecretKeyEnc,
+			err = putAddressKeysEnc(ns, cnt, addKey, valueSecretKeyEnc,
 				addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
 			if err != nil {
 				return maybeConvertDbError(err)
@@ -1346,7 +1354,7 @@ func Create(ns walletdb.ReadWriteBucket,
 					return maybeConvertDbError(err)
 				}
 
-				err = putAddressKeysEnc(ns, addKey, valueSecretKeyEnc,
+				err = putAddressKeysEnc(ns, i, addKey, valueSecretKeyEnc,
 					addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
 				if err != nil {
 					return maybeConvertDbError(err)

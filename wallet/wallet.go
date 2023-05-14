@@ -3,6 +3,7 @@ package wallet
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abecrypto"
@@ -1419,6 +1420,45 @@ func (w *Wallet) AddressMaxSequenceNumber() (uint64, error) {
 	return addressNum, err
 }
 
+func (w *Wallet) AddressRange(start uint64, end uint64) (res map[uint64]string, err error) {
+	addrKeys := make(map[uint64][]byte, end-start)
+	addresses := make(map[uint64][]byte, end-start)
+	res = make(map[uint64]string, end-start)
+	var addressMaxNum uint64
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+
+		addressMaxNum, err = waddrmgr.FetchSeedStatus(addrmgrNs)
+		if err != nil {
+			return err
+		}
+
+		addrKeys, err = waddrmgr.FetchAddressKeys(addrmgrNs, start, end)
+		for i := start; i < end && i <= addressMaxNum; i++ {
+			serializedAddressEnc, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKeys[i])
+			if err != nil {
+				return err
+			}
+			addresses[i], _, _, _, err = w.Manager.DecryptAddressKey(serializedAddressEnc, nil, nil, nil)
+			if err != nil {
+				return err
+			}
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	for i := start; i < end; i++ {
+		if i <= addressMaxNum {
+			res[i] = hex.EncodeToString(addresses[i])
+		} else {
+			res[i] = ""
+		}
+	}
+	return res, nil
+}
+
 // NewAddressKey returns a new address for a wallet.
 func (w *Wallet) NewAddressKey() ([]byte, uint64, []byte, error) {
 	var numberOrder uint64
@@ -1467,7 +1507,7 @@ func (w *Wallet) NewAddressKey() ([]byte, uint64, []byte, error) {
 
 		addKey := chainhash.DoubleHashB(addr[4 : 4+abecryptoparam.PQRingCTPP.AddressPublicKeySerializeSize()])
 
-		err = w.Manager.PutAddressKeysEnc(addrmgrNs, addKey[:], valueSecretKeyEnc,
+		err = w.Manager.PutAddressKeysEnc(addrmgrNs, numberOrder, addKey[:], valueSecretKeyEnc,
 			addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
 		if err != nil {
 			return err

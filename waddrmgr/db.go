@@ -222,11 +222,12 @@ var (
 	// crypto keys that encrypt all other generated keys, the watch only
 	// flag, the master private key (encrypted), the master HD private key
 	// (encrypted), and also versioning information.
-	mainBucketName  = []byte("main")
-	addrBukcetName  = []byte("address") // instance address = coin address + value address
-	askspBukcetName = []byte("asksp")   // coin spend key
-	asksnBukcetName = []byte("asksn")   // coin serial number key
-	vskBukcetName   = []byte("valuesk") // value secret key
+	mainBucketName    = []byte("main")
+	addrIdxBucketName = []byte("addridx")
+	addrBukcetName    = []byte("address") // instance address = coin address + value address
+	askspBukcetName   = []byte("asksp")   // coin spend key
+	asksnBukcetName   = []byte("asksn")   // coin serial number key
+	vskBukcetName     = []byte("valuesk") // value secret key
 	// masterHDPrivName is the name of the key that stores the master HD
 	// private key. This key is encrypted with the master private crypto
 	// encryption key. This resides under the main bucket.
@@ -419,6 +420,20 @@ func FetchSeedStatus(ns walletdb.ReadBucket) (uint64, error) {
 	return fetchSeedStatus(ns)
 }
 
+func FetchAddressKeys(ns walletdb.ReadBucket, start uint64, end uint64) (map[uint64][]byte, error) {
+	return fetchAddressKeys(ns, start, end)
+}
+
+func fetchAddressKeys(ns walletdb.ReadBucket, start uint64, end uint64) (addrKeys map[uint64][]byte, err error) {
+	addrKeys = make(map[uint64][]byte, end-start)
+	mainBucket := ns.NestedReadBucket(mainBucketName)
+	addrIdxBucket := mainBucket.NestedReadBucket(addrIdxBucketName)
+	for i := start; i < end; i++ {
+		addrKeys[i] = addrIdxBucket.Get(uint64ToBytes(i))
+	}
+	return addrKeys, nil
+}
+
 func fetchSeedStatus(ns walletdb.ReadBucket) (uint64, error) {
 	// As this is the key for the root manager, we don't need to fetch any
 	// particular scope, and can insert directly within the main bucket.
@@ -445,12 +460,20 @@ func putSeedStatus(ns walletdb.ReadWriteBucket, cnt uint64) error {
 	return nil
 }
 
-//putAddressKeysEnc TODO 20220610: check the internal logic of function
-func putAddressKeysEnc(ns walletdb.ReadWriteBucket, addrKey []byte, valueSecretKeyEnc,
+// putAddressKeysEnc TODO 20220610: check the internal logic of function
+func putAddressKeysEnc(ns walletdb.ReadWriteBucket, idx uint64, addrKey []byte, valueSecretKeyEnc,
 	addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc []byte) error {
 	// As this is the key for the root manager, we don't need to fetch any
 	// particular scope, and can insert directly within the main bucket.
 	mainBucket := ns.NestedReadWriteBucket(mainBucketName)
+
+	addressIndexBucket := mainBucket.NestedReadWriteBucket(addrIdxBucketName)
+
+	err := addressIndexBucket.Put(uint64ToBytes(idx), addrKey)
+	if err != nil {
+		str := "failed to store address index"
+		return managerError(ErrDatabase, str, err)
+	}
 
 	if addressKeyEnc != nil {
 		addrBucket := mainBucket.NestedReadWriteBucket(addrBukcetName)
@@ -1030,9 +1053,10 @@ func putBirthday(ns walletdb.ReadWriteBucket, t time.Time) error {
 // FetchBirthdayBlock retrieves the birthday block from the database.
 //
 // The block is serialized as follows:
-//   [0:4]   block height
-//   [4:36]  block hash
-//   [36:44] block timestamp
+//
+//	[0:4]   block height
+//	[4:36]  block hash
+//	[36:44] block timestamp
 func FetchBirthdayBlock(ns walletdb.ReadBucket) (BlockStamp, error) {
 	var block BlockStamp
 
@@ -1070,9 +1094,10 @@ func DeleteBirthdayBlock(ns walletdb.ReadWriteBucket) error {
 // PutBirthdayBlock stores the provided birthday block to the database.
 //
 // The block is serialized as follows:
-//   [0:4]   block height
-//   [4:36]  block hash
-//   [36:44] block timestamp
+//
+//	[0:4]   block height
+//	[4:36]  block hash
+//	[36:44] block timestamp
 //
 // NOTE: This does not alter the birthday block verification state.
 func PutBirthdayBlock(ns walletdb.ReadWriteBucket, block BlockStamp) error {
@@ -1185,6 +1210,11 @@ func createManagerNS(ns walletdb.ReadWriteBucket) error {
 	_, err = mainBucket.CreateBucket(addrBukcetName)
 	if err != nil {
 		str := "failed to create address bucket"
+		return managerError(ErrDatabase, str, err)
+	}
+	_, err = mainBucket.CreateBucket(addrIdxBucketName)
+	if err != nil {
+		str := "failed to create address index bucket"
 		return managerError(ErrDatabase, str, err)
 	}
 	_, err = mainBucket.CreateBucket(askspBukcetName)
