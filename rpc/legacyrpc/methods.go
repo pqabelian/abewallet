@@ -682,14 +682,18 @@ func listLockUnspent(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 
 // For test
 type utxo struct {
-	RingHash     string
-	TxHash       string
-	Index        uint8
-	FromCoinbase bool
-	Amount       uint64
-	Height       int32
-	UTXOHash     chainhash.Hash
-	UTXOHashStr  string
+	RingHash         string
+	TxHash           string
+	Index            uint8
+	FromCoinbase     bool
+	Amount           uint64
+	Height           int32
+	UTXOHash         chainhash.Hash
+	UTXOHashStr      string
+	SpentByTxHash    chainhash.Hash `json:"spentByTxHash,omitempty"`
+	SpentByTxHashStr string         `json:"spentByTxHashStr,omitempty"`
+	SpentTime        string         `json:"spentTime,omitempty"`
+	ConfirmTime      string         `json:"confirmTime,omitempty"`
 }
 type utxoset []utxo
 
@@ -827,14 +831,17 @@ func listSpentButUnminedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, er
 	res := make([]utxo, 0, len(sbutxos))
 	for i := 0; i < len(sbutxos); i++ {
 		res = append(res, utxo{
-			RingHash:     sbutxos[i].RingHash.String(),
-			TxHash:       sbutxos[i].TxOutput.TxHash.String(),
-			Index:        sbutxos[i].TxOutput.Index,
-			FromCoinbase: sbutxos[i].FromCoinBase,
-			Amount:       sbutxos[i].Amount,
-			Height:       sbutxos[i].Height,
-			UTXOHash:     sbutxos[i].Hash(),
-			UTXOHashStr:  sbutxos[i].Hash().String(),
+			RingHash:         sbutxos[i].RingHash.String(),
+			TxHash:           sbutxos[i].TxOutput.TxHash.String(),
+			Index:            sbutxos[i].TxOutput.Index,
+			FromCoinbase:     sbutxos[i].FromCoinBase,
+			Amount:           sbutxos[i].Amount,
+			Height:           sbutxos[i].Height,
+			UTXOHash:         sbutxos[i].Hash(),
+			UTXOHashStr:      sbutxos[i].Hash().String(),
+			SpentByTxHash:    sbutxos[i].SpentByHash,
+			SpentByTxHashStr: sbutxos[i].SpentByHash.String(),
+			SpentTime:        sbutxos[i].SpentTime.Format("2006-01-02 15:04:05"),
 		})
 	}
 	t := utxoset(res)
@@ -851,14 +858,18 @@ func listSpentAndMinedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, erro
 	res := make([]utxo, 0, len(sctxos))
 	for i := 0; i < len(sctxos); i++ {
 		res = append(res, utxo{
-			RingHash:     sctxos[i].RingHash.String(),
-			TxHash:       sctxos[i].TxOutput.TxHash.String(),
-			Index:        sctxos[i].TxOutput.Index,
-			FromCoinbase: sctxos[i].FromCoinBase,
-			Amount:       sctxos[i].Amount,
-			Height:       sctxos[i].Height,
-			UTXOHash:     sctxos[i].Hash(),
-			UTXOHashStr:  sctxos[i].Hash().String(),
+			RingHash:         sctxos[i].RingHash.String(),
+			TxHash:           sctxos[i].TxOutput.TxHash.String(),
+			Index:            sctxos[i].TxOutput.Index,
+			FromCoinbase:     sctxos[i].FromCoinBase,
+			Amount:           sctxos[i].Amount,
+			Height:           sctxos[i].Height,
+			UTXOHash:         sctxos[i].Hash(),
+			UTXOHashStr:      sctxos[i].Hash().String(),
+			SpentByTxHash:    sctxos[i].SpentByHash,
+			SpentByTxHashStr: sctxos[i].SpentByHash.String(),
+			SpentTime:        sctxos[i].SpentTime.Format("2006-01-02 15:04:05"),
+			ConfirmTime:      sctxos[i].ConfirmTime.Format("2006-01-02 15:04:05"),
 		})
 	}
 	t := utxoset(res)
