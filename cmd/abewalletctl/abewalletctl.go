@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/abesuite/abe-miningpool-server/utils"
 	"github.com/abesuite/abec/abejson"
@@ -203,95 +202,98 @@ type UTXO struct {
 func aggregateBalances(params []interface{}, cfg *config) (string, error) {
 	// total,group,fee
 	if len(params) < 7 {
-		return "", errors.New("non-enough parameters")
+		return "", fmt.Errorf("non-enough parameters")
 	}
 	walletpass := toString(params[0])
 	total, err := strconv.ParseUint(toString(params[1]), 10, 64)
 	if err != nil {
-		return "", errors.New("wrong format parameters")
+		return "", fmt.Errorf("wrong format parameters, 'total' must be a unsigned integer")
 	}
 	group, err := strconv.ParseUint(toString(params[2]), 10, 64)
 	if err != nil {
-		return "", errors.New("wrong format parameters")
+		return "", fmt.Errorf("wrong format parameters, 'group' must be a unsigned integer")
 	}
 	splitPercent, err := strconv.ParseUint(toString(params[3]), 10, 64)
 	if err != nil {
-		return "", errors.New("wrong format parameters")
+		return "", fmt.Errorf("wrong format parameters, 'split percent' must be a unsigned integer")
 	}
 	rangeStart, err := strconv.ParseUint(toString(params[4]), 10, 64)
 	if err != nil {
-		return "", errors.New("wrong format parameters")
+		return "", fmt.Errorf("wrong format parameters, 'range start' must be a unsigned integer")
 	}
 	rangeEnd, err := strconv.ParseUint(toString(params[5]), 10, 64)
 	if err != nil {
-		return "", errors.New("wrong format parameters")
+		return "", fmt.Errorf("wrong format parameters, 'range end' must be a unsigned integer")
 	}
 	fee, err := strconv.ParseUint(toString(params[6]), 10, 64)
 	if err != nil {
-		return "", errors.New("wrong format parameters")
+		return "", fmt.Errorf("wrong format parameters, 'transaction fee' must be a unsigned integer")
+	}
+	coinbaseOnly, err := strconv.ParseBool(toString(params[7]))
+	if err != nil {
+		return "", fmt.Errorf("wrong format parameters, 'coinbase only' must be a boolean value")
 	}
 
 	// parameter sanctity
-	unlockWallet := func() error {
+	unlockWallet := func(timeout int64) error {
 		marshalledJSON, err := abejson.MarshalCmd(1, &abejson.WalletPassphraseCmd{
 			Passphrase: walletpass,
-			Timeout:    60,
+			Timeout:    timeout,
 		})
 		if err != nil {
-			return errors.New("can not acquire utxo list")
+			return fmt.Errorf("can not unlock wallet: %v", err)
 		}
 		_, err = sendPostRequest(marshalledJSON, cfg)
 		if err != nil {
-			return errors.New("can not acquire utxo list")
+			return fmt.Errorf("can not unlock wallet: %v", err)
 		}
 		return nil
 	}
 	lockWallet := func() error {
 		marshalledJSON, err := abejson.MarshalCmd(1, &abejson.WalletLockCmd{})
 		if err != nil {
-			return errors.New("can not acquire utxo list")
+			return fmt.Errorf("can not lock wallet: %v", err)
 		}
 		_, err = sendPostRequest(marshalledJSON, cfg)
 		if err != nil {
-			return errors.New("can not acquire utxo list")
+			return fmt.Errorf("can not lock wallet: %v", err)
 		}
 		return nil
 	}
-	if unlockWallet() != nil {
-		return "", errors.New("wrong format wallet passphrase")
+	if err = unlockWallet(10); err != nil {
+		return "", err
 	}
-	if lockWallet() != nil {
-		return "", errors.New("wrong format wallet passphrase")
+	if err = lockWallet(); err != nil {
+		return "", err
 	}
 	if total <= 0 || group <= 0 || fee <= 0 || group > 5 || total < group ||
 		splitPercent >= 100 {
-		return "", errors.New("wrong format parameters")
+		return "", fmt.Errorf("invalid format parameters")
 	}
 
 	// acquire utxo list
-	marshalledJSON, err := abejson.MarshalCmd(1, &abejson.ListUnspentCoinbaseAbeCmd{})
+	marshalledJSON, err := abejson.MarshalCmd(1, &abejson.ListUnspentAbeCmd{})
 	if err != nil {
-		return "", errors.New("can not acquire utxo list")
+		return "", fmt.Errorf("can not acquire utxo list")
 	}
 	resBytes, err := sendPostRequest(marshalledJSON, cfg)
 	if err != nil {
-		return "", errors.New("can not acquire utxo list")
+		return "", fmt.Errorf("can not acquire utxo list: %v", err)
 	}
 	utxoList := make([]*UTXO, 0, 100)
 	err = json.Unmarshal(resBytes, &utxoList)
 	if err != nil {
-		return "", errors.New("can not acquire utxo list")
+		return "", fmt.Errorf("can not acquire utxo list")
 	}
 	// filter utxo list by range
 	filteredUTXOList := make([]*UTXO, 0, len(utxoList))
 	for i := 0; i < len(utxoList); i++ {
-		if rangeStart <= utxoList[i].Amount && utxoList[i].Amount < rangeEnd {
+		if rangeStart <= utxoList[i].Amount && utxoList[i].Amount < rangeEnd && (!coinbaseOnly || (coinbaseOnly && utxoList[i].FromCoinbase)) {
 			filteredUTXOList = append(filteredUTXOList, utxoList[i])
 		}
 	}
 	utxoList = filteredUTXOList
 
-	// acquire new addresses
 	type Address struct {
 		No_  uint64 `json:"No,omitempty"`
 		Addr string `json:"addr,omitempty"`
@@ -300,40 +302,41 @@ func aggregateBalances(params []interface{}, cfg *config) (string, error) {
 		total = uint64(len(utxoList))
 	}
 	totalRound := int((total + group - 1) / group)
-	newAddressNum := totalRound
-	if splitPercent != 0 {
-		newAddressNum += totalRound
-	}
-	marshalledJSON, err = abejson.MarshalCmd(1, &abejson.GenerateAddressCmd{
-		Num: &newAddressNum,
-	})
-	if err != nil {
-		return "", errors.New("can not acquire new address")
-	}
-	if unlockWallet() != nil {
-		return "", errors.New("wrong format wallet passphrase")
-	}
-	resBytes, err = sendPostRequest(marshalledJSON, cfg)
-	if err != nil {
-		return "", errors.New("can not acquire new address")
-	}
-	addresses := make([]*Address, 0, totalRound)
-	err = json.Unmarshal(resBytes, &addresses)
-	if err != nil {
-		return "", errors.New("can not acquire new address")
-	}
-	if lockWallet() != nil {
-		return "", errors.New("wrong format wallet passphrase")
-	}
-
 	// divide groups
-	addrIdx := 0
 	round := 0
 	zero := 0
 	fone := float64(1)
 	feeSpecified := float64(fee)
 	transactionHashStrs := make([]string, (total+group-1)/group)
 	for ; round < totalRound; round++ {
+		// acquire new addresses
+		newAddressNum := 1
+		if splitPercent != 0 {
+			newAddressNum += 1
+		}
+		marshalledJSON, err = abejson.MarshalCmd(1, &abejson.GenerateAddressCmd{
+			Num: &newAddressNum,
+		})
+		if err != nil {
+			return "", fmt.Errorf("can not acquire new address: %v", err)
+		}
+		if err = unlockWallet(60); err != nil {
+			return "", err
+		}
+		resBytes, err = sendPostRequest(marshalledJSON, cfg)
+		if err != nil {
+			return "", fmt.Errorf("can not acquire new address: %v", err)
+		}
+		addresses := make([]*Address, 0, newAddressNum)
+		err = json.Unmarshal(resBytes, &addresses)
+		if err != nil {
+			return "", fmt.Errorf("can not acquire new address: %v", err)
+		}
+		if err = lockWallet(); err != nil {
+			return "", err
+		}
+
+		addrIdx := 0
 		cmd := &abejson.SendToAddressAbeCmd{
 			Amounts: []abejson.Pair{
 				{
@@ -354,13 +357,13 @@ func aggregateBalances(params []interface{}, cfg *config) (string, error) {
 			utxoStrs = append(utxoStrs, utxoList[start+offset].UTXOHashStr)
 		}
 
-		if unlockWallet() != nil {
-			return "", errors.New("wrong format wallet passphrase")
+		if err := unlockWallet(60); err != nil {
+			return "", fmt.Errorf("wrong format wallet passphrase: %v", err)
 		}
 
 		utxoSpecified := strings.Join(utxoStrs, ",")
 		cmd.UTXOSpecified = &utxoSpecified
-		cmd.Amounts[0].Amount = float64(totalAmount-fee) / 100 * float64(splitPercent)
+		cmd.Amounts[0].Amount = float64(totalAmount-fee) / 100 * (100 - float64(splitPercent))
 		if splitPercent != 0 {
 			cmd.Amounts = append(cmd.Amounts, abejson.Pair{
 				Address: addresses[addrIdx].Addr,
@@ -371,7 +374,7 @@ func aggregateBalances(params []interface{}, cfg *config) (string, error) {
 
 		marshalledJSON, err = abejson.MarshalCmd(1, cmd)
 		if err != nil {
-			return "", errors.New("can not create transaction")
+			return "", fmt.Errorf("can not create transaction command: %v", err)
 		}
 
 		// Send the JSON-RPC request to the server using the user-specified
@@ -382,8 +385,8 @@ func aggregateBalances(params []interface{}, cfg *config) (string, error) {
 			os.Exit(1)
 		}
 		transactionHashStrs[round] = string(result[1 : 1+utils.MaxHashStringSize])
-		if lockWallet() != nil {
-			return "", errors.New("wrong format wallet passphrase")
+		if err = lockWallet(); err != nil {
+			return "", fmt.Errorf("wrong format wallet passphrase: %v", err)
 		}
 	}
 
