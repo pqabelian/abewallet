@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/abesuite/abe-miningpool-server/utils"
 	"github.com/abesuite/abec/abejson"
 	"github.com/abesuite/abec/chainhash"
 	"io"
@@ -384,7 +383,7 @@ func aggregateBalances(params []interface{}, cfg *config) (string, error) {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		transactionHashStrs[round] = string(result[1 : 1+utils.MaxHashStringSize])
+		transactionHashStrs[round] = string(result[1 : 1+chainhash.MaxHashStringSize])
 		if err = lockWallet(); err != nil {
 			return "", fmt.Errorf("wrong format wallet passphrase: %v", err)
 		}
