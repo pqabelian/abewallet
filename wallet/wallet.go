@@ -1019,6 +1019,16 @@ func (w *Wallet) FetchConfirmedTxHashs() ([]*chainhash.Hash, error) {
 	})
 	return txHashs, err
 }
+func (w *Wallet) FetchConfirmedTransactions() ([]*wtxmgr.TxRecord, error) {
+	var txRecords []*wtxmgr.TxRecord
+	var err error
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		txRecords, err = w.TxStore.ConfirmedTxs(txmgrNs)
+		return err
+	})
+	return txRecords, err
+}
 
 func (w *Wallet) FetchUnconfirmedTxHashs() ([]*chainhash.Hash, error) {
 	var txHashs []*chainhash.Hash
@@ -1030,7 +1040,16 @@ func (w *Wallet) FetchUnconfirmedTxHashs() ([]*chainhash.Hash, error) {
 	})
 	return txHashs, err
 }
-
+func (w *Wallet) FetchUnconfirmedTransactions() ([]*wtxmgr.TxRecord, error) {
+	var txRecords []*wtxmgr.TxRecord
+	var err error
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		txRecords, err = w.TxStore.UnconfirmedTxs(txmgrNs, 0)
+		return err
+	})
+	return txRecords, err
+}
 func (w *Wallet) FetchInvalidTxHashs() ([]*chainhash.Hash, error) {
 	var txHashs []*chainhash.Hash
 	var err error
@@ -1040,6 +1059,17 @@ func (w *Wallet) FetchInvalidTxHashs() ([]*chainhash.Hash, error) {
 		return err
 	})
 	return txHashs, err
+}
+
+func (w *Wallet) FetchInvalidTransactions() ([]*wtxmgr.TxRecord, error) {
+	var txRecords []*wtxmgr.TxRecord
+	var err error
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		txRecords, err = w.TxStore.InvalidTxs(txmgrNs)
+		return err
+	})
+	return txRecords, err
 }
 
 func (w *Wallet) TransactionStatus(hash *chainhash.Hash) (int, error) {
@@ -1360,11 +1390,11 @@ func (w *Wallet) resendUnminedTx() {
 		return
 	}
 	log.Debug("working for resend transaction")
-	var txs []*wire.MsgTxAbe
+	var txs []*wtxmgr.TxRecord
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		var err error
-		txs, err = w.TxStore.UnconfirmedTxs(txmgrNs)
+		txs, err = w.TxStore.UnconfirmedTxs(txmgrNs, 400)
 		return err
 	})
 	if err != nil {
@@ -1379,7 +1409,7 @@ func (w *Wallet) resendUnminedTx() {
 	}
 
 	for i := 0; i < len(txs); i++ {
-		tx := txs[i]
+		tx := &txs[i].MsgTx
 		_, err = w.publishTransaction(tx)
 		// TODO 20220611 according to the response to handle
 		// not all delete the unmined transaction

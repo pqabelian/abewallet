@@ -1562,8 +1562,7 @@ func putRawRelevantTxs(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	return nil
 }
 
-// TODO(abe):this function will be reused for unminedAbe
-func readRawUnminedHash(k []byte, txHash *chainhash.Hash) error {
+func readRawHash(k []byte, txHash *chainhash.Hash) error {
 	if len(k) < 32 {
 		str := "short unmined key"
 		return storeError(ErrData, str, nil)

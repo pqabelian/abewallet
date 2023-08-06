@@ -105,10 +105,10 @@ var rpcHandlers = map[string]struct {
 	"listmaturecoinbasetxoabe": {handler: listUnspentCoinbaseAbe},
 	"listunconfirmedtxoabe":    {handler: listSpentButUnminedAbe},
 	"listconfirmedtxoabe":      {handler: listSpentAndMinedAbe},
+	"listunconfirmedtxs":       {handler: listUnconfirmedTxs},
 	"listconfirmedtxs":         {handler: listConfirmedTxs},
 	"listinvalidtxs":           {handler: listInvalidTxs},
 	"transactionstatus":        {handler: txStatus},
-	"listunconfirmedtxs":       {handler: listUnconfirmedTxs},
 
 	"lockunspent": {handler: lockUnspent},
 	//"sendfrom":               {handlerWithChain: sendFrom},
@@ -877,40 +877,102 @@ func listSpentAndMinedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, erro
 	return res, nil
 }
 func listConfirmedTxs(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	_ = icmd.(*abejson.ListConfirmedTxsCmd)
-	confirmedTxHashs, err := w.FetchConfirmedTxHashs()
+	cmd := icmd.(*abejson.ListConfirmedTxsCmd)
+	if !*cmd.Verbose {
+		confirmedTxHashs, err := w.FetchConfirmedTxHashs()
+		if err != nil {
+			return nil, err
+		}
+		res := make([]string, len(confirmedTxHashs))
+		for i := 0; i < len(confirmedTxHashs); i++ {
+			res[i] = confirmedTxHashs[i].String()
+		}
+		return res, nil
+	}
+
+	confirmedTxs, err := w.FetchConfirmedTransactions()
 	if err != nil {
 		return nil, err
 	}
-	res := make([]string, len(confirmedTxHashs))
-	for i := 0; i < len(confirmedTxHashs); i++ {
-		res[i] = confirmedTxHashs[i].String()
+
+	txReplies := make([]*abejson.TxRawResultAbe, 0, len(confirmedTxs))
+	for i := 0; i < len(confirmedTxs); i++ {
+		reply, _ := createTxRawResultAbe(
+			nil,
+			&confirmedTxs[i].MsgTx,
+			confirmedTxs[i].MsgTx.TxHash().String(),
+			nil,
+			"",
+			0,
+			0)
+		txReplies = append(txReplies, reply)
 	}
-	return res, nil
+
+	return confirmedTxs, nil
 }
 func listUnconfirmedTxs(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	_ = icmd.(*abejson.ListUnconfirmedTxsCmd)
-	unconfirmedTxHashs, err := w.FetchUnconfirmedTxHashs()
+	cmd := icmd.(*abejson.ListUnconfirmedTxsCmd)
+	if !*cmd.Verbose {
+		unconfirmedTxHashs, err := w.FetchUnconfirmedTxHashs()
+		if err != nil {
+			return nil, err
+		}
+		res := make([]string, len(unconfirmedTxHashs))
+		for i := 0; i < len(unconfirmedTxHashs); i++ {
+			res[i] = unconfirmedTxHashs[i].String()
+		}
+		return res, nil
+	}
+	unconfirmedTxs, err := w.FetchUnconfirmedTransactions()
 	if err != nil {
 		return nil, err
 	}
-	res := make([]string, len(unconfirmedTxHashs))
-	for i := 0; i < len(unconfirmedTxHashs); i++ {
-		res[i] = unconfirmedTxHashs[i].String()
+
+	txReplies := make([]*abejson.TxRawResultAbe, 0, len(unconfirmedTxs))
+	for i := 0; i < len(unconfirmedTxs); i++ {
+		reply, _ := createTxRawResultAbe(
+			nil,
+			&unconfirmedTxs[i].MsgTx,
+			unconfirmedTxs[i].MsgTx.TxHash().String(),
+			nil,
+			"",
+			0,
+			0)
+		txReplies = append(txReplies, reply)
 	}
-	return res, nil
+	return txReplies, nil
 }
+
 func listInvalidTxs(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	_ = icmd.(*abejson.ListInvalidTxsCmd)
-	invalidTxHashs, err := w.FetchInvalidTxHashs()
+	cmd := icmd.(*abejson.ListInvalidTxsCmd)
+	if !*cmd.Verbose {
+		invalidTxHashs, err := w.FetchInvalidTxHashs()
+		if err != nil {
+			return nil, err
+		}
+		res := make([]string, len(invalidTxHashs))
+		for i := 0; i < len(invalidTxHashs); i++ {
+			res[i] = invalidTxHashs[i].String()
+		}
+		return res, nil
+	}
+	invalidTxs, err := w.FetchInvalidTransactions()
 	if err != nil {
 		return nil, err
 	}
-	res := make([]string, len(invalidTxHashs))
-	for i := 0; i < len(invalidTxHashs); i++ {
-		res[i] = invalidTxHashs[i].String()
+	txReplies := make([]*abejson.TxRawResultAbe, 0, len(invalidTxs))
+	for i := 0; i < len(invalidTxs); i++ {
+		reply, _ := createTxRawResultAbe(
+			nil,
+			&invalidTxs[i].MsgTx,
+			invalidTxs[i].MsgTx.TxHash().String(),
+			nil,
+			"",
+			0,
+			0)
+		txReplies = append(txReplies, reply)
 	}
-	return res, nil
+	return txReplies, nil
 }
 
 func txStatus(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
@@ -1767,4 +1829,80 @@ func decodeHexStr(hexStr string) ([]byte, error) {
 		}
 	}
 	return decoded, nil
+}
+
+func createTxRawResultAbe(chainParams *chaincfg.Params, mtx *wire.MsgTxAbe,
+	txHash string, blkHeader *wire.BlockHeader, blkHash string,
+	blkHeight int32, chainHeight int32) (*abejson.TxRawResultAbe, error) {
+
+	txReply := &abejson.TxRawResultAbe{
+		Txid:     txHash,
+		Hash:     mtx.TxHash().String(),
+		Size:     int32(mtx.SerializeSize()),
+		Fullsize: int32(mtx.SerializeSizeFull()),
+		Vin:      createVinListAbe(mtx),
+		Vout:     createVoutListAbe(mtx, chainParams),
+		Fee:      abeutil.Amount(mtx.TxFee).ToABE(),
+		Version:  mtx.Version,
+	}
+
+	if mtx.HasWitness() {
+		txReply.Witness = hex.EncodeToString(mtx.TxWitness)
+	}
+
+	if blkHeader != nil {
+		// This is not a typo, they are identical in bitcoind as well.
+		txReply.Time = blkHeader.Timestamp.Unix()
+		txReply.Blocktime = blkHeader.Timestamp.Unix()
+		txReply.BlockHash = blkHash
+		txReply.Confirmations = uint64(1 + chainHeight - blkHeight)
+	}
+
+	return txReply, nil
+}
+
+func createVinListAbe(mtx *wire.MsgTxAbe) []abejson.TxIn {
+	// Coinbase transactions only have a single txin by definition.
+	vinList := make([]abejson.TxIn, len(mtx.TxIns))
+
+	for i, txIn := range mtx.TxIns {
+		vinEntry := &vinList[i]
+		vinEntry.SerialNumber = hex.EncodeToString(txIn.SerialNumber)
+
+		blockHashNum := len(txIn.PreviousOutPointRing.BlockHashs)
+		blockHashs := make([]string, blockHashNum)
+		for i := 0; i < blockHashNum; i++ {
+			blockHashs[i] = txIn.PreviousOutPointRing.BlockHashs[i].String()
+		}
+
+		ringSize := len(txIn.PreviousOutPointRing.OutPoints)
+		outPoints := make([]abejson.OutPointAbe, ringSize)
+		for i := 0; i < ringSize; i++ {
+			outPoint := &outPoints[i]
+			outPoint.Txid = txIn.PreviousOutPointRing.OutPoints[i].TxHash.String()
+			outPoint.Index = txIn.PreviousOutPointRing.OutPoints[i].Index
+		}
+
+		vinEntry.PreviousOutPointRing = &abejson.OutPointRing{
+			BlockHashs: blockHashs,
+			OutPoints:  outPoints}
+	}
+
+	return vinList
+}
+
+func createVoutListAbe(mtx *wire.MsgTxAbe, chainParams *chaincfg.Params) []abejson.TxOutAbe {
+	voutList := make([]abejson.TxOutAbe, 0, len(mtx.TxOuts))
+	for i, txOut := range mtx.TxOuts {
+
+		var voutEntry abejson.TxOutAbe
+		voutEntry.N = uint8(i)
+		buffer := bytes.NewBuffer(make([]byte, 0, txOut.SerializeSize()))
+		_ = wire.WriteTxOutAbe(buffer, 0, mtx.Version, txOut)
+		voutEntry.TxoScript = hex.EncodeToString(buffer.Bytes())
+
+		voutList = append(voutList, voutEntry)
+	}
+
+	return voutList
 }
