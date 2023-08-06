@@ -158,9 +158,15 @@ func (w *Wallet) handleChainNotifications() {
 						"wallet to chain: %v", err))
 				}
 			case chain.BlockAbeConnected:
-				err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-					return w.connectBlock(tx, wtxmgr.BlockMeta(n))
-				})
+				// To avoid accumulating a lot of block notifications in the
+				// process of obtaining the latest block in wallet side
+				// due to the too long synchronization process of nodes
+				if w.Manager.SyncedTo().Height < n.Height {
+					err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+						return w.connectBlock(tx, wtxmgr.BlockMeta(n))
+					})
+				}
+
 				// When receiving a notification of connecting block
 				// The wallet resend all transaction that is not mined.
 				// On the one hand, the transaction would be invalid due
