@@ -65,99 +65,108 @@ func (w *Wallet) rescanWithTarget(startStamp *waddrmgr.BlockStamp) error {
 	catchUpHashes := func(w *Wallet, client chain.Interface, height int32) error {
 		log.Infof("Catching up block hashes to height %d, this"+
 			" might take a while", height)
-		err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
-			addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
-			txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
-			startBlock := w.Manager.SyncedTo()
 
-			for i := startBlock.Height + 1; i <= height; i++ {
-				hash, err := client.GetBlockHash(int64(i))
-				if err != nil {
-					return err
-				}
+		// acquire the synced block firstly
+		startBlock := w.Manager.SyncedTo()
+		batchBlockNum := int32(4000)
 
-				// have not reach the target start sync height
-				if i < w.SyncFrom {
-					blockHeader, err := client.GetBlockHeader(hash)
+		// batch to sync to latest block to avoid interrupt
+		for i := startBlock.Height + 1; i <= height; i++ {
+			err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+				addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+				txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
+
+				for j := int32(0); j < batchBlockNum; j++ {
+					currentHeight := i + j
+					hash, err := client.GetBlockHash(int64(currentHeight))
+					if err != nil {
+						return err
+					}
+
+					// have not reach the target start sync height
+					if currentHeight < w.SyncFrom {
+						blockHeader, err := client.GetBlockHeader(hash)
+						if err != nil {
+							return err
+						}
+						bs := waddrmgr.BlockStamp{
+							Height:    currentHeight,
+							Hash:      *hash,
+							Timestamp: blockHeader.Timestamp,
+						}
+						err = w.Manager.SetSyncedTo(addrmgrNs, &bs)
+						if err != nil {
+							return err
+						}
+						continue
+					}
+
+					blockNum := int32(wire.GetBlockNumPerRingGroupByBlockHeight(currentHeight))
+					maturedBlockHashs := make([]*chainhash.Hash, blockNum)
+					maturity := int32(w.chainParams.CoinbaseMaturity)
+					if currentHeight >= maturity && (currentHeight-maturity+1)%blockNum == 0 {
+						for k := int32(0); k < blockNum; k++ {
+							maturedBlockHashs[k], err = client.GetBlockHash(int64(currentHeight - maturity - k))
+							if err != nil {
+								return err
+							}
+						}
+					}
+					var b *wire.MsgBlockAbe
+					b, err = client.GetBlockAbe(hash)
+					if err != nil {
+						return err
+					}
+					blockAbeDetail, err := wtxmgr.NewBlockRecordFromMsgBlock(b)
+					if err != nil {
+						return err
+					}
+					extraBlockAbeDetails := make(map[uint32]*wtxmgr.BlockRecord, 2)
+					if blockAbeDetail.Height%blockNum == blockNum-1 {
+						b1, err := w.chainClient.GetBlockAbe(&blockAbeDetail.MsgBlock.Header.PrevBlock)
+						if err != nil {
+							return err
+						}
+						extraBlockAbeDetails[uint32(blockAbeDetail.Height-1)], err = wtxmgr.NewBlockRecordFromMsgBlock(b1)
+						if err != nil {
+							return err
+						}
+
+						b2, err := w.chainClient.GetBlockAbe(&extraBlockAbeDetails[uint32(blockAbeDetail.Height-1)].MsgBlock.Header.PrevBlock)
+						if err != nil {
+							return err
+						}
+						extraBlockAbeDetails[uint32(blockAbeDetail.Height-2)], err = wtxmgr.NewBlockRecordFromMsgBlock(b2)
+						if err != nil {
+							return err
+						}
+					}
+
+					err = w.TxStore.InsertBlock(txmgrNs, addrmgrNs, blockAbeDetail, extraBlockAbeDetails, maturedBlockHashs)
 					if err != nil {
 						return err
 					}
 					bs := waddrmgr.BlockStamp{
-						Height:    i,
+						Height:    currentHeight,
 						Hash:      *hash,
-						Timestamp: blockHeader.Timestamp,
+						Timestamp: blockAbeDetail.RecvTime,
 					}
 					err = w.Manager.SetSyncedTo(addrmgrNs, &bs)
 					if err != nil {
 						return err
 					}
-					continue
 				}
-
-				blockNum := int32(wire.GetBlockNumPerRingGroupByBlockHeight(i))
-				maturedBlockHashs := make([]*chainhash.Hash, blockNum)
-				maturity := int32(w.chainParams.CoinbaseMaturity)
-				if i >= maturity && (i-maturity+1)%blockNum == 0 {
-					for j := int32(0); j < blockNum; j++ {
-						maturedBlockHashs[j], err = client.GetBlockHash(int64(i - maturity - j))
-						if err != nil {
-							return err
-						}
-					}
-				}
-				var b *wire.MsgBlockAbe
-				b, err = client.GetBlockAbe(hash)
-				if err != nil {
-					return err
-				}
-				blockAbeDetail, err := wtxmgr.NewBlockRecordFromMsgBlock(b)
-				if err != nil {
-					return err
-				}
-				extraBlockAbeDetails := make(map[uint32]*wtxmgr.BlockRecord, 2)
-				if blockAbeDetail.Height%blockNum == blockNum-1 {
-					b1, err := w.chainClient.GetBlockAbe(&blockAbeDetail.MsgBlock.Header.PrevBlock)
-					if err != nil {
-						return err
-					}
-					extraBlockAbeDetails[uint32(blockAbeDetail.Height-1)], err = wtxmgr.NewBlockRecordFromMsgBlock(b1)
-					if err != nil {
-						return err
-					}
-
-					b2, err := w.chainClient.GetBlockAbe(&extraBlockAbeDetails[uint32(blockAbeDetail.Height-1)].MsgBlock.Header.PrevBlock)
-					if err != nil {
-						return err
-					}
-					extraBlockAbeDetails[uint32(blockAbeDetail.Height-2)], err = wtxmgr.NewBlockRecordFromMsgBlock(b2)
-					if err != nil {
-						return err
-					}
-				}
-
-				err = w.TxStore.InsertBlock(txmgrNs, addrmgrNs, blockAbeDetail, extraBlockAbeDetails, maturedBlockHashs)
-				if err != nil {
-					return err
-				}
-				bs := waddrmgr.BlockStamp{
-					Height:    i,
-					Hash:      *hash,
-					Timestamp: blockAbeDetail.RecvTime,
-				}
-				err = w.Manager.SetSyncedTo(addrmgrNs, &bs)
-				if err != nil {
-					return err
-				}
+				return nil
+			})
+			if err != nil {
+				log.Errorf("Failed to update address manager "+
+					"sync state for height %d: %v", height, err)
+				return err
 			}
-			return nil
-		})
-		if err != nil {
-			log.Errorf("Failed to update address manager "+
-				"sync state for height %d: %v", height, err)
 		}
 
 		log.Info("Done catching up block hashes")
-		return err
+		return nil
 	}
 	_, bestBlockHeight, err := w.chainClient.GetBestBlock()
 	if err != nil {
