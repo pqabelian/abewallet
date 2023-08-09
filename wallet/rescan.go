@@ -68,15 +68,15 @@ func (w *Wallet) rescanWithTarget(startStamp *waddrmgr.BlockStamp) error {
 
 		// acquire the synced block firstly
 		startBlock := w.Manager.SyncedTo()
-		batchBlockNum := int32(4000)
+		batchBlockNum := int32(400)
 
 		// batch to sync to latest block to avoid interrupt
-		for i := startBlock.Height + 1; i <= height; i++ {
+		for i := startBlock.Height + 1; i <= height; i += batchBlockNum {
 			err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 				addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 				txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
 
-				for j := int32(0); j < batchBlockNum; j++ {
+				for j := int32(0); j < batchBlockNum && i+j <= height; j++ {
 					currentHeight := i + j
 					hash, err := client.GetBlockHash(int64(currentHeight))
 					if err != nil {

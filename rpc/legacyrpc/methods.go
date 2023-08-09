@@ -878,7 +878,7 @@ func listSpentAndMinedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, erro
 }
 func listConfirmedTxs(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.ListConfirmedTxsCmd)
-	if !*cmd.Verbose {
+	if *cmd.Verbose == 0 {
 		confirmedTxHashs, err := w.FetchConfirmedTxHashs()
 		if err != nil {
 			return nil, err
@@ -904,15 +904,16 @@ func listConfirmedTxs(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 			nil,
 			"",
 			0,
-			0)
+			0,
+			*cmd.Verbose)
 		txReplies = append(txReplies, reply)
 	}
 
-	return confirmedTxs, nil
+	return txReplies, nil
 }
 func listUnconfirmedTxs(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.ListUnconfirmedTxsCmd)
-	if !*cmd.Verbose {
+	if *cmd.Verbose == 0 {
 		unconfirmedTxHashs, err := w.FetchUnconfirmedTxHashs()
 		if err != nil {
 			return nil, err
@@ -937,7 +938,8 @@ func listUnconfirmedTxs(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 			nil,
 			"",
 			0,
-			0)
+			0,
+			*cmd.Verbose)
 		txReplies = append(txReplies, reply)
 	}
 	return txReplies, nil
@@ -945,7 +947,7 @@ func listUnconfirmedTxs(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 
 func listInvalidTxs(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.ListInvalidTxsCmd)
-	if !*cmd.Verbose {
+	if *cmd.Verbose == 0 {
 		invalidTxHashs, err := w.FetchInvalidTxHashs()
 		if err != nil {
 			return nil, err
@@ -969,7 +971,8 @@ func listInvalidTxs(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 			nil,
 			"",
 			0,
-			0)
+			0,
+			*cmd.Verbose)
 		txReplies = append(txReplies, reply)
 	}
 	return txReplies, nil
@@ -1833,7 +1836,7 @@ func decodeHexStr(hexStr string) ([]byte, error) {
 
 func createTxRawResultAbe(chainParams *chaincfg.Params, mtx *wire.MsgTxAbe,
 	txHash string, blkHeader *wire.BlockHeader, blkHash string,
-	blkHeight int32, chainHeight int32) (*abejson.TxRawResultAbe, error) {
+	blkHeight int32, chainHeight int32, verbose int) (*abejson.TxRawResultAbe, error) {
 
 	txReply := &abejson.TxRawResultAbe{
 		Txid:     txHash,
@@ -1841,12 +1844,12 @@ func createTxRawResultAbe(chainParams *chaincfg.Params, mtx *wire.MsgTxAbe,
 		Size:     int32(mtx.SerializeSize()),
 		Fullsize: int32(mtx.SerializeSizeFull()),
 		Vin:      createVinListAbe(mtx),
-		Vout:     createVoutListAbe(mtx, chainParams),
+		Vout:     createVoutListAbe(mtx, chainParams, verbose),
 		Fee:      abeutil.Amount(mtx.TxFee).ToABE(),
 		Version:  mtx.Version,
 	}
 
-	if mtx.HasWitness() {
+	if mtx.HasWitness() && verbose == 2 {
 		txReply.Witness = hex.EncodeToString(mtx.TxWitness)
 	}
 
@@ -1891,15 +1894,17 @@ func createVinListAbe(mtx *wire.MsgTxAbe) []abejson.TxIn {
 	return vinList
 }
 
-func createVoutListAbe(mtx *wire.MsgTxAbe, chainParams *chaincfg.Params) []abejson.TxOutAbe {
+func createVoutListAbe(mtx *wire.MsgTxAbe, chainParams *chaincfg.Params, verbose int) []abejson.TxOutAbe {
 	voutList := make([]abejson.TxOutAbe, 0, len(mtx.TxOuts))
 	for i, txOut := range mtx.TxOuts {
 
 		var voutEntry abejson.TxOutAbe
 		voutEntry.N = uint8(i)
-		buffer := bytes.NewBuffer(make([]byte, 0, txOut.SerializeSize()))
-		_ = wire.WriteTxOutAbe(buffer, 0, mtx.Version, txOut)
-		voutEntry.TxoScript = hex.EncodeToString(buffer.Bytes())
+		if verbose == 2 {
+			buffer := bytes.NewBuffer(make([]byte, 0, txOut.SerializeSize()))
+			_ = wire.WriteTxOutAbe(buffer, 0, mtx.Version, txOut)
+			voutEntry.TxoScript = hex.EncodeToString(buffer.Bytes())
+		}
 
 		voutList = append(voutList, voutEntry)
 	}
