@@ -8,6 +8,7 @@ import (
 	"github.com/abesuite/abec/chainhash"
 	"io"
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -369,6 +370,9 @@ func aggregateBalances(params []interface{}, cfg *config) (string, error) {
 				Amount:  float64(totalAmount-fee) - cmd.Amounts[0].Amount,
 			})
 			addrIdx += 1
+			if rand.Intn(100) > 50 {
+				cmd.Amounts[0], cmd.Amounts[1] = cmd.Amounts[1], cmd.Amounts[0]
+			}
 		}
 
 		marshalledJSON, err = abejson.MarshalCmd(1, cmd)
