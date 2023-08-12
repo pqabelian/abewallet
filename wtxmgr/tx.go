@@ -3,7 +3,6 @@ package wtxmgr
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abecrypto"
@@ -968,30 +967,30 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 	return nil
 }
 
-func (s *Store) InsertGenesisBlock(ns walletdb.ReadWriteBucket, block *BlockRecord, addrToVskMap map[string][]byte, coinAddrToInstanceAddr map[string][]byte) error {
-	balance, err := fetchMinedBalance(ns)
+func (s *Store) InsertGenesisBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb.ReadWriteBucket, block *BlockRecord) error {
+	balance, err := fetchMinedBalance(txMgrNs)
 	if err != nil {
 		return err
 	}
-	spendableBal, err := fetchSpenableBalance(ns)
+	spendableBal, err := fetchSpenableBalance(txMgrNs)
 	if err != nil {
 		return err
 	}
-	immatureCBBal, err := fetchImmatureCoinbaseBalance(ns)
+	immatureCBBal, err := fetchImmatureCoinbaseBalance(txMgrNs)
 	if err != nil {
 		return err
 	}
-	immatureTRBal, err := fetchImmatureTransferBalance(ns)
+	immatureTRBal, err := fetchImmatureTransferBalance(txMgrNs)
 	if err != nil {
 		return err
 	}
-	unconfirmedBal, err := fetchUnconfirmedBalance(ns)
+	unconfirmedBal, err := fetchUnconfirmedBalance(txMgrNs)
 	if err != nil {
 		return err
 	}
 
 	// put the genesis block into database
-	err = putBlockRecord(ns, block)
+	err = putBlockRecord(txMgrNs, block)
 	if err != nil {
 		return err
 	}
@@ -1009,19 +1008,28 @@ func (s *Store) InsertGenesisBlock(ns walletdb.ReadWriteBucket, block *BlockReco
 		if err != nil {
 			return err
 		}
-		key := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
-		var vskBytes []byte
-		var ok bool
-		if vskBytes, ok = addrToVskMap[key]; !ok {
+		addressEnc, _, _, valueSecretKeyEnc, addrIdx, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
+		if err != nil {
+			return err
+		}
+		addressBytes, _, _, vskBytes, err := s.manager.DecryptAddressKey(addressEnc, nil, nil, valueSecretKeyEnc)
+		if err != nil {
+			return err
+		}
+		if vskBytes == nil {
 			continue
 		}
 		copyedVskBytes := make([]byte, len(vskBytes))
 		copy(copyedVskBytes, vskBytes)
-		valid, v, err := abecrypto.TxoCoinReceive(coinbaseTx.TxOuts[i], coinAddrToInstanceAddr[key], copyedVskBytes)
+		valid, v, err := abecrypto.TxoCoinReceive(coinbaseTx.TxOuts[i], addressBytes, copyedVskBytes)
 		if err != nil {
 			return err
 		}
 		if valid {
+			// record the idx is used
+			if err = s.manager.MarkAddrUsed(addrMgrNs, addrIdx); err != nil {
+				log.Warnf("fail to mark No.%d address as used", addrIdx)
+			}
 			amt := abeutil.Amount(v)
 			log.Infof("(Coinbase) Find my txo at block height %d (hash %s) with value %v", block.Height, block.Hash, amt.ToABE())
 			immatureCBBal += amt
@@ -1036,7 +1044,7 @@ func (s *Store) InsertGenesisBlock(ns walletdb.ReadWriteBucket, block *BlockReco
 		}
 	}
 	if len(blockOutputs) != 0 {
-		err := putRawImmaturedCoinbaseOutput(ns, canonicalBlock(block.Height, block.Hash), valueImmaturedCoinbaseOutput(coinbaseOutput))
+		err := putRawImmaturedCoinbaseOutput(txMgrNs, canonicalBlock(block.Height, block.Hash), valueImmaturedCoinbaseOutput(coinbaseOutput))
 		if err != nil {
 			return err
 		}
@@ -1055,7 +1063,7 @@ func (s *Store) InsertGenesisBlock(ns walletdb.ReadWriteBucket, block *BlockReco
 				v[offset] = ops[j].Index
 				offset += 1
 			}
-			err := putBlockOutput(ns, k, v)
+			err := putBlockOutput(txMgrNs, k, v)
 			if err != nil {
 				return err
 			}
@@ -1063,23 +1071,23 @@ func (s *Store) InsertGenesisBlock(ns walletdb.ReadWriteBucket, block *BlockReco
 	}
 	// update the balances
 	// return handle
-	err = putSpenableBalance(ns, spendableBal)
+	err = putSpenableBalance(txMgrNs, spendableBal)
 	if err != nil {
 		return err
 	}
-	err = putImmatureCoinbaseBalance(ns, immatureCBBal)
+	err = putImmatureCoinbaseBalance(txMgrNs, immatureCBBal)
 	if err != nil {
 		return err
 	}
-	err = putImmatureTransferBalance(ns, immatureTRBal)
+	err = putImmatureTransferBalance(txMgrNs, immatureTRBal)
 	if err != nil {
 		return err
 	}
-	err = putUnconfirmedBalance(ns, unconfirmedBal)
+	err = putUnconfirmedBalance(txMgrNs, unconfirmedBal)
 	if err != nil {
 		return err
 	}
-	return putMinedBalance(ns, balance)
+	return putMinedBalance(txMgrNs, balance)
 }
 
 func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb.ReadWriteBucket, block *BlockRecord, extraBlock map[uint32]*BlockRecord, maturedBlockHashs []*chainhash.Hash) error {
@@ -1137,7 +1145,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 		if err != nil {
 			return err
 		}
-		addressEnc, _, _, valueSecretKeyEnc, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
+		addressEnc, _, _, valueSecretKeyEnc, addrIdx, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
 		if err != nil {
 			return err
 		}
@@ -1155,6 +1163,10 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			return err
 		}
 		if valid {
+			// record the idx is used
+			if err = s.manager.MarkAddrUsed(addrMgrNs, addrIdx); err != nil {
+				log.Warnf("fail to mark No.%d address as used", addrIdx)
+			}
 			amt := abeutil.Amount(v)
 			log.Infof("(Coinbase) Find my txo at block height %d (hash %s) with value %v", block.Height, block.Hash, amt.ToABE())
 			immatureCBBal += amt
@@ -1406,7 +1418,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			if err != nil {
 				return err
 			}
-			addressEnc, _, _, valueSecretKeyEnc, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
+			addressEnc, _, _, valueSecretKeyEnc, addrIdx, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
 			if err != nil {
 				return err
 			}
@@ -1424,6 +1436,9 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 				return err
 			}
 			if valid {
+				if err = s.manager.MarkAddrUsed(addrMgrNs, addrIdx); err != nil {
+					log.Warnf("fail to mark No.%d address as used", addrIdx)
+				}
 				amt := abeutil.Amount(v)
 				log.Infof("(Transfer) Find my txo at block height %d (hash %s) with value %v", block.Height, block.Hash, amt.ToABE())
 				immatureTRBal += amt
@@ -1767,7 +1782,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 					if err != nil {
 						return err
 					}
-					_, _, addressSecretSnEnc, _, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
+					_, _, addressSecretSnEnc, _, _, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
 					if err != nil {
 						return err
 					}

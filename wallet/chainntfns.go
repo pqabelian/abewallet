@@ -157,6 +157,7 @@ func (w *Wallet) handleChainNotifications() {
 					panic(fmt.Errorf("unable to synchronize "+
 						"wallet to chain: %v", err))
 				}
+
 			case chain.BlockAbeConnected:
 				// To avoid accumulating a lot of block notifications in the
 				// process of obtaining the latest block in wallet side

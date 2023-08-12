@@ -1,11 +1,13 @@
 package waddrmgr
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abewallet/walletdb"
+	"github.com/bits-and-blooms/bitset"
 	"time"
 )
 
@@ -223,7 +225,8 @@ var (
 	// flag, the master private key (encrypted), the master HD private key
 	// (encrypted), and also versioning information.
 	mainBucketName    = []byte("main")
-	addrIdxBucketName = []byte("addridx")
+	addrIdxBucketName = []byte("addridx") // idx -> addr key
+	idxAddrBucketName = []byte("idxaddr") // addr key-> idx
 	addrBukcetName    = []byte("address") // instance address = coin address + value address
 	askspBukcetName   = []byte("asksp")   // coin spend key
 	asksnBukcetName   = []byte("asksn")   // coin serial number key
@@ -236,6 +239,7 @@ var (
 	// derived seed and its used status
 	seedKeyName    = []byte("seed")
 	seedStatusName = []byte("sdcnt")
+	addrStatusName = []byte("addrstatus") // bitmap
 	netIDName      = []byte("netid")
 
 	// masterHDPubName is the name of the key that stores the master HD
@@ -460,6 +464,63 @@ func putSeedStatus(ns walletdb.ReadWriteBucket, cnt uint64) error {
 	return nil
 }
 
+func markAddrUnused(ns walletdb.ReadWriteBucket, cnt uint64) error {
+	mainBucket := ns.NestedReadWriteBucket(mainBucketName)
+	bitmapBuff := bytes.NewBuffer(mainBucket.Get(addrStatusName))
+	set := bitset.BitSet{}
+	set.ReadFrom(bitmapBuff)
+	set.Clear(uint(cnt))
+	outputBuff := &bytes.Buffer{}
+	set.WriteTo(outputBuff)
+	err := mainBucket.Put(addrStatusName, outputBuff.Bytes())
+	if err != nil {
+		str := "failed to store seed status"
+		return managerError(ErrDatabase, str, err)
+	}
+	return nil
+}
+
+func markAddrUsed(ns walletdb.ReadWriteBucket, cnt uint64) error {
+	mainBucket := ns.NestedReadWriteBucket(mainBucketName)
+	bitmapBuff := bytes.NewBuffer(mainBucket.Get(addrStatusName))
+	set := bitset.BitSet{}
+	set.ReadFrom(bitmapBuff)
+	set.Set(uint(cnt))
+	outputBuff := &bytes.Buffer{}
+	set.WriteTo(outputBuff)
+	err := mainBucket.Put(addrStatusName, outputBuff.Bytes())
+	if err != nil {
+		str := "failed to store seed status"
+		return managerError(ErrDatabase, str, err)
+	}
+	return nil
+}
+
+func checkNextFreeAddress(ns walletdb.ReadBucket) error {
+	mainBucket := ns.NestedReadBucket(mainBucketName)
+	bitmapBytes := mainBucket.Get(addrStatusName)
+	bitmapBuff := bytes.NewBuffer(bitmapBytes)
+	set := bitset.BitSet{}
+	set.ReadFrom(bitmapBuff)
+	fmt.Printf("%v\n", bitmapBytes)
+	// read seed status
+	status := mainBucket.Get(seedStatusName)
+	if status == nil {
+		str := "failed to fetch seed status"
+		return managerError(ErrDatabase, str, errors.New("the status of seed is wrong"))
+	}
+	latestCnt := binary.LittleEndian.Uint64(status)
+	// probe 20 addresses backwards
+	lastUsed, ok := set.NextSet(uint(latestCnt))
+	if ok && uint64(lastUsed) >= latestCnt {
+		log.Warnf("All addresses are marked used, if it is the first synchronization, " +
+			"the maximum address sequence number may not be large enough, please increase it " +
+			"as appropriate")
+	}
+
+	return nil
+}
+
 // putAddressKeysEnc TODO 20220610: check the internal logic of function
 func putAddressKeysEnc(ns walletdb.ReadWriteBucket, idx uint64, addrKey []byte, valueSecretKeyEnc,
 	addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc []byte) error {
@@ -472,6 +533,13 @@ func putAddressKeysEnc(ns walletdb.ReadWriteBucket, idx uint64, addrKey []byte, 
 	err := addressIndexBucket.Put(uint64ToBytes(idx), addrKey)
 	if err != nil {
 		str := "failed to store address index"
+		return managerError(ErrDatabase, str, err)
+	}
+
+	idxAddressBucket := mainBucket.NestedReadWriteBucket(idxAddrBucketName)
+	err = idxAddressBucket.Put(addrKey, uint64ToBytes(idx))
+	if err != nil {
+		str := "failed to store index address"
 		return managerError(ErrDatabase, str, err)
 	}
 
@@ -516,7 +584,7 @@ func putAddressKeysEnc(ns walletdb.ReadWriteBucket, idx uint64, addrKey []byte, 
 
 	return nil
 }
-func fetchAddressKeyEnc(ns walletdb.ReadBucket, addrKey []byte) ([]byte, []byte, []byte, []byte, error) {
+func fetchAddressKeyEnc(ns walletdb.ReadBucket, addrKey []byte) ([]byte, []byte, []byte, []byte, uint64, error) {
 	mainBucket := ns.NestedReadBucket(mainBucketName)
 
 	addrBucket := mainBucket.NestedReadBucket(addrBukcetName)
@@ -528,7 +596,13 @@ func fetchAddressKeyEnc(ns walletdb.ReadBucket, addrKey []byte) ([]byte, []byte,
 	askspEnc := askspBucket.Get(addrKey)
 	asksnBucket := mainBucket.NestedReadBucket(asksnBukcetName)
 	asksnEnc := asksnBucket.Get(addrKey)
-	return addrEnc, askspEnc, asksnEnc, vskEnc, nil
+
+	idxAddrBucket := mainBucket.NestedReadBucket(idxAddrBucketName)
+	addrIdx := uint64(0)
+	if idxBytes := idxAddrBucket.Get(addrKey); len(idxBytes) != 0 {
+		addrIdx = binary.LittleEndian.Uint64(idxBytes)
+	}
+	return addrEnc, askspEnc, asksnEnc, vskEnc, addrIdx, nil
 }
 
 // fetchMasterHDKeys attempts to fetch both the master HD private and public
@@ -1215,6 +1289,11 @@ func createManagerNS(ns walletdb.ReadWriteBucket) error {
 	_, err = mainBucket.CreateBucket(addrIdxBucketName)
 	if err != nil {
 		str := "failed to create address index bucket"
+		return managerError(ErrDatabase, str, err)
+	}
+	_, err = mainBucket.CreateBucket(idxAddrBucketName)
+	if err != nil {
+		str := "failed to create index address bucket"
 		return managerError(ErrDatabase, str, err)
 	}
 	_, err = mainBucket.CreateBucket(askspBukcetName)

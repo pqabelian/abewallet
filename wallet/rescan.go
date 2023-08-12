@@ -175,5 +175,12 @@ func (w *Wallet) rescanWithTarget(startStamp *waddrmgr.BlockStamp) error {
 	if err := catchUpHashes(w, w.chainClient, bestBlockHeight); err != nil {
 		return err
 	}
+
+	// check the status of all addresses
+	_ = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+		return w.Manager.CheckNextFreeAddress(addrmgrNs)
+	})
+
 	return nil
 }

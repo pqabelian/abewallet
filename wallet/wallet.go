@@ -1465,7 +1465,7 @@ func (w *Wallet) AddressRange(start uint64, end uint64) (res map[uint64]string, 
 
 		addrKeys, err = waddrmgr.FetchAddressKeys(addrmgrNs, start, end)
 		for i := start; i < end && i <= addressMaxNum; i++ {
-			serializedAddressEnc, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKeys[i])
+			serializedAddressEnc, _, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKeys[i])
 			if err != nil {
 				return err
 			}

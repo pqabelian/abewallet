@@ -412,7 +412,7 @@ func (m *Manager) DecryptAddressKey(addressEnc, addressSecretSpEnc, addressSecre
 }
 
 // FetchAddressKeyEnc got addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc,
-func (m *Manager) FetchAddressKeyEnc(ns walletdb.ReadBucket, coinAddrBytes []byte) ([]byte, []byte, []byte, []byte, error) {
+func (m *Manager) FetchAddressKeyEnc(ns walletdb.ReadBucket, coinAddrBytes []byte) ([]byte, []byte, []byte, []byte, uint64, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	addrKey := chainhash.DoubleHashB(coinAddrBytes)
@@ -420,10 +420,22 @@ func (m *Manager) FetchAddressKeyEnc(ns walletdb.ReadBucket, coinAddrBytes []byt
 }
 
 // FetchAddressKeyEnc got addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc,
-func (m *Manager) FetchAddressKeyEncByAddressKey(ns walletdb.ReadBucket, addrKey []byte) ([]byte, []byte, []byte, []byte, error) {
+func (m *Manager) FetchAddressKeyEncByAddressKey(ns walletdb.ReadBucket, addrKey []byte) ([]byte, []byte, []byte, []byte, uint64, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	return fetchAddressKeyEnc(ns, addrKey)
+}
+
+func (m *Manager) MarkAddrUsed(ns walletdb.ReadWriteBucket, idx uint64) error {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	log.Infof("No.%d address is marked used.", idx)
+	return markAddrUsed(ns, idx)
+}
+func (m *Manager) CheckNextFreeAddress(ns walletdb.ReadBucket) error {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	return checkNextFreeAddress(ns)
 }
 
 func (m *Manager) FetchSeedEnc(ns walletdb.ReadBucket) ([]byte, error) {
@@ -452,17 +464,23 @@ func (m *Manager) GenerateAddressKeys(ns walletdb.ReadWriteBucket, seed []byte) 
 	if err != nil {
 		return 0, nil, nil, nil, nil, err
 	}
-	// update the seedStatus
-	err = putSeedStatus(ns, cnt+1)
-	if err != nil {
-		return 0, nil, nil, nil, nil, err
-	}
+
 	serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, err := generateAddressSk(seed, len(seed), cnt+1)
 	if err != nil {
 		return 0, nil, nil, nil, nil, fmt.Errorf("failed to generate address and key")
 	}
 	log.Infof("The address with No. %d is created.", cnt+1)
 	log.Infof("Wallet status: current max No. of address is %v.", cnt+1)
+
+	err = markAddrUnused(ns, cnt+1)
+	if err != nil {
+		return 0, nil, nil, nil, nil, err
+	}
+	// update the seedStatus
+	err = putSeedStatus(ns, cnt+1)
+	if err != nil {
+		return 0, nil, nil, nil, nil, err
+	}
 
 	return cnt + 1, serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, nil
 }

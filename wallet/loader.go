@@ -1,12 +1,8 @@
 package wallet
 
 import (
-	"encoding/hex"
 	"errors"
-	"github.com/abesuite/abec/abecrypto"
-	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abec/chaincfg"
-	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abewallet/internal/prompt"
 	"github.com/abesuite/abewallet/waddrmgr"
 	"github.com/abesuite/abewallet/walletdb"
@@ -170,36 +166,11 @@ func (l *Loader) createNewWallet(pubPassphrase, privPassphrase,
 		addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 		txmgrNs := tx.ReadWriteBucket(wtxmgrNamespaceKey)
 
-		addrToVSK := map[string][]byte{}
-		coinAddrToInstanceAddr := map[string][]byte{}
-		for i := 0; i < len(l.chainParams.GenesisBlock.Transactions); i++ {
-			transaction := l.chainParams.GenesisBlock.Transactions[i]
-			for k := 0; k < len(transaction.TxOuts); k++ {
-				coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(transaction.TxOuts[k].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
-				if err != nil {
-					return err
-				}
-				addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
-				if _, ok := addrToVSK[addrKey]; ok {
-					continue
-				}
-				addrBytesEnc, _, _, vskBytesEnc, err := w.Manager.FetchAddressKeyEnc(addrmgrNs, coinAddr)
-				if addrBytesEnc != nil && vskBytesEnc != nil {
-					addrBytes, _, _, vskBytes, err := w.Manager.DecryptAddressKey(addrBytesEnc, nil, nil, vskBytesEnc)
-					if err != nil {
-						return err
-					}
-					addrToVSK[addrKey] = vskBytes
-					coinAddrToInstanceAddr[addrKey] = addrBytes
-				}
-			}
-		}
-
 		genesisBlockRecords, err := wtxmgr.NewBlockRecordFromMsgBlock(l.chainParams.GenesisBlock)
 		if err != nil {
 			return err
 		}
-		err = w.TxStore.InsertGenesisBlock(txmgrNs, genesisBlockRecords, addrToVSK, coinAddrToInstanceAddr)
+		err = w.TxStore.InsertGenesisBlock(txmgrNs, addrmgrNs, genesisBlockRecords)
 		if err != nil {
 			log.Error("Fail to create wallet due to:", err)
 		}

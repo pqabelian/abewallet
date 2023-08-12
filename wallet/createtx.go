@@ -738,7 +738,7 @@ func (w *Wallet) txPqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc, mi
 			if err != nil {
 				return err
 			}
-			serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, err = w.Manager.FetchAddressKeyEnc(addrmgrNs, coinAddr)
+			serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, _, err = w.Manager.FetchAddressKeyEnc(addrmgrNs, coinAddr)
 			if err != nil {
 				return err
 			}
