@@ -105,10 +105,11 @@ var rpcHandlers = map[string]struct {
 	"listmaturecoinbasetxoabe": {handler: listUnspentCoinbaseAbe},
 	"listunconfirmedtxoabe":    {handler: listSpentButUnminedAbe},
 	"listconfirmedtxoabe":      {handler: listSpentAndMinedAbe},
-	"listunconfirmedtxs":       {handler: listUnconfirmedTxs},
-	"listconfirmedtxs":         {handler: listConfirmedTxs},
-	"listinvalidtxs":           {handler: listInvalidTxs},
-	"transactionstatus":        {handler: txStatus},
+
+	"listunconfirmedtxs": {handler: listUnconfirmedTxs},
+	"listconfirmedtxs":   {handler: listConfirmedTxs},
+	"listinvalidtxs":     {handler: listInvalidTxs},
+	"transactionstatus":  {handler: txStatus},
 
 	"lockunspent": {handler: lockUnspent},
 	//"sendfrom":               {handlerWithChain: sendFrom},
@@ -688,9 +689,9 @@ type utxo struct {
 	FromCoinbase     bool
 	Amount           uint64
 	Height           int32
-	UTXOHash         chainhash.Hash
+	UTXOHash         chainhash.Hash `json:"-"`
 	UTXOHashStr      string
-	SpentByTxHash    chainhash.Hash `json:"spentByTxHash,omitempty"`
+	SpentByTxHash    chainhash.Hash `json:"-"`
 	SpentByTxHashStr string         `json:"spentByTxHashStr,omitempty"`
 	SpentTime        string         `json:"spentTime,omitempty"`
 	ConfirmTime      string         `json:"confirmTime,omitempty"`
@@ -709,7 +710,11 @@ func (u *utxoset) Swap(i, j int) {
 	(*u)[i], (*u)[j] = (*u)[j], (*u)[i]
 }
 func listAllUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	_ = icmd.(*abejson.ListAllUnspentAbeCmd)
+	cmd := icmd.(*abejson.ListAllUnspentAbeCmd)
+	segment := false
+	if *cmd.Max != 0 && *cmd.Min != 0 && *cmd.Max >= *cmd.Min {
+		segment = true
+	}
 	utxos, err := w.FetchUnspentUTXOSet()
 	if err != nil {
 		return nil, err
@@ -743,12 +748,19 @@ func listAllUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 			UTXOHashStr:  utxos[i].Hash().String(),
 		})
 	}
-	t := utxoset(res)
-	sort.Sort(&t)
-	return res, nil
+	if !segment {
+		t := utxoset(res)
+		sort.Sort(&t)
+		return res, nil
+	}
+	return segmentationTXOSet(res, *cmd.Min, *cmd.Max), nil
 }
 func listUnmaturedUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	_ = icmd.(*abejson.ListUnmaturedAbeCmd)
+	cmd := icmd.(*abejson.ListUnmaturedAbeCmd)
+	segment := false
+	if *cmd.Max != 0 && *cmd.Min != 0 && *cmd.Max >= *cmd.Min {
+		segment = true
+	}
 	unmatureds, err := w.FetchUnmatruedUTXOSet()
 	if err != nil {
 		return nil, err
@@ -766,13 +778,20 @@ func listUnmaturedUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, erro
 			UTXOHashStr:  unmatureds[i].Hash().String(),
 		})
 	}
-	t := utxoset(res)
-	sort.Sort(&t)
-	return res, nil
+	if !segment {
+		t := utxoset(res)
+		sort.Sort(&t)
+		return res, nil
+	}
+	return segmentationTXOSet(res, *cmd.Min, *cmd.Max), nil
 }
 
 func listUnspentAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	_ = icmd.(*abejson.ListUnspentAbeCmd)
+	cmd := icmd.(*abejson.ListUnspentAbeCmd)
+	segment := false
+	if *cmd.Max != 0 && *cmd.Min != 0 && *cmd.Max >= *cmd.Min {
+		segment = true
+	}
 	utxos, err := w.FetchUnspentUTXOSet()
 	if err != nil {
 		return nil, err
@@ -790,9 +809,12 @@ func listUnspentAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 			UTXOHashStr:  utxos[i].Hash().String(),
 		})
 	}
-	t := utxoset(res)
-	sort.Sort(&t)
-	return res, nil
+	if !segment {
+		t := utxoset(res)
+		sort.Sort(&t)
+		return res, nil
+	}
+	return segmentationTXOSet(res, *cmd.Min, *cmd.Max), nil
 }
 
 func listUnspentCoinbaseAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
@@ -823,7 +845,11 @@ func listUnspentCoinbaseAbe(icmd interface{}, w *wallet.Wallet) (interface{}, er
 }
 
 func listSpentButUnminedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	_ = icmd.(*abejson.ListSpentButUnminedAbeCmd)
+	cmd := icmd.(*abejson.ListSpentButUnminedAbeCmd)
+	segment := false
+	if *cmd.Max != 0 && *cmd.Min != 0 && *cmd.Max >= *cmd.Min {
+		segment = true
+	}
 	sbutxos, err := w.FetchSpentButUnminedTXOSet()
 	if err != nil {
 		return nil, err
@@ -844,13 +870,19 @@ func listSpentButUnminedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, er
 			SpentTime:        sbutxos[i].SpentTime.Format("2006-01-02 15:04:05"),
 		})
 	}
-	t := utxoset(res)
-	sort.Sort(&t)
-	return res, nil
-
+	if !segment {
+		t := utxoset(res)
+		sort.Sort(&t)
+		return res, nil
+	}
+	return segmentationTXOSet(res, *cmd.Min, *cmd.Max), nil
 }
 func listSpentAndMinedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	_ = icmd.(*abejson.ListSpentAndMinedAbeCmd)
+	cmd := icmd.(*abejson.ListSpentAndMinedAbeCmd)
+	segment := false
+	if *cmd.Max != 0 && *cmd.Min != 0 && *cmd.Max >= *cmd.Min {
+		segment = true
+	}
 	sctxos, err := w.FetchSpentAndConfirmedTXOSet()
 	if err != nil {
 		return nil, err
@@ -872,9 +904,12 @@ func listSpentAndMinedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, erro
 			ConfirmTime:      sctxos[i].ConfirmTime.Format("2006-01-02 15:04:05"),
 		})
 	}
-	t := utxoset(res)
-	sort.Sort(&t)
-	return res, nil
+	if !segment {
+		t := utxoset(res)
+		sort.Sort(&t)
+		return res, nil
+	}
+	return segmentationTXOSet(res, *cmd.Min, *cmd.Max), nil
 }
 func listConfirmedTxs(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.ListConfirmedTxsCmd)
@@ -1910,4 +1945,31 @@ func createVoutListAbe(mtx *wire.MsgTxAbe, chainParams *chaincfg.Params, verbose
 	}
 
 	return voutList
+}
+func segmentationTXOSet(txo []utxo, min float64, max float64) [][]utxo {
+	if max < min {
+		return nil
+	}
+	interval := (max - min) / 10
+	segmentations := make([][]utxo, 10)
+	for i := 0; i < 10; i++ {
+		segmentations[i] = make([]utxo, 0, len(txo))
+	}
+	for i := 0; i < len(txo); i++ {
+		if min <= float64(txo[i].Amount) && float64(txo[i].Amount) < max {
+			seg := 0
+			if interval != 0 {
+				seg = int((float64(txo[i].Amount)-min+interval)/interval) - 1
+			}
+			segmentations[seg] = append(segmentations[seg], txo[i])
+		} else if float64(txo[i].Amount) == max {
+			segmentations[len(segmentations)-1] = append(segmentations[len(segmentations)-1], txo[i])
+		}
+
+	}
+	for i := 0; i < len(segmentations); i++ {
+		t := utxoset(segmentations[i])
+		sort.Sort(&t)
+	}
+	return segmentations
 }

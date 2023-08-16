@@ -502,7 +502,6 @@ func checkNextFreeAddress(ns walletdb.ReadBucket) error {
 	bitmapBuff := bytes.NewBuffer(bitmapBytes)
 	set := bitset.BitSet{}
 	set.ReadFrom(bitmapBuff)
-	fmt.Printf("%v\n", bitmapBytes)
 	// read seed status
 	status := mainBucket.Get(seedStatusName)
 	if status == nil {
@@ -513,7 +512,7 @@ func checkNextFreeAddress(ns walletdb.ReadBucket) error {
 	// probe 20 addresses backwards
 	lastUsed, ok := set.NextSet(uint(latestCnt))
 	if ok && uint64(lastUsed) >= latestCnt {
-		log.Warnf("All addresses are marked used, if it is the first synchronization, " +
+		log.Warnf("The lastest addresses are marked used, if it is the first synchronization, " +
 			"the maximum address sequence number may not be large enough, please increase it " +
 			"as appropriate")
 	}
