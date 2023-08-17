@@ -120,6 +120,7 @@ var rpcHandlers = map[string]struct {
 	"generateaddressabe":       {handler: generateAddressAbe},
 	"addressmaxsequencenumber": {handler: addressMaxSequenceNumber},
 	"addressrange":             {handler: addressRange},
+	"listfreeaddresses":        {handler: listFreeAddress},
 	//"sendtoaddress":          {handler: sendToAddress},
 	//"sendtopayee":            {handler: sendToPayees},
 	"settxfee": {handler: setTxFee}, // TODO
@@ -1420,7 +1421,26 @@ func generateAddressAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 	}
 	return res, nil
 }
+func listFreeAddress(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	_ = icmd.(*abejson.ListFreeAddressesCmd)
 
+	addressBytes, err := w.ListFreeAddresses()
+	if err != nil {
+		return nil, err
+	}
+	type tt struct {
+		No_  uint64 `json:"No,omitempty"`
+		Addr string `json:"addr,omitempty"`
+	}
+	res := make([]*tt, 0, len(addressBytes))
+	for idx, addressByte := range addressBytes {
+		res = append(res, &tt{
+			No_:  idx,
+			Addr: hex.EncodeToString(addressByte),
+		})
+	}
+	return res, nil
+}
 func sendToAddressesAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.SendToAddressAbeCmd)
 

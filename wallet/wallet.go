@@ -1489,6 +1489,34 @@ func (w *Wallet) AddressRange(start uint64, end uint64) (res map[uint64]string, 
 	return res, nil
 }
 
+func (w *Wallet) ListFreeAddresses() (res map[uint64][]byte, err error) {
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+		addrKeys, err := w.Manager.ListFreeAddresses(addrmgrNs)
+		if err != nil {
+			return err
+		}
+
+		res = make(map[uint64][]byte, len(addrKeys))
+		for idx, addrKey := range addrKeys {
+			serializedAddressEnc, _, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKey)
+			if err != nil {
+				return err
+			}
+			res[idx], _, _, _, err = w.Manager.DecryptAddressKey(serializedAddressEnc, nil, nil, nil)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
 // NewAddressKey returns a new address for a wallet.
 func (w *Wallet) NewAddressKey() ([]byte, uint64, []byte, error) {
 	var numberOrder uint64

@@ -432,10 +432,19 @@ func (m *Manager) MarkAddrUsed(ns walletdb.ReadWriteBucket, idx uint64) error {
 	log.Infof("No.%d address is marked used.", idx)
 	return markAddrUsed(ns, idx)
 }
-func (m *Manager) CheckNextFreeAddress(ns walletdb.ReadBucket) error {
+func (m *Manager) CheckFreeAddress(ns walletdb.ReadBucket) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
-	return checkNextFreeAddress(ns)
+	return checkFreeAddress(ns)
+}
+func (m *Manager) ListFreeAddresses(ns walletdb.ReadBucket) (map[uint64][]byte, error) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	res, err := fetchFreeAddressKeys(ns)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 func (m *Manager) FetchSeedEnc(ns walletdb.ReadBucket) ([]byte, error) {
