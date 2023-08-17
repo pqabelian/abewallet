@@ -797,11 +797,19 @@ func (w *Wallet) txPqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc, mi
 	usedCntNum := ^uint64(0)
 	if needChangeFlag {
 		var addrBytes []byte
-		// fetch a change address for the change
-		_, usedCntNum, addrBytes, err = w.NewAddressKey()
+		// fetch a free address if possible
+		usedCntNum, addrBytes, err = w.FetchFreeAddress()
 		if err != nil {
-			return nil, err
+			// fetch a change address for the change
+			_, usedCntNum, addrBytes, err = w.NewAddressKey()
+			if err != nil {
+				return nil, err
+			}
+			log.Infof("No.%d would be used as change address when generating a transaction", usedCntNum)
+		} else {
+			log.Infof("No.%d would be used as change address when generating a transaction", usedCntNum)
 		}
+
 		txOutDescs = append(txOutDescs, abecrypto.NewAbeTxOutDesc(addrBytes, uint64(currentTotal-txFee-targetValue)))
 		// random the outputs
 		r, err := rand.Int(rand.Reader, big.NewInt(int64(len(txOutDescs))))

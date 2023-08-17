@@ -446,6 +446,15 @@ func (m *Manager) ListFreeAddresses(ns walletdb.ReadBucket) (map[uint64][]byte, 
 	}
 	return res, nil
 }
+func (m *Manager) FetchNextFreeAddressKey(ns walletdb.ReadBucket) (uint64, []byte, error) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	sequenceNo, addrKey, err := fetchNextFreeAddressKey(ns)
+	if err != nil {
+		return 0, nil, err
+	}
+	return sequenceNo, addrKey, nil
+}
 
 func (m *Manager) FetchSeedEnc(ns walletdb.ReadBucket) ([]byte, error) {
 	m.mtx.Lock()

@@ -1517,6 +1517,40 @@ func (w *Wallet) ListFreeAddresses() (res map[uint64][]byte, err error) {
 	return res, nil
 }
 
+// return a free address for a wallet
+func (w *Wallet) FetchFreeAddress() (uint64, []byte, error) {
+	var sequenceNumber uint64
+	var address []byte
+	var err error
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		var addrKey []byte
+		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+		sequenceNumber, addrKey, err = w.Manager.FetchNextFreeAddressKey(addrmgrNs)
+		if err != nil {
+			return err
+		}
+		if addrKey == nil {
+			return errors.New("no free address")
+		}
+
+		serializedAddressEnc, _, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKey)
+		if err != nil {
+			return err
+		}
+
+		address, _, _, _, err = w.Manager.DecryptAddressKey(serializedAddressEnc, nil, nil, nil)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		return 0, nil, err
+	}
+	return sequenceNumber, address, nil
+}
+
 // NewAddressKey returns a new address for a wallet.
 func (w *Wallet) NewAddressKey() ([]byte, uint64, []byte, error) {
 	var numberOrder uint64

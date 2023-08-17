@@ -520,13 +520,49 @@ func checkFreeAddress(ns walletdb.ReadBucket) error {
 	return nil
 }
 
+func fetchNextFreeAddressKey(ns walletdb.ReadBucket) (uint64, []byte, error) {
+	mainBucket := ns.NestedReadBucket(mainBucketName)
+	bitmapBytes := mainBucket.Get(addrStatusName)
+	bitmapBuff := bytes.NewBuffer(bitmapBytes)
+	set := bitset.BitSet{}
+	set.ReadFrom(bitmapBuff)
+
+	// read seed status
+	status := mainBucket.Get(seedStatusName)
+	if status == nil {
+		str := "failed to fetch seed status"
+		return 0, nil, managerError(ErrDatabase, str, errors.New("the status of seed is wrong"))
+	}
+	latestCnt := binary.LittleEndian.Uint64(status)
+
+	// flip set
+	flippedSet := set.Clone()
+	flippedSet.FlipRange(0, 500)
+
+	// intersection
+	allSet := bitset.BitSet{}
+	for i := uint64(0); i < latestCnt; i++ {
+		allSet.Set(uint(i))
+	}
+	result := flippedSet.Intersection(&allSet)
+
+	addrIdxBucket := mainBucket.NestedReadBucket(addrIdxBucketName)
+	current := uint64(0)
+	for current <= latestCnt {
+		if k, ok := result.NextSet(uint(current)); ok {
+			return uint64(k), addrIdxBucket.Get(uint64ToBytes(uint64(k))), nil
+		}
+	}
+
+	return 0, nil, nil
+}
+
 func fetchFreeAddressKeys(ns walletdb.ReadBucket) (map[uint64][]byte, error) {
 	mainBucket := ns.NestedReadBucket(mainBucketName)
 	bitmapBytes := mainBucket.Get(addrStatusName)
 	bitmapBuff := bytes.NewBuffer(bitmapBytes)
 	set := bitset.BitSet{}
 	set.ReadFrom(bitmapBuff)
-	fmt.Printf("%v", bitmapBytes)
 
 	// read seed status
 	status := mainBucket.Get(seedStatusName)
