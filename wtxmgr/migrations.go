@@ -24,7 +24,7 @@ var versions = []migration.Version{
 	},
 	{
 		Number:    3,
-		Migration: nil,
+		Migration: markUsedAddress,
 	},
 }
 
@@ -40,7 +40,6 @@ type MigrationManager struct {
 	ns     walletdb.ReadWriteBucket
 	addrNs walletdb.ReadWriteBucket
 }
-
 type Options func(*MigrationManager) error
 
 // A compile-time assertion to ensure that MigrationManager implements the
@@ -69,6 +68,10 @@ func (m *MigrationManager) Name() string {
 // NOTE: This method is part of the migration.Manager interface.
 func (m *MigrationManager) Namespace() walletdb.ReadWriteBucket {
 	return m.ns
+}
+
+func (m *MigrationManager) Namespace2() walletdb.ReadWriteBucket {
+	return m.addrNs
 }
 
 // CurrentVersion returns the current version of the service's database.

@@ -42,8 +42,8 @@ func getLatestVersion() uint32 {
 // will be used to handle migrations for the address manager. It exposes the
 // necessary parameters required to successfully perform migrations.
 type MigrationManager struct {
-	ns         walletdb.ReadWriteBucket
-	readOnlyNs walletdb.ReadWriteBucket
+	ns   walletdb.ReadWriteBucket
+	txNs walletdb.ReadWriteBucket
 }
 
 type Options func(*MigrationManager) error
@@ -57,8 +57,8 @@ var _ migration.Manager = (*MigrationManager)(nil)
 // address manager's data is contained within.
 func NewMigrationManager(ns walletdb.ReadWriteBucket, txNs walletdb.ReadWriteBucket) *MigrationManager {
 	return &MigrationManager{
-		ns:         ns,
-		readOnlyNs: txNs,
+		ns:   ns,
+		txNs: txNs,
 	}
 }
 
@@ -74,6 +74,9 @@ func (m *MigrationManager) Name() string {
 // NOTE: This method is part of the migration.Manager interface.
 func (m *MigrationManager) Namespace() walletdb.ReadWriteBucket {
 	return m.ns
+}
+func (m *MigrationManager) Namespace2() walletdb.ReadWriteBucket {
+	return m.txNs
 }
 
 // CurrentVersion returns the current version of the service's database.
@@ -289,7 +292,7 @@ func storeMaxReorgDepth(ns walletdb.ReadWriteBucket) error {
 	return nil
 }
 
-func populateIdxAddrBucket(addrMgr walletdb.ReadWriteBucket, readOnlyMgr ...walletdb.ReadBucket) error {
+func populateIdxAddrBucket(addrMgr walletdb.ReadWriteBucket, txNs walletdb.ReadWriteBucket) error {
 	mainBucket := addrMgr.NestedReadWriteBucket([]byte("main"))
 	// check whether the idx address bucket exist or not
 	// this bucket would store the map: addr key -> idx
