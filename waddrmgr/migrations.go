@@ -17,15 +17,19 @@ import (
 var versions = []migration.Version{
 	{
 		Number:    6,
-		Migration: populateBirthdayBlock,
+		Migration: nil,
 	},
 	{
 		Number:    7,
-		Migration: resetSyncedBlockToBirthday,
+		Migration: nil,
 	},
 	{
 		Number:    8,
-		Migration: storeMaxReorgDepth,
+		Migration: nil,
+	},
+	{
+		Number:    9,
+		Migration: populateIdxAddrBucket,
 	},
 }
 
@@ -38,8 +42,11 @@ func getLatestVersion() uint32 {
 // will be used to handle migrations for the address manager. It exposes the
 // necessary parameters required to successfully perform migrations.
 type MigrationManager struct {
-	ns walletdb.ReadWriteBucket
+	ns         walletdb.ReadWriteBucket
+	readOnlyNs walletdb.ReadWriteBucket
 }
+
+type Options func(*MigrationManager) error
 
 // A compile-time assertion to ensure that MigrationManager implements the
 // migration.Manager interface.
@@ -48,8 +55,11 @@ var _ migration.Manager = (*MigrationManager)(nil)
 // NewMigrationManager creates a new migration manager for the address manager.
 // The given bucket should reflect the top-level bucket in which all of the
 // address manager's data is contained within.
-func NewMigrationManager(ns walletdb.ReadWriteBucket) *MigrationManager {
-	return &MigrationManager{ns: ns}
+func NewMigrationManager(ns walletdb.ReadWriteBucket, txNs walletdb.ReadWriteBucket) *MigrationManager {
+	return &MigrationManager{
+		ns:         ns,
+		readOnlyNs: txNs,
+	}
 }
 
 // Name returns the name of the service we'll be attempting to upgrade.
@@ -276,5 +286,27 @@ func storeMaxReorgDepth(ns walletdb.ReadWriteBucket) error {
 		}
 	}
 
+	return nil
+}
+
+func populateIdxAddrBucket(addrMgr walletdb.ReadWriteBucket, readOnlyMgr ...walletdb.ReadBucket) error {
+	mainBucket := addrMgr.NestedReadWriteBucket([]byte("main"))
+	// check whether the idx address bucket exist or not
+	// this bucket would store the map: addr key -> idx
+	idxAddrBucket, err := mainBucket.CreateBucketIfNotExists([]byte("idxaddr"))
+	if err != nil {
+		str := "failed to create index address bucket"
+		return managerError(ErrDatabase, str, err)
+	}
+	// according idx -> addr key to build addr key -> idx
+	err = mainBucket.NestedReadBucket([]byte("addridx")).ForEach(func(k, v []byte) error {
+		if err = idxAddrBucket.Put(v, k); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
 	return nil
 }

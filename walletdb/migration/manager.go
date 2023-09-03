@@ -23,7 +23,7 @@ type Version struct {
 	// Migration represents a migration function that modifies the database
 	// state. Care must be taken so that consequent migrations build off of
 	// the previous one in order to ensure the consistency of the database.
-	Migration func(walletdb.ReadWriteBucket) error
+	Migration func(walletdb.ReadWriteBucket, ...walletdb.ReadBucket) error
 }
 
 // Manager is an interface that exposes the necessary methods needed in order to

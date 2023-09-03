@@ -2102,9 +2102,9 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 		}
 
 		// TODO(abe): the upgrade can discard now
-		addrMgrUpgrader := waddrmgr.NewMigrationManager(addrMgrBucket)
-		txMgrUpgrader := wtxmgr.NewMigrationManager(txMgrBucket)
-		err := migration.Upgrade(txMgrUpgrader, addrMgrUpgrader)
+		addrMgrUpgrader := waddrmgr.NewMigrationManager(addrMgrBucket, txMgrBucket)
+		txMgrUpgrader := wtxmgr.NewMigrationManager(txMgrBucket, addrMgrBucket)
+		err := migration.Upgrade(addrMgrUpgrader, txMgrUpgrader)
 		if err != nil {
 			return err
 		}
