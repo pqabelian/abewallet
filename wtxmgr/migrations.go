@@ -148,15 +148,18 @@ func markUsedAddress(txMgr walletdb.ReadWriteBucket, addrMgr walletdb.ReadWriteB
 		ringDetail := &Ring{}
 		ringDetail.Deserialize(ringDetailBucket.Get(k))
 		for i := 0; i < len(ring.IsMy); i++ {
-			address, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetail.TxoScripts[i], abecryptoparam.CryptoSchemePQRingCT)
-			if err != nil {
-				return err
+			if ring.IsMy[i] {
+				address, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetail.TxoScripts[i], abecryptoparam.CryptoSchemePQRingCT)
+				if err != nil {
+					return err
+				}
+				addrKey := chainhash.DoubleHashB(address)
+				if idxBytes := idxAddrBucket.Get(addrKey); len(idxBytes) != 0 {
+					addrIdx := binary.LittleEndian.Uint64(idxBytes)
+					set.Set(uint(addrIdx))
+				}
 			}
-			addrKey := chainhash.DoubleHashB(address)
-			if idxBytes := idxAddrBucket.Get(addrKey); len(idxBytes) != 0 {
-				addrIdx := binary.LittleEndian.Uint64(idxBytes)
-				set.Set(uint(addrIdx))
-			}
+
 		}
 		return nil
 	})
