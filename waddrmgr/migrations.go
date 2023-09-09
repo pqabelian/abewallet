@@ -78,9 +78,6 @@ func (m *MigrationManager) Name() string {
 func (m *MigrationManager) Namespace() walletdb.ReadWriteBucket {
 	return m.ns
 }
-func (m *MigrationManager) Namespace2() walletdb.ReadWriteBucket {
-	return m.txNs
-}
 
 // CurrentVersion returns the current version of the service's database.
 //

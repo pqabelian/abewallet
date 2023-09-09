@@ -59,10 +59,6 @@ func (m *MigrationManager) Namespace() walletdb.ReadWriteBucket {
 	return m.ns
 }
 
-func (m *MigrationManager) Namespace2() walletdb.ReadWriteBucket {
-	return m.addrNs
-}
-
 // CurrentVersion returns the current version of the service's database.
 //
 // NOTE: This method is part of the migration.Manager interface.

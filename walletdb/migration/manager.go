@@ -23,7 +23,7 @@ type Version struct {
 	// Migration represents a migration function that modifies the database
 	// state. Care must be taken so that consequent migrations build off of
 	// the previous one in order to ensure the consistency of the database.
-	Migration func(walletdb.ReadWriteBucket, walletdb.ReadWriteBucket) error
+	Migration func(walletdb.ReadWriteBucket) error
 }
 
 // Manager is an interface that exposes the necessary methods needed in order to
@@ -36,7 +36,6 @@ type Manager interface {
 
 	// Namespace returns the top-level bucket of the service.
 	Namespace() walletdb.ReadWriteBucket
-	Namespace2() walletdb.ReadWriteBucket
 
 	// CurrentVersion returns the current version of the service's database.
 	CurrentVersion(walletdb.ReadBucket) (uint32, error)
@@ -129,7 +128,6 @@ func upgrade(mgr Manager) error {
 		versions := VersionsToApply(currentVersion, versions)
 		mgrName := mgr.Name()
 		ns := mgr.Namespace()
-		ns2 := mgr.Namespace2()
 
 		for _, version := range versions {
 			log.Infof("Applying %v migration #%d", mgrName,
@@ -138,7 +136,7 @@ func upgrade(mgr Manager) error {
 			// We'll only run a migration if there is one available
 			// for this version.
 			if version.Migration != nil {
-				err := version.Migration(ns, ns2)
+				err := version.Migration(ns)
 				if err != nil {
 					log.Errorf("Unable to apply %v "+
 						"migration #%d: %v", mgrName,
