@@ -1,11 +1,14 @@
 package waddrmgr
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abewallet/walletdb"
 	"github.com/abesuite/abewallet/walletdb/migration"
+	"github.com/bits-and-blooms/bitset"
 	"time"
 )
 
@@ -292,17 +295,17 @@ func storeMaxReorgDepth(ns walletdb.ReadWriteBucket) error {
 	return nil
 }
 
-func populateIdxAddrBucket(addrMgr walletdb.ReadWriteBucket, txNs walletdb.ReadWriteBucket) error {
-	mainBucket := addrMgr.NestedReadWriteBucket([]byte("main"))
+func populateIdxAddrBucket(addrMgr walletdb.ReadWriteBucket) error {
+	mainBucket := addrMgr.NestedReadWriteBucket(mainBucketName)
 	// check whether the idx address bucket exist or not
 	// this bucket would store the map: addr key -> idx
-	idxAddrBucket, err := mainBucket.CreateBucketIfNotExists([]byte("idxaddr"))
+	idxAddrBucket, err := mainBucket.CreateBucketIfNotExists(idxAddrBucketName)
 	if err != nil {
 		str := "failed to create index address bucket"
 		return managerError(ErrDatabase, str, err)
 	}
 	// according idx -> addr key to build addr key -> idx
-	err = mainBucket.NestedReadBucket([]byte("addridx")).ForEach(func(k, v []byte) error {
+	err = mainBucket.NestedReadBucket(addrIdxBucketName).ForEach(func(k, v []byte) error {
 		if err = idxAddrBucket.Put(v, k); err != nil {
 			return err
 		}
@@ -310,6 +313,20 @@ func populateIdxAddrBucket(addrMgr walletdb.ReadWriteBucket, txNs walletdb.ReadW
 	})
 	if err != nil {
 		return err
+	}
+	// mark all address as used
+	seedCnt := mainBucket.Get(seedStatusName)
+	cnt := binary.LittleEndian.Uint64(seedCnt)
+	set := bitset.BitSet{}
+	for i := uint(0); i < uint(cnt); i++ {
+		set.Set(i)
+	}
+	outputBuff := &bytes.Buffer{}
+	set.WriteTo(outputBuff)
+	err = mainBucket.Put(addrStatusName, outputBuff.Bytes())
+	if err != nil {
+		str := "failed to store seed status"
+		return managerError(ErrDatabase, str, err)
 	}
 	return nil
 }

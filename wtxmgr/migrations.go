@@ -1,15 +1,8 @@
 package wtxmgr
 
 import (
-	"bytes"
-	"encoding/binary"
-	"github.com/abesuite/abec/abecrypto"
-	"github.com/abesuite/abec/abecrypto/abecryptoparam"
-	"github.com/abesuite/abec/chainhash"
-	"github.com/abesuite/abewallet/waddrmgr"
 	"github.com/abesuite/abewallet/walletdb"
 	"github.com/abesuite/abewallet/walletdb/migration"
-	"github.com/bits-and-blooms/bitset"
 )
 
 // TODO(abe): this slice should be re-design, we just have one version
@@ -21,10 +14,6 @@ var versions = []migration.Version{
 	{
 		Number:    2,
 		Migration: nil,
-	},
-	{
-		Number:    3,
-		Migration: markUsedAddress,
 	},
 }
 
@@ -124,59 +113,4 @@ func dropTransactionHistory(ns walletdb.ReadWriteBucket) error {
 
 	// Finally, we'll insert a 0 value for our mined balance.
 	return putMinedBalance(ns, 0)
-}
-
-// markAddressUsedStatus is a migration responsible for marking address belong txo
-// used
-func markUsedAddress(txMgr walletdb.ReadWriteBucket, addrMgr walletdb.ReadWriteBucket) error {
-	mainBucket := addrMgr.NestedReadWriteBucket([]byte("main"))
-	// check whether the idx address bucket exist or not
-	// this bucket would store the map: addr key -> idx
-	idxAddrBucket := mainBucket.NestedReadBucket([]byte("idxaddr"))
-
-	set := bitset.BitSet{}
-	// Retrieve all txo from utxoringdetails
-	// and mark the address in those used
-	ringDetailBucket := txMgr.NestedReadBucket(bucketRingDetails)
-	// utxoringdetails
-	err := txMgr.NestedReadBucket(bucketUTXORing).ForEach(func(k, v []byte) error {
-		ring := &UTXORing{}
-		err := ring.Deserialize(v)
-		if err != nil {
-			return err
-		}
-		ringDetail := &Ring{}
-		ringDetail.Deserialize(ringDetailBucket.Get(k))
-		for i := 0; i < len(ring.IsMy); i++ {
-			if ring.IsMy[i] {
-				address, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetail.TxoScripts[i], abecryptoparam.CryptoSchemePQRingCT)
-				if err != nil {
-					return err
-				}
-				addrKey := chainhash.DoubleHashB(address)
-				if idxBytes := idxAddrBucket.Get(addrKey); len(idxBytes) != 0 {
-					addrIdx := binary.LittleEndian.Uint64(idxBytes)
-					set.Set(uint(addrIdx))
-				}
-			}
-
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
-	outputBuff := &bytes.Buffer{}
-	set.WriteTo(outputBuff)
-	err = mainBucket.Put([]byte("addrstatus"), outputBuff.Bytes())
-	if err != nil {
-		str := "failed to set addr status"
-		return waddrmgr.ManagerError{
-			ErrorCode:   waddrmgr.ErrDatabase,
-			Description: str,
-			Err:         err,
-		}
-	}
-	return nil
 }
