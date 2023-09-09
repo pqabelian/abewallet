@@ -315,7 +315,7 @@ func populateIdxAddrBucket(addrMgr walletdb.ReadWriteBucket) error {
 	seedCnt := mainBucket.Get(seedStatusName)
 	cnt := binary.LittleEndian.Uint64(seedCnt)
 	set := bitset.BitSet{}
-	for i := uint(0); i < uint(cnt); i++ {
+	for i := uint(0); i <= uint(cnt); i++ {
 		set.Set(i)
 	}
 	outputBuff := &bytes.Buffer{}

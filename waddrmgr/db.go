@@ -537,11 +537,11 @@ func fetchNextFreeAddressKey(ns walletdb.ReadBucket) (uint64, []byte, error) {
 
 	// flip set
 	flippedSet := set.Clone()
-	flippedSet.FlipRange(0, 500)
+	flippedSet.FlipRange(0, uint(latestCnt))
 
 	// intersection
 	allSet := bitset.BitSet{}
-	for i := uint64(0); i < latestCnt; i++ {
+	for i := uint64(0); i <= latestCnt; i++ {
 		allSet.Set(uint(i))
 	}
 	result := flippedSet.Intersection(&allSet)
@@ -552,6 +552,7 @@ func fetchNextFreeAddressKey(ns walletdb.ReadBucket) (uint64, []byte, error) {
 		if k, ok := result.NextSet(uint(current)); ok {
 			return uint64(k), addrIdxBucket.Get(uint64ToBytes(uint64(k))), nil
 		}
+		current += 1
 	}
 
 	return 0, nil, nil
