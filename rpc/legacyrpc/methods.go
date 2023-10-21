@@ -1396,7 +1396,7 @@ func generateAddressAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 	for i := 0; i < number; i++ {
 		var address []byte
 		var netID []byte
-		netID, numberOrder[i], address, err = w.NewAddressKey()
+		netID, numberOrder[i], address, err = w.NewAddressKey(false)
 		if err != nil {
 			return nil, err
 		}
