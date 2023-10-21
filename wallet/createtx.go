@@ -798,10 +798,10 @@ func (w *Wallet) txPqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc, mi
 	if needChangeFlag {
 		var addrBytes []byte
 		// fetch a free address if possible
-		usedCntNum, addrBytes, err = w.FetchFreeAddress()
+		usedCntNum, addrBytes, err = w.FetchFreeAddress(true)
 		if err != nil {
 			// fetch a change address for the change
-			_, usedCntNum, addrBytes, err = w.NewAddressKey()
+			_, usedCntNum, addrBytes, err = w.NewAddressKey(true)
 			if err != nil {
 				return nil, err
 			}

@@ -1518,7 +1518,7 @@ func (w *Wallet) ListFreeAddresses() (res map[uint64][]byte, err error) {
 }
 
 // return a free address for a wallet
-func (w *Wallet) FetchFreeAddress() (uint64, []byte, error) {
+func (w *Wallet) FetchFreeAddress(markUsed bool) (uint64, []byte, error) {
 	var sequenceNumber uint64
 	var address []byte
 	var err error
@@ -1548,11 +1548,20 @@ func (w *Wallet) FetchFreeAddress() (uint64, []byte, error) {
 	if err != nil {
 		return 0, nil, err
 	}
+	if markUsed {
+		err = walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
+			addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+			if err = w.Manager.MarkAddrUsed(addrmgrNs, sequenceNumber); err != nil {
+				return err
+			}
+			return nil
+		})
+	}
 	return sequenceNumber, address, nil
 }
 
 // NewAddressKey returns a new address for a wallet.
-func (w *Wallet) NewAddressKey() ([]byte, uint64, []byte, error) {
+func (w *Wallet) NewAddressKey(markUsed bool) ([]byte, uint64, []byte, error) {
 	var numberOrder uint64
 	var addr []byte
 	var netID []byte
@@ -1603,6 +1612,13 @@ func (w *Wallet) NewAddressKey() ([]byte, uint64, []byte, error) {
 			addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
 		if err != nil {
 			return err
+		}
+
+		if markUsed {
+			err = w.Manager.MarkAddrUsed(addrmgrNs, numberOrder)
+			if err != nil {
+				return err
+			}
 		}
 
 		return err
