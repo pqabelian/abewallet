@@ -106,6 +106,8 @@ var rpcHandlers = map[string]struct {
 	"listunconfirmedtxoabe":    {handler: listSpentButUnminedAbe},
 	"listconfirmedtxoabe":      {handler: listSpentAndMinedAbe},
 
+	"rangespendableutxo": {handler: rangeSpendableUTXOAbe},
+
 	"listunconfirmedtxs": {handler: listUnconfirmedTxs},
 	"listconfirmedtxs":   {handler: listConfirmedTxs},
 	"listinvalidtxs":     {handler: listInvalidTxs},
@@ -912,6 +914,62 @@ func listSpentAndMinedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, erro
 	}
 	return segmentationTXOSet(res, *cmd.Min, *cmd.Max), nil
 }
+
+func rangeSpendableUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.RangeSpendableUTXOAbeCmd)
+	specified := false
+	if *cmd.Max != 0 && *cmd.Min != 0 && *cmd.Max >= *cmd.Min {
+		specified = true
+	}
+	utxos, err := w.FetchUnspentUTXOSet()
+	if err != nil {
+		return nil, err
+	}
+
+	if !specified {
+		minValue, maxValue := float64(0), float64(0)
+		// find the max/min value
+		for i := 0; i < len(utxos); i++ {
+			if float64(utxos[i].Amount) < minValue {
+				minValue = float64(utxos[i].Amount)
+			}
+			if maxValue < float64(utxos[i].Amount) {
+				maxValue = float64(utxos[i].Amount)
+			}
+		}
+		cmd.Min = &minValue
+		cmd.Max = &maxValue
+	}
+	interval := (*cmd.Max - *cmd.Min) / 10
+	rangeCount := map[int]int{}
+	for i := 0; i < len(utxos); i++ {
+		if *cmd.Min <= float64(utxos[i].Amount) && float64(utxos[i].Amount) < *cmd.Max {
+			seg := 0
+			if interval != 0 {
+				seg = int((float64(utxos[i].Amount)-*cmd.Min+interval)/interval) - 1
+			}
+			rangeCount[seg]++
+		} else if float64(utxos[i].Amount) == *cmd.Max {
+			rangeCount[9]++
+		}
+	}
+
+	res := make([]string, 10)
+	for i := 0; i < 9; i++ {
+		res[i] = fmt.Sprintf("[%.7f,%.7f]:%d",
+			(*cmd.Min+interval*float64(i))/1000000,
+			(*cmd.Min+interval*float64(i+1))/1000000,
+			rangeCount[i])
+	}
+	res[9] = fmt.Sprintf("[%.7f,%.7f]:%d",
+		(*cmd.Min+interval*float64(9))/1000000,
+		*cmd.Max/1000000,
+		rangeCount[9])
+
+	return res, nil
+
+}
+
 func listConfirmedTxs(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.ListConfirmedTxsCmd)
 	if *cmd.Verbose == 0 {
