@@ -918,7 +918,10 @@ func listSpentAndMinedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, erro
 func rangeSpendableUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.RangeSpendableUTXOAbeCmd)
 	specified := false
-	if *cmd.Max != 0 && *cmd.Min != 0 && *cmd.Max-*cmd.Max < 10 {
+	if *cmd.Max != 0 && *cmd.Min != 0 {
+		if *cmd.Max < *cmd.Min {
+			cmd.Min, cmd.Max = cmd.Max, cmd.Min
+		}
 		specified = true
 	}
 	utxos, err := w.FetchUnspentUTXOSet()
@@ -926,44 +929,48 @@ func rangeSpendableUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, err
 		return nil, err
 	}
 
-	if !specified {
-		minValue, maxValue := uint64(0), uint64(0)
-		// find the max/min value
+	if specified {
+		count := 0
 		for i := 0; i < len(utxos); i++ {
-			if utxos[i].Amount < minValue {
-				minValue = utxos[i].Amount
-			}
-			if maxValue < utxos[i].Amount {
-				maxValue = utxos[i].Amount
+			if *cmd.Min <= utxos[i].Amount && utxos[i].Amount <= *cmd.Max {
+				count++
 			}
 		}
-		cmd.Min = &minValue
-		cmd.Max = &maxValue
-	}
-	interval := (*cmd.Max - *cmd.Min) / 10
-	rangeCount := map[uint64]int{}
-	for i := 0; i < len(utxos); i++ {
-		if *cmd.Min <= utxos[i].Amount && utxos[i].Amount < *cmd.Max {
-			seg := uint64(0)
-			if interval != 0 {
-				seg = (utxos[i].Amount-*cmd.Min+interval)/interval - 1
-			}
-			rangeCount[seg]++
-		} else if utxos[i].Amount == *cmd.Max {
-			if interval != 0 {
-				rangeCount[9]++
-			} else {
-				rangeCount[0]++
-			}
-		}
+		return []string{fmt.Sprintf("[%d,%d]:%d",
+			*cmd.Min,
+			*cmd.Max,
+			count),
+		}, nil
 	}
 
+	minValue, maxValue := uint64(0), uint64(0)
+	// find the max/min value
+	for i := 0; i < len(utxos); i++ {
+		if utxos[i].Amount < minValue {
+			minValue = utxos[i].Amount
+		}
+		if maxValue < utxos[i].Amount {
+			maxValue = utxos[i].Amount
+		}
+	}
+	cmd.Min = &minValue
+	cmd.Max = &maxValue
+
+	interval := (*cmd.Max - *cmd.Min) / 10
 	if interval == 0 {
 		return []string{fmt.Sprintf("[%d,%d]:%d",
 			*cmd.Min,
 			*cmd.Max,
-			rangeCount[0]),
+			len(utxos)),
 		}, nil
+	}
+	rangeCount := map[uint64]int{}
+	for i := 0; i < len(utxos); i++ {
+		if *cmd.Min <= utxos[i].Amount && utxos[i].Amount < *cmd.Max {
+			rangeCount[(utxos[i].Amount-*cmd.Min+interval)/interval-1]++
+		} else if utxos[i].Amount == *cmd.Max {
+			rangeCount[9]++
+		}
 	}
 	res := make([]string, 10)
 	for i := uint64(0); i < 9; i++ {
