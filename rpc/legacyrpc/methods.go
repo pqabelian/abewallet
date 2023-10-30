@@ -918,7 +918,7 @@ func listSpentAndMinedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, erro
 func rangeSpendableUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.RangeSpendableUTXOAbeCmd)
 	specified := false
-	if *cmd.Max != 0 && *cmd.Min != 0 && *cmd.Max >= *cmd.Min {
+	if *cmd.Max != 0 && *cmd.Min != 0 && *cmd.Max-*cmd.Max < 10 {
 		specified = true
 	}
 	utxos, err := w.FetchUnspentUTXOSet()
@@ -927,43 +927,54 @@ func rangeSpendableUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, err
 	}
 
 	if !specified {
-		minValue, maxValue := float64(0), float64(0)
+		minValue, maxValue := uint64(0), uint64(0)
 		// find the max/min value
 		for i := 0; i < len(utxos); i++ {
-			if float64(utxos[i].Amount) < minValue {
-				minValue = float64(utxos[i].Amount)
+			if utxos[i].Amount < minValue {
+				minValue = utxos[i].Amount
 			}
-			if maxValue < float64(utxos[i].Amount) {
-				maxValue = float64(utxos[i].Amount)
+			if maxValue < utxos[i].Amount {
+				maxValue = utxos[i].Amount
 			}
 		}
 		cmd.Min = &minValue
 		cmd.Max = &maxValue
 	}
 	interval := (*cmd.Max - *cmd.Min) / 10
-	rangeCount := map[int]int{}
+	rangeCount := map[uint64]int{}
 	for i := 0; i < len(utxos); i++ {
-		if *cmd.Min <= float64(utxos[i].Amount) && float64(utxos[i].Amount) < *cmd.Max {
-			seg := 0
+		if *cmd.Min <= utxos[i].Amount && utxos[i].Amount < *cmd.Max {
+			seg := uint64(0)
 			if interval != 0 {
-				seg = int((float64(utxos[i].Amount)-*cmd.Min+interval)/interval) - 1
+				seg = (utxos[i].Amount-*cmd.Min+interval)/interval - 1
 			}
 			rangeCount[seg]++
-		} else if float64(utxos[i].Amount) == *cmd.Max {
-			rangeCount[9]++
+		} else if utxos[i].Amount == *cmd.Max {
+			if interval != 0 {
+				rangeCount[9]++
+			} else {
+				rangeCount[0]++
+			}
 		}
 	}
 
+	if interval == 0 {
+		return []string{fmt.Sprintf("[%d,%d]:%d",
+			*cmd.Min,
+			*cmd.Max,
+			rangeCount[0]),
+		}, nil
+	}
 	res := make([]string, 10)
-	for i := 0; i < 9; i++ {
-		res[i] = fmt.Sprintf("[%.7f,%.7f]:%d",
-			(*cmd.Min+interval*float64(i))/1000000,
-			(*cmd.Min+interval*float64(i+1))/1000000,
+	for i := uint64(0); i < 9; i++ {
+		res[i] = fmt.Sprintf("[%d,%d):%d",
+			*cmd.Min+interval*i,
+			*cmd.Min+interval*(i+1),
 			rangeCount[i])
 	}
-	res[9] = fmt.Sprintf("[%.7f,%.7f]:%d",
-		(*cmd.Min+interval*float64(9))/1000000,
-		*cmd.Max/1000000,
+	res[9] = fmt.Sprintf("[%d,%d]:%d",
+		*cmd.Min+interval*9,
+		*cmd.Max,
 		rangeCount[9])
 
 	return res, nil
