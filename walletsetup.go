@@ -88,6 +88,11 @@ func createWallet(cfg *config) error {
 		}
 
 		fmt.Println("Creating the wallet...")
+
+		if end == prompt.MAXCOUNTERADDRESS && cfg.MyRestoreNumber != 0 {
+			end = cfg.MyRestoreNumber
+		}
+
 		w, err := loader.CreateNewWallet(pubPass, privPass, seed[4:], end, time.Now())
 		if err != nil {
 			return err

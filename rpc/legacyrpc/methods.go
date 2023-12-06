@@ -122,6 +122,7 @@ var rpcHandlers = map[string]struct {
 	"generateaddressabe":       {handler: generateAddressAbe},
 	"addressmaxsequencenumber": {handler: addressMaxSequenceNumber},
 	"addressrange":             {handler: addressRange},
+	"exportrange":              {handler: exportRange},
 	"listfreeaddresses":        {handler: listFreeAddress},
 	//"sendtoaddress":          {handler: sendToAddress},
 	//"sendtopayee":            {handler: sendToPayees},
@@ -1455,6 +1456,15 @@ func addressMaxSequenceNumber(icmd interface{}, w *wallet.Wallet) (interface{}, 
 func addressRange(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.AddressRangeCmd)
 	res, err := w.AddressRange(cmd.Start, cmd.End)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func exportRange(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.ExportRangeCmd)
+	res, err := w.ExportRange(cmd.Start, cmd.End)
 	if err != nil {
 		return nil, err
 	}

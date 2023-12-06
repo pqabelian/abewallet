@@ -156,7 +156,8 @@ type Wallet struct {
 	quitMu  sync.Mutex
 
 	// Information for syncing.
-	SyncFrom int32
+	SyncFrom                 int32
+	changeWithInitialAddress bool
 }
 
 // Start starts the goroutines necessary to manage a wallet.
@@ -339,6 +340,10 @@ func (w *Wallet) SetChainSynced(synced bool) {
 	w.chainClientSyncMtx.Lock()
 	w.chainClientSynced = synced
 	w.chainClientSyncMtx.Unlock()
+}
+
+func (w *Wallet) SetChangeWithZeroAddr(changeWithZeroAddr bool) {
+	w.changeWithInitialAddress = changeWithZeroAddr
 }
 
 // activeData returns the currently-active receiving addresses and all unspent
@@ -1464,6 +1469,9 @@ func (w *Wallet) AddressRange(start uint64, end uint64) (res map[uint64]string, 
 		}
 
 		addrKeys, err = waddrmgr.FetchAddressKeys(addrmgrNs, start, end)
+		if err != nil {
+			return err
+		}
 		for i := start; i < end && i <= addressMaxNum; i++ {
 			serializedAddressEnc, _, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKeys[i])
 			if err != nil {
@@ -1481,12 +1489,95 @@ func (w *Wallet) AddressRange(start uint64, end uint64) (res map[uint64]string, 
 	}
 	for i := start; i < end; i++ {
 		if i <= addressMaxNum {
-			res[i] = hex.EncodeToString(addresses[i])
+			res[i] = w.Export(addresses[i])
 		} else {
 			res[i] = ""
 		}
 	}
 	return res, nil
+}
+
+func (w *Wallet) ExportRange(start uint64, end uint64) (interface{}, error) {
+	heldUnlock, err := w.holdUnlock()
+	if err != nil {
+		return nil, err
+	}
+	addrKeys := make(map[uint64][]byte, end-start)
+	cryptoSeeds := make(map[uint64][]byte, end-start)
+	addresses := make(map[uint64][]byte, end-start)
+	asksps := make(map[uint64][]byte, end-start)
+	asksns := make(map[uint64][]byte, end-start)
+	vsks := make(map[uint64][]byte, end-start)
+	var addressMaxNum uint64
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+
+		seedEnc, err := w.Manager.FetchSeedEnc(addrmgrNs)
+		if err != nil {
+			return err
+		}
+		seed, err := w.Manager.Decrypt(waddrmgr.CKTSeed, seedEnc)
+		if err != nil {
+			return err
+		}
+
+		addressMaxNum, err = waddrmgr.FetchSeedStatus(addrmgrNs)
+		if err != nil {
+			return err
+		}
+
+		addrKeys, err = waddrmgr.FetchAddressKeys(addrmgrNs, start, end)
+		if err != nil {
+			return err
+		}
+		for i := start; i < end && i <= addressMaxNum; i++ {
+			cryptoSeeds[i], err = w.Manager.GenerateCryptoSeed(seed, i)
+			if err != nil {
+				return err
+			}
+			serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKeys[i])
+			if err != nil {
+				return err
+			}
+			addresses[i], asksps[i], asksns[i], vsks[i], err = w.Manager.DecryptAddressKey(serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc)
+			if err != nil {
+				return err
+			}
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	res := make(map[uint64]map[string]string, end-start)
+	for i := start; i < end; i++ {
+		res[i] = map[string]string{}
+		if i <= addressMaxNum {
+			res[i]["cryptoseed"] = w.Export(cryptoSeeds[i])
+			res[i]["address"] = w.Export(addresses[i])
+			res[i]["asksp"] = w.Export(asksps[i])
+			res[i]["asksn"] = w.Export(asksns[i])
+			res[i]["vsk"] = w.Export(vsks[i])
+		} else {
+			res[i]["cryptoseed"] = ""
+			res[i]["address"] = ""
+			res[i]["asksp"] = ""
+			res[i]["asksn"] = ""
+			res[i]["vsk"] = ""
+		}
+	}
+	heldUnlock.release()
+	return res, nil
+}
+
+func (w *Wallet) Export(content []byte) string {
+	b := make([]byte, len(content)+1)
+	b[0] = w.chainParams.AbelAddressNetId
+	copy(b[1:], content)
+	// generate the hash of (abecrypto.CryptoSchemePQRINGCT || content)
+	hash := chainhash.DoubleHashB(b)
+	b = append(b, hash...)
+	return hex.EncodeToString(b)
 }
 
 func (w *Wallet) ListFreeAddresses() (res map[uint64][]byte, err error) {
@@ -1518,21 +1609,29 @@ func (w *Wallet) ListFreeAddresses() (res map[uint64][]byte, err error) {
 }
 
 // return a free address for a wallet
-func (w *Wallet) FetchFreeAddress(markUsed bool) (uint64, []byte, error) {
+func (w *Wallet) FetchChangeAddress(markUsed bool) (uint64, []byte, error) {
 	var sequenceNumber uint64
 	var address []byte
 	var err error
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		var addrKey []byte
 		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		sequenceNumber, addrKey, err = w.Manager.FetchNextFreeAddressKey(addrmgrNs)
-		if err != nil {
-			return err
+		if w.changeWithInitialAddress {
+			addrKeys, err := waddrmgr.FetchAddressKeys(addrmgrNs, 0, 1)
+			if err != nil {
+				return err
+			}
+			addrKey = addrKeys[0]
+			sequenceNumber = 0
+		} else {
+			sequenceNumber, addrKey, err = w.Manager.FetchNextFreeAddressKey(addrmgrNs)
+			if err != nil {
+				return err
+			}
+			if addrKey == nil {
+				return errors.New("no free address")
+			}
 		}
-		if addrKey == nil {
-			return errors.New("no free address")
-		}
-
 		serializedAddressEnc, _, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKey)
 		if err != nil {
 			return err
