@@ -22,6 +22,7 @@ import (
 	"github.com/abesuite/abewallet/walletdb/migration"
 	"github.com/abesuite/abewallet/wtxmgr"
 	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1494,6 +1495,54 @@ func (w *Wallet) AddressRange(start uint64, end uint64) (res map[uint64]string, 
 			res[i] = ""
 		}
 	}
+	return res, nil
+}
+func (w *Wallet) ExportAddressKeyRandSeed(start uint64, end uint64) (interface{}, error) {
+	heldUnlock, err := w.holdUnlock()
+	if err != nil {
+		return nil, err
+	}
+	randSeeds := make(map[uint64][]byte, end-start)
+	var addressMaxNum uint64
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+
+		seedEnc, err := w.Manager.FetchSeedEnc(addrmgrNs)
+		if err != nil {
+			return err
+		}
+		seed, err := w.Manager.Decrypt(waddrmgr.CKTSeed, seedEnc)
+		if err != nil {
+			return err
+		}
+
+		addressMaxNum, err = waddrmgr.FetchSeedStatus(addrmgrNs)
+		if err != nil {
+			return err
+		}
+		for i := start; i < end && i <= addressMaxNum; i++ {
+			randSeeds[i], err = w.Manager.GenerateCryptoSeed(seed, i)
+			if err != nil {
+				return err
+			}
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	res := make(map[uint64]map[string]string, end-start)
+	for i := start; i < end; i++ {
+		res[i] = map[string]string{}
+		if i <= addressMaxNum {
+			res[i]["randseed"] = hex.EncodeToString(append([]byte{0, 0, 0, 0}, randSeeds[i]...))
+			res[i]["No"] = strconv.Itoa(int(i))
+		} else {
+			res[i]["randseed"] = ""
+			res[i]["No"] = strconv.Itoa(int(i))
+		}
+	}
+	heldUnlock.release()
 	return res, nil
 }
 
