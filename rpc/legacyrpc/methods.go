@@ -106,6 +106,8 @@ var rpcHandlers = map[string]struct {
 	"listunconfirmedtxoabe":    {handler: listSpentButUnminedAbe},
 	"listconfirmedtxoabe":      {handler: listSpentAndMinedAbe},
 
+	"rangespendableutxo": {handler: rangeSpendableUTXOAbe},
+
 	"listunconfirmedtxs": {handler: listUnconfirmedTxs},
 	"listconfirmedtxs":   {handler: listConfirmedTxs},
 	"listinvalidtxs":     {handler: listInvalidTxs},
@@ -120,6 +122,8 @@ var rpcHandlers = map[string]struct {
 	"generateaddressabe":       {handler: generateAddressAbe},
 	"addressmaxsequencenumber": {handler: addressMaxSequenceNumber},
 	"addressrange":             {handler: addressRange},
+	//"exportrange":              {handler: exportRange},
+	"exportaddresskeyrandseed": {handler: exportAddressKeyRandSeed},
 	"listfreeaddresses":        {handler: listFreeAddress},
 	//"sendtoaddress":          {handler: sendToAddress},
 	//"sendtopayee":            {handler: sendToPayees},
@@ -912,6 +916,80 @@ func listSpentAndMinedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, erro
 	}
 	return segmentationTXOSet(res, *cmd.Min, *cmd.Max), nil
 }
+
+func rangeSpendableUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.RangeSpendableUTXOAbeCmd)
+	specified := false
+	if *cmd.Max != 0 && *cmd.Min != 0 {
+		if *cmd.Max < *cmd.Min {
+			cmd.Min, cmd.Max = cmd.Max, cmd.Min
+		}
+		specified = true
+	}
+	utxos, err := w.FetchUnspentUTXOSet()
+	if err != nil {
+		return nil, err
+	}
+
+	if specified {
+		count := 0
+		for i := 0; i < len(utxos); i++ {
+			if *cmd.Min <= utxos[i].Amount && utxos[i].Amount <= *cmd.Max {
+				count++
+			}
+		}
+		return []string{fmt.Sprintf("[%d,%d]:%d",
+			*cmd.Min,
+			*cmd.Max,
+			count),
+		}, nil
+	}
+
+	minValue, maxValue := uint64(0), uint64(0)
+	// find the max/min value
+	for i := 0; i < len(utxos); i++ {
+		if utxos[i].Amount < minValue {
+			minValue = utxos[i].Amount
+		}
+		if maxValue < utxos[i].Amount {
+			maxValue = utxos[i].Amount
+		}
+	}
+	cmd.Min = &minValue
+	cmd.Max = &maxValue
+
+	interval := (*cmd.Max - *cmd.Min) / 10
+	if interval == 0 {
+		return []string{fmt.Sprintf("[%d,%d]:%d",
+			*cmd.Min,
+			*cmd.Max,
+			len(utxos)),
+		}, nil
+	}
+	rangeCount := map[uint64]int{}
+	for i := 0; i < len(utxos); i++ {
+		if *cmd.Min <= utxos[i].Amount && utxos[i].Amount < *cmd.Max {
+			rangeCount[(utxos[i].Amount-*cmd.Min+interval)/interval-1]++
+		} else if utxos[i].Amount == *cmd.Max {
+			rangeCount[9]++
+		}
+	}
+	res := make([]string, 10)
+	for i := uint64(0); i < 9; i++ {
+		res[i] = fmt.Sprintf("[%d,%d):%d",
+			*cmd.Min+interval*i,
+			*cmd.Min+interval*(i+1),
+			rangeCount[i])
+	}
+	res[9] = fmt.Sprintf("[%d,%d]:%d",
+		*cmd.Min+interval*9,
+		*cmd.Max,
+		rangeCount[9])
+
+	return res, nil
+
+}
+
 func listConfirmedTxs(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.ListConfirmedTxsCmd)
 	if *cmd.Verbose == 0 {
@@ -1379,6 +1457,25 @@ func addressMaxSequenceNumber(icmd interface{}, w *wallet.Wallet) (interface{}, 
 func addressRange(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.AddressRangeCmd)
 	res, err := w.AddressRange(cmd.Start, cmd.End)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// The result would be a hex.EncodeToString([]byte) to a string
+func exportAddressKeyRandSeed(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.ExportRangeCmd)
+	res, err := w.ExportAddressKeyRandSeed(cmd.Start, cmd.End)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func exportRange(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.ExportRangeCmd)
+	res, err := w.ExportRange(cmd.Start, cmd.End)
 	if err != nil {
 		return nil, err
 	}

@@ -503,6 +503,18 @@ func (m *Manager) GenerateAddressKeys(ns walletdb.ReadWriteBucket, seed []byte) 
 	return cnt + 1, serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, nil
 }
 
+// TODO Need refract it.
+func (m *Manager) GenerateCryptoSeed(seed []byte, cnt uint64) ([]byte, error) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	cryptoSeed, err := generateCryptoSeed(seed, len(seed), cnt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate address and key")
+	}
+	return cryptoSeed, nil
+}
+
 // ChainParams returns the chain parameters for this address manager.
 func (m *Manager) ChainParams() *chaincfg.Params {
 	// NOTE: No need for mutex here since the net field does not change
@@ -1396,7 +1408,7 @@ func Create(ns walletdb.ReadWriteBucket,
 					return maybeConvertDbError(err)
 				}
 			}
-			log.Infof("The addresses with No. in [0, %d] have been restored.", end)
+			log.Infof("The addresses with No. in [0, %d] have been generated.", end)
 		}
 
 		startSeedStatus := end
@@ -1451,9 +1463,9 @@ func Create(ns walletdb.ReadWriteBucket,
 	return putBirthday(ns, birthday.Add(-48*time.Hour))
 }
 
-func generateAddressSk(seed []byte, length int, cnt uint64) ([]byte, []byte, []byte, []byte, error) {
+func generateCryptoSeed(seed []byte, length int, cnt uint64) ([]byte, error) {
 	if len(seed) != length {
-		return nil, nil, nil, nil, errors.New("the length of given seed is not matched")
+		return nil, errors.New("the length of given seed is not matched")
 	}
 	seedHalfLength := length >> 1
 	halfLength := abecryptoparam.PQRingCTPP.ParamSeedBytesLen()
@@ -1489,5 +1501,13 @@ func generateAddressSk(seed []byte, length int, cnt uint64) ([]byte, []byte, []b
 	tmp[seedHalfLength+9] = byte(cnt >> 7)
 	t = sha3.Sum512(tmp)
 	copy(usedSeed[halfLength:], t[:])
+	return usedSeed, nil
+}
+
+func generateAddressSk(seed []byte, length int, cnt uint64) ([]byte, []byte, []byte, []byte, error) {
+	usedSeed, err := generateCryptoSeed(seed, length, cnt)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
 	return abecrypto.CryptoAddressKeyGen(usedSeed, abecryptoparam.CryptoSchemePQRingCT)
 }

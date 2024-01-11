@@ -109,6 +109,9 @@ type config struct {
 	// when the new gRPC server is enabled.
 	ExperimentalRPCListeners []string `long:"experimentalrpclisten" description:"Listen for RPC connections on this interface/port"`
 
+	// Options using the No.0 address as the change address
+	ChangeWithInitialAddress bool `long:"changewithinitialaddress" description:"use the No.0 address as the change address"`
+
 	// Options that are used when creating wallet in non-interactive mode
 	NonInteractiveCreate bool   `long:"noninteractivecreate" description:"Create a wallet in non-interactive mode, just using command line args"`
 	WithMnemonic         bool   `long:"withmnemonic" description:"Whether or not the args containing wallet mnemonic"`
