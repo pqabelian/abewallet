@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto"
 	"github.com/abesuite/abec/abecrypto/abecryptoparam"
+	"github.com/abesuite/abec/abecryptox/abecryptoutils"
+	"github.com/abesuite/abec/abecryptox/abecryptoxkey"
+	"github.com/abesuite/abec/abecryptox/abecryptoxparam"
 	"github.com/abesuite/abec/abeutil/hdkeychain"
 	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abec/chainhash"
@@ -255,6 +257,9 @@ type Manager struct {
 	gcnt         uint64 // global count for generate address and information for spending
 	syncState    syncState
 	watchingOnly bool
+
+	cryptoScheme abecryptoxparam.CryptoScheme
+	privacyLevel abecryptoxkey.PrivacyLevel
 	birthday     time.Time
 	locked       bool
 	closed       bool
@@ -298,6 +303,10 @@ type Manager struct {
 	// manager is already unlocked.  The hash is zeroed each lock.
 	privPassphraseSalt   [saltSize]byte //To not compare the private key directly
 	hashedPrivPassphrase [sha512.Size]byte
+}
+
+func (m *Manager) SyncedHeight() int32 {
+	return m.syncState.syncedTo.Height
 }
 
 // WatchOnly returns true if the root manager is in watch only mode, and false
@@ -373,28 +382,35 @@ func (m *Manager) Close() {
 // along with the active scoped manager. Otherwise, a nil manager and a non-nil
 // error will be returned.
 
-func (m *Manager) DecryptAddressKey(addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc []byte) ([]byte, []byte, []byte, []byte, error) {
+func (m *Manager) DecryptAddressKey(addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc []byte, detectorKeyEnc []byte) ([]byte, []byte, []byte, []byte, []byte, error) {
 	var addressBytes, valueSecretKeyBytes []byte
 	var err error
 
 	if addressEnc != nil {
 		addressBytes, err = m.Decrypt(CKTPublic, addressEnc)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, err
 		}
 	}
 
 	if valueSecretKeyEnc != nil {
 		valueSecretKeyBytes, err = m.Decrypt(CKTPublic, valueSecretKeyEnc)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, err
 		}
 	}
 	var addressSecretSnBytes []byte
 	if addressSecretSnEnc != nil {
 		addressSecretSnBytes, err = m.Decrypt(CKTPublic, addressSecretSnEnc)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, err
+		}
+	}
+	var detectoyKey []byte
+	if detectorKeyEnc != nil {
+		detectoyKey, err = m.Decrypt(CKTPublic, detectorKeyEnc)
+		if err != nil {
+			return nil, nil, nil, nil, nil, err
 		}
 	}
 
@@ -403,16 +419,16 @@ func (m *Manager) DecryptAddressKey(addressEnc, addressSecretSpEnc, addressSecre
 		if addressSecretSpEnc != nil {
 			addressSecretSpBytes, err = m.Decrypt(CKTPrivate, addressSecretSpEnc)
 			if err != nil {
-				return nil, nil, nil, nil, err
+				return nil, nil, nil, nil, nil, err
 			}
 		}
 
 	}
-	return addressBytes, addressSecretSpBytes, addressSecretSnBytes, valueSecretKeyBytes, nil
+	return addressBytes, addressSecretSpBytes, addressSecretSnBytes, valueSecretKeyBytes, detectoyKey, nil
 }
 
 // FetchAddressKeyEnc got addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc,
-func (m *Manager) FetchAddressKeyEnc(ns walletdb.ReadBucket, coinAddrBytes []byte) ([]byte, []byte, []byte, []byte, uint64, error) {
+func (m *Manager) FetchAddressKeyEnc(ns walletdb.ReadBucket, coinAddrBytes []byte) ([]byte, []byte, []byte, []byte, uint64, []byte, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	addrKey := chainhash.DoubleHashB(coinAddrBytes)
@@ -420,24 +436,33 @@ func (m *Manager) FetchAddressKeyEnc(ns walletdb.ReadBucket, coinAddrBytes []byt
 }
 
 // FetchAddressKeyEnc got addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc,
-func (m *Manager) FetchAddressKeyEncByAddressKey(ns walletdb.ReadBucket, addrKey []byte) ([]byte, []byte, []byte, []byte, uint64, error) {
+func (m *Manager) FetchAddressKeyEncByAddressKey(ns walletdb.ReadBucket, addrKey []byte) ([]byte, []byte, []byte, []byte, uint64, []byte, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	return fetchAddressKeyEnc(ns, addrKey)
 }
 
 func (m *Manager) MarkAddrUsed(ns walletdb.ReadWriteBucket, idx uint64) error {
+	if m.cryptoScheme != abecryptoxparam.CryptoSchemePQRingCT {
+		return nil
+	}
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	log.Infof("No.%d address is marked used.", idx)
 	return markAddrUsed(ns, idx)
 }
 func (m *Manager) CheckFreeAddress(ns walletdb.ReadBucket) error {
+	if m.cryptoScheme != abecryptoxparam.CryptoSchemePQRingCT {
+		return nil
+	}
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	return checkFreeAddress(ns)
 }
 func (m *Manager) ListFreeAddresses(ns walletdb.ReadBucket) (map[uint64][]byte, error) {
+	if m.cryptoScheme != abecryptoxparam.CryptoSchemePQRingCT {
+		return nil, nil
+	}
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	res, err := fetchFreeAddressKeys(ns)
@@ -447,6 +472,9 @@ func (m *Manager) ListFreeAddresses(ns walletdb.ReadBucket) (map[uint64][]byte, 
 	return res, nil
 }
 func (m *Manager) FetchNextFreeAddressKey(ns walletdb.ReadBucket) (uint64, []byte, error) {
+	if m.cryptoScheme != abecryptoxparam.CryptoSchemePQRingCT {
+		return 0, nil, nil
+	}
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	sequenceNo, addrKey, err := fetchNextFreeAddressKey(ns)
@@ -468,47 +496,53 @@ func (m *Manager) FetchNetID(ns walletdb.ReadBucket) ([]byte, error) {
 }
 
 func (m *Manager) PutAddressKeysEnc(ns walletdb.ReadWriteBucket, idx uint64, addrKey []byte, valueSecretKeyEnc,
-	addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc []byte) error {
+	addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc []byte, detectorKeyEnc []byte, publicRand []byte) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
-	return putAddressKeysEnc(ns, idx, addrKey, valueSecretKeyEnc, addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
+	return putAddressKeysEnc(ns, idx, addrKey, valueSecretKeyEnc, addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc, detectorKeyEnc, publicRand)
 
 }
-func (m *Manager) GenerateAddressKeys(ns walletdb.ReadWriteBucket, seed []byte) (uint64, []byte, []byte, []byte, []byte, error) {
+func (m *Manager) GenerateAddressKeys(ns walletdb.ReadWriteBucket, seed []byte) (uint64, []byte, []byte, []byte, []byte, []byte, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	// fetch the seed status
-	cnt, err := fetchSeedStatus(ns)
-	if err != nil {
-		return 0, nil, nil, nil, nil, err
+	var cnt uint64
+	var err error
+	if m.cryptoScheme == abecryptoxparam.CryptoSchemePQRingCT {
+		cnt, err = fetchSeedStatus(ns)
+		if err != nil {
+			return 0, nil, nil, nil, nil, nil, err
+		}
 	}
 
-	serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, err := generateAddressSk(seed, len(seed), cnt+1)
+	serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, detectorKey, err := generateAddressSk(m.cryptoScheme, m.privacyLevel, seed, len(seed), cnt+1)
 	if err != nil {
-		return 0, nil, nil, nil, nil, fmt.Errorf("failed to generate address and key")
-	}
-	log.Infof("The address with No. %d is created.", cnt+1)
-	log.Infof("Wallet status: current max No. of address is %v.", cnt+1)
-
-	err = markAddrUnused(ns, cnt+1)
-	if err != nil {
-		return 0, nil, nil, nil, nil, err
-	}
-	// update the seedStatus
-	err = putSeedStatus(ns, cnt+1)
-	if err != nil {
-		return 0, nil, nil, nil, nil, err
+		return 0, nil, nil, nil, nil, nil, fmt.Errorf("failed to generate address and key")
 	}
 
-	return cnt + 1, serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, nil
+	if m.cryptoScheme == abecryptoxparam.CryptoSchemePQRingCT {
+		log.Infof("The address with No. %d is created.", cnt+1)
+		log.Infof("Wallet status: current max No. of address is %v.", cnt+1)
+		err = markAddrUnused(ns, cnt+1)
+		if err != nil {
+			return 0, nil, nil, nil, nil, nil, err
+		}
+		// update the seedStatus
+		err = putSeedStatus(ns, cnt+1)
+		if err != nil {
+			return 0, nil, nil, nil, nil, nil, err
+		}
+	}
+
+	return cnt + 1, serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, detectorKey, nil
 }
 
 // TODO Need refract it.
-func (m *Manager) GenerateCryptoSeed(seed []byte, cnt uint64) ([]byte, error) {
+func (m *Manager) GenerateRandSeed(rootSeed []byte, cnt uint64) ([]byte, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
-	cryptoSeed, err := generateCryptoSeed(seed, len(seed), cnt)
+	cryptoSeed, err := generateRandSeed(rootSeed, len(rootSeed), cnt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate address and key")
 	}
@@ -942,13 +976,21 @@ func (m *Manager) Decrypt(keyType CryptoKeyType, in []byte) ([]byte, error) {
 	return decrypted, nil
 }
 
+func (m *Manager) GetCryptoScheme() abecryptoxparam.CryptoScheme {
+	return m.cryptoScheme
+}
+
+func (m *Manager) GetPrivacyLevel() abecryptoxkey.PrivacyLevel {
+	return m.privacyLevel
+}
+
 // newManager returns a new locked address manager with the given parameters.
 func newManager(chainParams *chaincfg.Params, masterKeyPub,
 	masterKeyPriv *snacl.SecretKey, cryptoKeyPub EncryptorDecryptor,
 	cryptoKeySeedEncrypted, cryptoKeyPrivEncrypted,
 	cryptoKeyScriptEncrypted []byte, syncInfo *syncState,
 	birthday time.Time, privPassphraseSalt [32]byte,
-	watchingOnly bool) *Manager {
+	watchingOnly bool, cryptoScheme abecryptoxparam.CryptoScheme, privacyLevel abecryptoxkey.PrivacyLevel) *Manager {
 	m := &Manager{
 		chainParams:              chainParams,
 		syncState:                *syncInfo,
@@ -968,6 +1010,8 @@ func newManager(chainParams *chaincfg.Params, masterKeyPub,
 		//externalAddrSchemas:      make(map[AddressType][]KeyScope),
 		//internalAddrSchemas:      make(map[AddressType][]KeyScope),
 		watchingOnly: watchingOnly,
+		cryptoScheme: cryptoScheme,
+		privacyLevel: privacyLevel,
 	}
 
 	//for _, sMgr := range m.scopedManagers {
@@ -1003,6 +1047,16 @@ func loadManager(ns walletdb.ReadBucket, pubPassphrase []byte,
 
 	// Load whether or not the manager is watching-only from the db.
 	watchingOnly, err := fetchWatchingOnly(ns)
+	if err != nil {
+		return nil, maybeConvertDbError(err)
+	}
+
+	// Load whether or not the manager is weak-privacy from the db.
+	cryptoScheme, err := fetchCryptoScheme(ns)
+	if err != nil {
+		return nil, maybeConvertDbError(err)
+	}
+	privacyLevel, err := fetchPrivacyLevel(ns)
 	if err != nil {
 		return nil, maybeConvertDbError(err)
 	}
@@ -1108,7 +1162,7 @@ func loadManager(ns walletdb.ReadBucket, pubPassphrase []byte,
 	mgr := newManager(
 		chainParams, &masterKeyPub, &masterKeyPriv,
 		cryptoKeyPub, cryptoKeySeedEnc, cryptoKeyPrivEnc, cryptoKeyScriptEnc, syncInfo,
-		birthday, privPassphraseSalt, watchingOnly,
+		birthday, privPassphraseSalt, watchingOnly, cryptoScheme, privacyLevel,
 	)
 
 	return mgr, nil
@@ -1176,13 +1230,12 @@ func Open(ns walletdb.ReadBucket, pubPassphrase []byte,
 //                       	         |
 // pubpassphrase -> masterkeypub     | [cryptoKeyPub -> 				 masterPubKey]
 
-func Create(ns walletdb.ReadWriteBucket,
-	seed, pubPassphrase, privPassphrase []byte, end uint64,
-	chainParams *chaincfg.Params, config *ScryptOptions,
-	birthday time.Time) error {
+func Create(cryptoScheme abecryptoxparam.CryptoScheme, privacyLevel abecryptoxkey.PrivacyLevel,
+	ns walletdb.ReadWriteBucket, originSeed, pubPassphrase, privPassphrase []byte, end uint64,
+	chainParams *chaincfg.Params, config *ScryptOptions, birthday time.Time) error {
 
-	// If the seed argument is nil we create in watchingOnly mode.
-	isWatchingOnly := seed == nil
+	// If the originSeed argument is nil we create in watchingOnly mode.
+	isWatchingOnly := originSeed == nil
 
 	// Return an error if the manager has already been created in
 	// the given database namespace.
@@ -1281,7 +1334,7 @@ func Create(ns walletdb.ReadWriteBucket,
 
 		cryptoKeySeed, err := newCryptoKey()
 		if err != nil {
-			str := "failed to generate crypto seed key"
+			str := "failed to generate crypto originSeed key"
 			return managerError(ErrCrypto, str, err)
 		}
 		defer cryptoKeySeed.Zero()
@@ -1292,134 +1345,115 @@ func Create(ns walletdb.ReadWriteBucket,
 			str := "failed to encrypt crypto private key"
 			return managerError(ErrCrypto, str, err)
 		}
-		cryptoKeyScriptEnc, err =
-			masterKeyPriv.Encrypt(cryptoKeyScript.Bytes())
+		cryptoKeyScriptEnc, err = masterKeyPriv.Encrypt(cryptoKeyScript.Bytes())
 		if err != nil {
 			str := "failed to encrypt crypto script key"
 			return managerError(ErrCrypto, str, err)
 		}
-		cryptoKeySeedEnc, err =
-			masterKeyPriv.Encrypt(cryptoKeySeed.Bytes())
+		cryptoKeySeedEnc, err = masterKeyPriv.Encrypt(cryptoKeySeed.Bytes())
 		if err != nil {
-			str := "failed to encrypt crypto seed key"
+			str := "failed to encrypt crypto originSeed key"
 			return managerError(ErrCrypto, str, err)
 		}
 
-		// generate a longer seed from origin seed via hash function such as shake256
-		seedLength := len(seed)
-		usedSeed := make([]byte, seedLength*2)
-		shake256 := sha3.NewShake256()
-		shake256.Reset()
-		tmp := []byte{'a', 'd', 'd', 'r', 'e', 's', 's'}
-		tmp = append(tmp, seed...)
-		shake256.Write(tmp)
-		shake256.Read(usedSeed[:seedLength])
+		// generate a longer originSeed from origin seed via hash function such as shake256
+		usedSeed, err := generateRootSeed(cryptoScheme, originSeed)
+		if err != nil {
+			return err
+		}
 
-		shake256.Reset()
-		tmp = []byte{'v', 'a', 'l', 'u', 'e'}
-		tmp = append(tmp, seed...)
-		shake256.Write(tmp)
-		shake256.Read(usedSeed[seedLength:])
-
-		seedEnc, err :=
-			cryptoKeySeed.Encrypt(usedSeed)
+		seedEnc, err := cryptoKeySeed.Encrypt(usedSeed)
 		if err != nil {
 			return maybeConvertDbError(err)
 		}
-		if end == prompt.MAXCOUNTERADDRESS {
-			cnt := uint64(0)
-			// create and generate an address and print it
-			// generate an address and information for spending
-			serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, err := generateAddressSk(usedSeed, 2*seedLength, cnt)
-			if err != nil {
-				return fmt.Errorf("failed to generate address and key")
-			}
-			addKey := chainhash.DoubleHashB(serializedCryptoAddress[4 : 4+abecryptoparam.PQRingCTPP.AddressPublicKeySerializeSize()])
-			addressSecretKeySpEnc, err :=
-				cryptoKeyPriv.Encrypt(serializedASksp)
-			if err != nil {
-				return maybeConvertDbError(err)
-			}
-			addressSecretKeySnEnc, err :=
-				cryptoKeyPub.Encrypt(serializedASksn)
-			if err != nil {
-				return maybeConvertDbError(err)
-			}
-			addressKeyEnc, err :=
-				cryptoKeyPub.Encrypt(serializedCryptoAddress)
-			if err != nil {
-				return maybeConvertDbError(err)
-			}
-			valueSecretKeyEnc, err :=
-				cryptoKeyPub.Encrypt(serializedVSk)
-			if err != nil {
-				return maybeConvertDbError(err)
-			}
-
-			err = putAddressKeysEnc(ns, cnt, addKey, valueSecretKeyEnc,
-				addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
-			if err != nil {
-				return maybeConvertDbError(err)
-			}
-			// record the status
-			end = 0
-
-			b := make([]byte, len(serializedCryptoAddress)+1)
-			b[0] = chainParams.AbelAddressNetId
-			copy(b[1:], serializedCryptoAddress)
-			// generate the hash of (abecrypto.CryptoSchemePQRINGCT || serialized address)
-			hash := chainhash.DoubleHashB(b)
-			b = append(b, hash...)
-			fmt.Println(`Please remember the initial address:`)
-			fmt.Println(hex.EncodeToString(b))
-		} else {
-			// restore the previous address
-			for i := uint64(0); i <= end; i++ {
-				// generate an address and information for spending
-				serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, err := generateAddressSk(usedSeed, 2*seedLength, i)
-				if err != nil {
-					return fmt.Errorf("failed to generate address and key")
-				}
-				addKey := chainhash.DoubleHashB(serializedCryptoAddress[4 : 4+abecryptoparam.PQRingCTPP.AddressPublicKeySerializeSize()])
-				addressSecretKeySpEnc, err :=
-					cryptoKeyPriv.Encrypt(serializedASksp)
-				if err != nil {
-					return maybeConvertDbError(err)
-				}
-				addressSecretKeySnEnc, err :=
-					cryptoKeyPub.Encrypt(serializedASksn)
-				if err != nil {
-					return maybeConvertDbError(err)
-				}
-				addressKeyEnc, err :=
-					cryptoKeyPub.Encrypt(serializedCryptoAddress)
-				if err != nil {
-					return maybeConvertDbError(err)
-				}
-				valueSecretKeyEnc, err :=
-					cryptoKeyPub.Encrypt(serializedVSk)
-				if err != nil {
-					return maybeConvertDbError(err)
-				}
-
-				err = putAddressKeysEnc(ns, i, addKey, valueSecretKeyEnc,
-					addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
-				if err != nil {
-					return maybeConvertDbError(err)
-				}
-			}
-			log.Infof("The addresses with No. in [0, %d] have been generated.", end)
-		}
-
-		startSeedStatus := end
-
 		err = putSeedEnc(ns, seedEnc)
 		if err != nil {
 			return maybeConvertDbError(err)
 		}
-		err = putSeedStatus(ns, startSeedStatus)
-		if err != nil {
-			return maybeConvertDbError(err)
+
+		// mode: 0 create / 1 recovery
+		recoveryMode := true
+		if end == prompt.MAXCOUNTERADDRESS {
+			recoveryMode = false
+			end = 0
+		}
+
+		// generate initial address
+
+		// restore the previous address
+		for i := uint64(0); i <= end; i++ {
+			var serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, detectorKey []byte
+			var err error
+			if i == 0 {
+				serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, detectorKey, err = generateInitialAddress(cryptoScheme, privacyLevel, usedSeed, len(usedSeed))
+			} else {
+				// generate an address and information for spending
+				serializedCryptoAddress, serializedASksp, serializedASksn, serializedVSk, detectorKey, err = generateAddressSk(cryptoScheme, privacyLevel, usedSeed, len(usedSeed), i)
+			}
+			if err != nil {
+				return fmt.Errorf("failed to generate address and key")
+			}
+			// TODO Check compatibility
+			_, coinAddress, _, err := abecryptoxkey.CryptoAddressParse(serializedCryptoAddress)
+			if err != nil {
+				return err
+			}
+			addKey := chainhash.DoubleHashB(coinAddress)
+			addressSecretKeySpEnc, err := cryptoKeyPriv.Encrypt(serializedASksp)
+			if err != nil {
+				return maybeConvertDbError(err)
+			}
+			addressSecretKeySnEnc, err := cryptoKeyPub.Encrypt(serializedASksn)
+			if err != nil {
+				return maybeConvertDbError(err)
+			}
+			addressKeyEnc, err := cryptoKeyPub.Encrypt(serializedCryptoAddress)
+			if err != nil {
+				return maybeConvertDbError(err)
+			}
+			valueSecretKeyEnc, err := cryptoKeyPub.Encrypt(serializedVSk)
+			if err != nil {
+				return maybeConvertDbError(err)
+			}
+			detectorKeyEnc, err := cryptoKeyPub.Encrypt(detectorKey)
+			if err != nil {
+				return maybeConvertDbError(err)
+			}
+
+			var publicRand []byte
+			if cryptoScheme == abecryptoxparam.CryptoSchemePQRingCTX {
+				publicRand, err = abecryptoxkey.ExtractPublicRandFromCryptoAddress(serializedCryptoAddress)
+				if err != nil {
+					return err
+				}
+			}
+			err = putAddressKeysEnc(ns, i, addKey, valueSecretKeyEnc,
+				addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc, detectorKeyEnc, publicRand)
+			if err != nil {
+				return maybeConvertDbError(err)
+			}
+
+			if !recoveryMode && i == 0 {
+				b := make([]byte, len(serializedCryptoAddress)+1)
+				b[0] = chainParams.AbelAddressNetId
+				copy(b[1:], serializedCryptoAddress)
+				// generate the hash of (abecrypto.CryptoSchemePQRINGCT || serialized address)
+				hash := chainhash.DoubleHashB(b)
+				b = append(b, hash...)
+				fmt.Println(`Please remember the initial address:`)
+				fmt.Println(hex.EncodeToString(b))
+			}
+		}
+		if cryptoScheme == abecryptoxparam.CryptoSchemePQRingCT && recoveryMode {
+			log.Infof("The addresses with No. in [0, %d] have been restored.", end)
+		}
+
+		if cryptoScheme == abecryptoxparam.CryptoSchemePQRingCT {
+			startSeedStatus := end
+			err = putSeedStatus(ns, startSeedStatus)
+			if err != nil {
+				return maybeConvertDbError(err)
+			}
 		}
 		err = putNetID(ns, []byte{chainParams.PQRingCTID})
 		if err != nil {
@@ -1449,6 +1483,16 @@ func Create(ns walletdb.ReadWriteBucket,
 		return maybeConvertDbError(err)
 	}
 
+	/*TODO(multiply-privacy-level)  add the privacy level*/
+	err = putCryptoScheme(ns, cryptoScheme)
+	if err != nil {
+		return maybeConvertDbError(err)
+	}
+	err = putPrivacyLevel(ns, privacyLevel)
+	if err != nil {
+		return maybeConvertDbError(err)
+	}
+
 	// Save the initial synced to state.
 	err = PutSyncedTo(ns, &syncInfo.syncedTo)
 	if err != nil {
@@ -1463,8 +1507,122 @@ func Create(ns walletdb.ReadWriteBucket,
 	return putBirthday(ns, birthday.Add(-48*time.Hour))
 }
 
-func generateCryptoSeed(seed []byte, length int, cnt uint64) ([]byte, error) {
-	if len(seed) != length {
+func generateInitialAddress(cryptoScheme abecryptoxparam.CryptoScheme, privacyLevel abecryptoxkey.PrivacyLevel,
+	rootSeed []byte, length int) ([]byte, []byte, []byte, []byte, []byte, error) {
+	if cryptoScheme != abecryptoxparam.CryptoSchemePQRingCT && cryptoScheme != abecryptoxparam.CryptoSchemePQRingCTX {
+		return nil, nil, nil, nil, nil, errors.New("unsupported crypto scheme")
+	}
+	randSeedLength := abecryptoutils.PRFKeyBytesLen
+
+	hashFunc := sha3.New512()
+	hashFunc.Reset()
+	// initial
+	tmp := []byte{'i', 'n', 'i', 't', 'i', 'a', 'l'}
+	tmp = append(tmp, rootSeed...)
+	hashFunc.Write(tmp)
+	publicRand := hashFunc.Sum(nil)
+
+	if cryptoScheme == abecryptoxparam.CryptoSchemePQRingCTX {
+		cryptoAddress, cryptoSpsk, cryptoSnsk, cryptoVsk, cryptoDetectorKey, err := abecryptoxkey.CryptoAddressKeyReGenByRootSeedsFromPublicRand(
+			cryptoScheme, privacyLevel,
+			rootSeed[:randSeedLength], rootSeed[randSeedLength:2*randSeedLength],
+			rootSeed[2*randSeedLength:3*randSeedLength], rootSeed[3*randSeedLength:4*randSeedLength],
+			publicRand)
+		return cryptoAddress, cryptoSpsk, cryptoSnsk, cryptoVsk, cryptoDetectorKey, err
+	}
+	// cryptoScheme == abecryptoxparam.CryptoSchemePQRingCT
+	usedSeed, err := generateRandSeed(rootSeed, length, 0)
+	if err != nil {
+		return nil, nil, nil, nil, nil, errors.New("the length of given rootSeed is not matched")
+	}
+	cryptoAddress, cryptoSpsk, cryptoSnsk, cryptoVsk, _, err := abecryptoxkey.CryptoAddressKeyGenByRandSeeds(cryptoScheme, privacyLevel, usedSeed[:randSeedLength], nil, usedSeed[randSeedLength:], nil, nil)
+	return cryptoAddress, cryptoSpsk, cryptoSnsk, cryptoVsk, nil, err
+}
+
+func generateAddressSk(cryptoScheme abecryptoxparam.CryptoScheme, privacyLevel abecryptoxkey.PrivacyLevel,
+	rootSeed []byte, length int, cnt uint64) ([]byte, []byte, []byte, []byte, []byte, error) {
+	if cryptoScheme != abecryptoxparam.CryptoSchemePQRingCT && cryptoScheme != abecryptoxparam.CryptoSchemePQRingCTX {
+		return nil, nil, nil, nil, nil, errors.New("unsupported crypto scheme")
+	}
+	randSeedLength := abecryptoutils.PRFKeyBytesLen
+
+	if cryptoScheme == abecryptoxparam.CryptoSchemePQRingCTX {
+		cryptoAddress, cryptoSpsk, cryptoSnsk, cryptoVsk, cryptoDetectorKey, err := abecryptoxkey.CryptoAddressKeyGenByRootSeeds(cryptoScheme, privacyLevel, rootSeed[:randSeedLength], rootSeed[randSeedLength:2*randSeedLength], rootSeed[2*randSeedLength:3*randSeedLength], rootSeed[3*randSeedLength:4*randSeedLength])
+		return cryptoAddress, cryptoSpsk, cryptoSnsk, cryptoVsk, cryptoDetectorKey, err
+	}
+	// cryptoScheme == abecryptoxparam.CryptoSchemePQRingCT
+	usedSeed, err := generateRandSeed(rootSeed, length, cnt)
+	if err != nil {
+		return nil, nil, nil, nil, nil, errors.New("the length of given rootSeed is not matched")
+	}
+	cryptoAddress, cryptoSpsk, cryptoSnsk, cryptoVsk, _, err := abecryptoxkey.CryptoAddressKeyGenByRandSeeds(cryptoScheme, privacyLevel, usedSeed[:randSeedLength], nil, usedSeed[randSeedLength:], nil, nil)
+	return cryptoAddress, cryptoSpsk, cryptoSnsk, cryptoVsk, nil, err
+}
+
+func generateRootSeed(cryptoScheme abecryptoxparam.CryptoScheme, originSeed []byte) ([]byte, error) {
+	if cryptoScheme != abecryptoxparam.CryptoSchemePQRingCT && cryptoScheme != abecryptoxparam.CryptoSchemePQRingCTX {
+		return nil, errors.New("unsupported crypto scheme")
+	}
+	var rootSeed []byte
+
+	if cryptoScheme == abecryptoxparam.CryptoSchemePQRingCTX {
+		seedLength := abecryptoutils.PRFKeyBytesLen
+		rootSeed = make([]byte, seedLength*4)
+		offset := 0
+
+		// TODO this is not safe, find a alternative method
+		shake256 := sha3.NewShake256()
+		shake256.Reset()
+		tmp := []byte{'s', 'p', 'e', 'n', 'd'}
+		tmp = append(tmp, originSeed...)
+		shake256.Write(tmp)
+		shake256.Read(rootSeed[offset : offset+seedLength])
+		offset += seedLength
+
+		shake256.Reset()
+		tmp = []byte{'s', 'e', 'r', 'i', 'a', 'l'}
+		tmp = append(tmp, originSeed...)
+		shake256.Write(tmp)
+		shake256.Read(rootSeed[offset : offset+seedLength])
+		offset += seedLength
+
+		shake256.Reset()
+		tmp = []byte{'d', 'e', 't', 'e', 'c', 't'}
+		tmp = append(tmp, originSeed...)
+		shake256.Write(tmp)
+
+		shake256.Read(rootSeed[offset : offset+seedLength])
+		offset += seedLength
+
+		shake256.Reset()
+		tmp = []byte{'v', 'a', 'l', 'u', 'e'}
+		tmp = append(tmp, originSeed...)
+		shake256.Write(tmp)
+		shake256.Read(rootSeed[offset : offset+seedLength])
+		offset += seedLength
+		return rootSeed, nil
+	}
+
+	seedLength := prompt.SeedLength
+	rootSeed = make([]byte, seedLength*2)
+	shake256 := sha3.NewShake256()
+	shake256.Reset()
+	tmp := []byte{'a', 'd', 'd', 'r', 'e', 's', 's'}
+	tmp = append(tmp, originSeed...)
+	shake256.Write(tmp)
+	shake256.Read(rootSeed[:seedLength])
+
+	shake256.Reset()
+	tmp = []byte{'v', 'a', 'l', 'u', 'e'}
+	tmp = append(tmp, originSeed...)
+	shake256.Write(tmp)
+	shake256.Read(rootSeed[seedLength:])
+
+	return rootSeed, nil
+}
+
+func generateRandSeed(seed []byte, length int, cnt uint64) ([]byte, error) {
+	if len(seed) != length || length != 2*prompt.SeedLength {
 		return nil, errors.New("the length of given seed is not matched")
 	}
 	seedHalfLength := length >> 1
@@ -1502,12 +1660,4 @@ func generateCryptoSeed(seed []byte, length int, cnt uint64) ([]byte, error) {
 	t = sha3.Sum512(tmp)
 	copy(usedSeed[halfLength:], t[:])
 	return usedSeed, nil
-}
-
-func generateAddressSk(seed []byte, length int, cnt uint64) ([]byte, []byte, []byte, []byte, error) {
-	usedSeed, err := generateCryptoSeed(seed, length, cnt)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	return abecrypto.CryptoAddressKeyGen(usedSeed, abecryptoparam.CryptoSchemePQRingCT)
 }

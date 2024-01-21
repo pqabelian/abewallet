@@ -3,6 +3,8 @@ package rpcserver
 import (
 	"bytes"
 	"fmt"
+	"github.com/abesuite/abec/abecryptox/abecryptoxkey"
+	"github.com/abesuite/abec/abecryptox/abecryptoxparam"
 	"sync"
 	"time"
 
@@ -431,12 +433,12 @@ func (s *walletServer) SignTransaction(ctx context.Context, req *pb.SignTransact
 }
 
 // BUGS:
-// - The transaction is not inspected to be relevant before publishing using
-//   sendrawtransaction, so connection errors to btcd could result in the tx
-//   never being added to the wallet database.
-// - Once the above bug is fixed, wallet will require a way to purge invalid
-//   transactions from the database when they are rejected by the network, other
-//   than double spending them.
+//   - The transaction is not inspected to be relevant before publishing using
+//     sendrawtransaction, so connection errors to btcd could result in the tx
+//     never being added to the wallet database.
+//   - Once the above bug is fixed, wallet will require a way to purge invalid
+//     transactions from the database when they are rejected by the network, other
+//     than double spending them.
 func (s *walletServer) PublishTransaction(ctx context.Context, req *pb.PublishTransactionRequest) (
 	*pb.PublishTransactionResponse, error) {
 
@@ -668,7 +670,7 @@ func (s *loaderServer) CreateWallet(ctx context.Context, req *pb.CreateWalletReq
 	//return &pb.CreateWalletResponse{}, nil
 }
 
-//TODO(abe):
+// TODO(abe):
 func (s *loaderServer) CreateWalletAbe(ctx context.Context, req *pb.CreateWalletRequest) (
 	*pb.CreateWalletResponse, error) {
 
@@ -684,8 +686,8 @@ func (s *loaderServer) CreateWalletAbe(ctx context.Context, req *pb.CreateWallet
 	}
 
 	createdWallet, err := s.loader.CreateNewWallet(
-		pubPassphrase, req.PrivatePassphrase, req.Seed, 0, time.Now(),
-	)
+		abecryptoxparam.CryptoSchemePQRingCTX, abecryptoxkey.PrivacyLevelRINGCT,
+		pubPassphrase, req.PrivatePassphrase, req.Seed, 0, time.Now(), true)
 	if err != nil {
 		return nil, translateError(err)
 	}

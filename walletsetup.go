@@ -7,7 +7,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto/abecryptoparam"
+	"github.com/abesuite/abec/abecryptox/abecryptoxkey"
+	"github.com/abesuite/abec/abecryptox/abecryptoxparam"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abewallet/wordlists"
 	"os"
@@ -55,7 +56,6 @@ func createWallet(cfg *config) error {
 	// When there is a legacy keystore, open it now to ensure any errors
 	// don't end up exiting the process after the user has spent time
 	// entering a bunch of information.
-	var err error
 	if cfg.Create {
 		// Start by prompting for the private passphrase.  When there is an
 		// existing keystore, the user will be promped for that passphrase,
@@ -82,18 +82,25 @@ func createWallet(cfg *config) error {
 		// Ascertain the wallet generation seed.  This will either be an
 		// automatically generated value the user has already confirmed or a
 		// value the user has entered which has already been validated.
-		seed, end, err := prompt.Seed(reader)
+
+		// (crypto_scheme,privacy_level)
+		// TODO introduce a transfer level to unify crypto scheme
+		// user view -> dev view
+		// (0,0)     -> (1,0)
+		// (1,1)     -> (1,1)
+		// (1,2)     -> (1,2)
+		cryptoScheme, privacyLevel, seed, end, err := prompt.Seed(reader)
 		if err != nil {
 			return err
 		}
 
 		fmt.Println("Creating the wallet...")
 
-		if end == prompt.MAXCOUNTERADDRESS && cfg.MyRestoreNumber != 0 {
+		if cryptoScheme == abecryptoxparam.CryptoSchemePQRingCT && end == prompt.MAXCOUNTERADDRESS && cfg.MyRestoreNumber != 0 {
 			end = cfg.MyRestoreNumber
 		}
 
-		w, err := loader.CreateNewWallet(pubPass, privPass, seed[4:], end, time.Now())
+		w, err := loader.CreateNewWallet(cryptoScheme, privacyLevel, pubPass, privPass, seed[4:], end, time.Now(), true)
 		if err != nil {
 			return err
 		}
@@ -101,6 +108,37 @@ func createWallet(cfg *config) error {
 		w.Manager.Close()
 		fmt.Println("The wallet has been created successfully.")
 	} else if cfg.NonInteractiveCreate {
+		// default crypto scheme and privacy level
+		cryptoScheme := abecryptoxparam.CryptoSchemePQRingCTX
+		privacyLevel := abecryptoxkey.PrivacyLevelRINGCT
+
+		// try to read from config
+		cryptoSchemeStr := strings.TrimSpace(strings.ToLower(cfg.MyVersion))
+		cryptoSchemeInt, err := strconv.Atoi(cryptoSchemeStr)
+		if err != nil {
+			return err
+		}
+		cryptoScheme = abecryptoxparam.CryptoScheme(cryptoSchemeInt)
+		if cryptoScheme != abecryptoxparam.CryptoSchemePQRingCT &&
+			cryptoScheme != abecryptoxparam.CryptoSchemePQRingCTX {
+			return errors.New("Invalid crypto version specified\n")
+		}
+
+		if cryptoScheme == abecryptoxparam.CryptoSchemePQRingCT {
+			privacyLevel = abecryptoxkey.PrivacyLevelRINGCTPre
+		}
+		if cryptoScheme == abecryptoxparam.CryptoSchemePQRingCTX {
+			if !cfg.WithPrivacyLevel {
+				return errors.New("No privacy level specified\n")
+			}
+			privacyLevel = abecryptoxkey.PrivacyLevel(cfg.MyPrivacyLevel)
+			if /*privacyLevel != abecryptoxkey.PrivacyLevelRINGCTPre &&*/
+			privacyLevel != abecryptoxkey.PrivacyLevelRINGCT &&
+				privacyLevel != abecryptoxkey.PrivacyLevelPSEUDONYM {
+				return errors.New("Invalid privacy level specified\n")
+			}
+		}
+
 		var seed []byte
 		var mnemonics []string
 		if !cfg.WithMnemonic {
@@ -110,29 +148,29 @@ func createWallet(cfg *config) error {
 				return err
 			}
 			mnemonics = prompt.SeedToWords(seed, wordlists.English)
+
+			// TODO Maybe we can remove this logic
 			tmp := make([]byte, 4, 4+prompt.SeedLength)
-			binary.BigEndian.PutUint32(tmp[0:4], uint32(abecryptoparam.CryptoSchemePQRingCT))
+			binary.BigEndian.PutUint32(tmp[0:4], uint32(cryptoScheme))
 			seed = append(tmp, seed[:]...)
-			cfg.MyRestoreNumber = 0xFFFF_FFFF_FFFF_FFFF
+
+			cfg.MyRestoreNumber = prompt.MAXCOUNTERADDRESS
 		} else {
-			versionStr := strings.TrimSpace(strings.ToLower(cfg.MyVersion))
-			version, err := strconv.Atoi(versionStr)
-			if err != nil {
-				return err
-			}
 			mnemonics = strings.Split(cfg.MyMnemonic, ",")
 			seed = prompt.WordsToSeed(mnemonics, wordlists.EnglishMap)
 			if len(seed) != prompt.SeedLength+1 {
 				return errors.New("Invalid mnemonic word list specified\n")
 			}
-			seedH := chainhash.DoubleHashH(seed[:32])
+			seedH := chainhash.DoubleHashH(seed[:prompt.SeedLength])
 			if !bytes.Equal(seedH[:1], seed[prompt.SeedLength:]) {
 				return errors.New("Invalid mnemonic word list specified\n")
 			}
 			seed = seed[:prompt.SeedLength]
+
 			// add the cryptoScheme before seed
+			// TODO Maybe we can remove this logic
 			tmp := make([]byte, 4, 4+prompt.SeedLength)
-			binary.BigEndian.PutUint32(tmp[0:4], uint32(version))
+			binary.BigEndian.PutUint32(tmp[0:4], uint32(cryptoScheme))
 			seed = append(tmp, seed[:]...)
 		}
 		fmt.Println(binary.BigEndian.Uint32(seed[:4]))
@@ -141,7 +179,10 @@ func createWallet(cfg *config) error {
 		if cfg.MyWalletPass == "" {
 			cfg.MyWalletPass = wallet.InsecurePubPassphrase
 		}
-		w, err := loader.CreateNewWallet([]byte(cfg.MyWalletPass), []byte(cfg.MyPassword), seed[4:], cfg.MyRestoreNumber, time.Now())
+
+		w, err := loader.CreateNewWallet(cryptoScheme, privacyLevel,
+			[]byte(cfg.MyWalletPass), []byte(cfg.MyPassword),
+			seed[4:], cfg.MyRestoreNumber, time.Now(), true)
 		if err != nil {
 			return err
 		}
@@ -175,7 +216,7 @@ func createSimulationWallet(cfg *config) error {
 	defer db.Close()
 
 	// Create the wallet.
-	err = wallet.Create(db, pubPass, privPass, nil, 0, activeNet.Params, time.Now())
+	err = wallet.Create(db, abecryptoxparam.CryptoSchemePQRingCTX, abecryptoxkey.PrivacyLevelRINGCT, pubPass, privPass, nil, 0, activeNet.Params, time.Now(), false)
 	if err != nil {
 		return err
 	}

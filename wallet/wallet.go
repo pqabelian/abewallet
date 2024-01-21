@@ -6,8 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto"
-	"github.com/abesuite/abec/abecrypto/abecryptoparam"
+	"github.com/abesuite/abec/abecryptox"
+	"github.com/abesuite/abec/abecryptox/abecryptoxkey"
+	"github.com/abesuite/abec/abecryptox/abecryptoxparam"
 	"github.com/abesuite/abec/abejson"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/chaincfg"
@@ -648,7 +649,7 @@ func locateBirthdayBlock(chainClient chainConn,
 
 type (
 	createTxRequest struct {
-		txOutDescs        []*abecrypto.AbeTxOutputDesc
+		txOutDescs        []*abecryptox.AbeTxOutputDesc
 		minconf           int32
 		feePerKbSpecified abeutil.Amount
 		feeSpecified      abeutil.Amount
@@ -683,7 +684,9 @@ out:
 				txr.resp <- createTxResponse{nil, err}
 				continue
 			}
-			tx, err := w.txPqringCTToOutputs(txr.txOutDescs, txr.minconf, txr.feePerKbSpecified, txr.feeSpecified, txr.utxoSpecified, txr.dryRun)
+
+			tx, err := w.txPqringCTToOutputsMLP(txr.txOutDescs, txr.minconf, txr.feePerKbSpecified, txr.feeSpecified, txr.utxoSpecified, txr.dryRun)
+
 			heldUnlock.release()
 			txr.resp <- createTxResponse{tx, err}
 		case <-quit:
@@ -702,7 +705,7 @@ out:
 //
 // NOTE: The dryRun argument can be set true to create a tx that doesn't alter
 // the database. A tx created with this set to true SHOULD NOT be broadcasted.
-func (w *Wallet) CreateSimpleTx(outputDescs []*abecrypto.AbeTxOutputDesc, minconf int32,
+func (w *Wallet) CreateSimpleTx(outputDescs []*abecryptox.AbeTxOutputDesc, minconf int32,
 	feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, dryRun bool) (*txauthor.AuthoredTxAbe, error) {
 
 	req := createTxRequest{
@@ -1474,11 +1477,11 @@ func (w *Wallet) AddressRange(start uint64, end uint64) (res map[uint64]string, 
 			return err
 		}
 		for i := start; i < end && i <= addressMaxNum; i++ {
-			serializedAddressEnc, _, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKeys[i])
+			serializedAddressEnc, _, _, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKeys[i])
 			if err != nil {
 				return err
 			}
-			addresses[i], _, _, _, err = w.Manager.DecryptAddressKey(serializedAddressEnc, nil, nil, nil)
+			addresses[i], _, _, _, _, err = w.Manager.DecryptAddressKey(serializedAddressEnc, nil, nil, nil, nil)
 			if err != nil {
 				return err
 			}
@@ -1521,7 +1524,7 @@ func (w *Wallet) ExportAddressKeyRandSeed(start uint64, end uint64) (interface{}
 			return err
 		}
 		for i := start; i < end && i <= addressMaxNum; i++ {
-			randSeeds[i], err = w.Manager.GenerateCryptoSeed(seed, i)
+			randSeeds[i], err = w.Manager.GenerateRandSeed(seed, i)
 			if err != nil {
 				return err
 			}
@@ -1580,15 +1583,15 @@ func (w *Wallet) ExportRange(start uint64, end uint64) (interface{}, error) {
 			return err
 		}
 		for i := start; i < end && i <= addressMaxNum; i++ {
-			cryptoSeeds[i], err = w.Manager.GenerateCryptoSeed(seed, i)
+			cryptoSeeds[i], err = w.Manager.GenerateRandSeed(seed, i)
 			if err != nil {
 				return err
 			}
-			serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKeys[i])
+			serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKeys[i])
 			if err != nil {
 				return err
 			}
-			addresses[i], asksps[i], asksns[i], vsks[i], err = w.Manager.DecryptAddressKey(serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc)
+			addresses[i], asksps[i], asksns[i], vsks[i], _, err = w.Manager.DecryptAddressKey(serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, nil)
 			if err != nil {
 				return err
 			}
@@ -1639,11 +1642,11 @@ func (w *Wallet) ListFreeAddresses() (res map[uint64][]byte, err error) {
 
 		res = make(map[uint64][]byte, len(addrKeys))
 		for idx, addrKey := range addrKeys {
-			serializedAddressEnc, _, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKey)
+			serializedAddressEnc, _, _, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKey)
 			if err != nil {
 				return err
 			}
-			res[idx], _, _, _, err = w.Manager.DecryptAddressKey(serializedAddressEnc, nil, nil, nil)
+			res[idx], _, _, _, _, err = w.Manager.DecryptAddressKey(serializedAddressEnc, nil, nil, nil, nil)
 			if err != nil {
 				return err
 			}
@@ -1681,12 +1684,12 @@ func (w *Wallet) FetchChangeAddress(markUsed bool) (uint64, []byte, error) {
 				return errors.New("no free address")
 			}
 		}
-		serializedAddressEnc, _, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKey)
+		serializedAddressEnc, _, _, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKey)
 		if err != nil {
 			return err
 		}
 
-		address, _, _, _, err = w.Manager.DecryptAddressKey(serializedAddressEnc, nil, nil, nil)
+		address, _, _, _, _, err = w.Manager.DecryptAddressKey(serializedAddressEnc, nil, nil, nil, nil)
 		if err != nil {
 			return err
 		}
@@ -1711,7 +1714,7 @@ func (w *Wallet) FetchChangeAddress(markUsed bool) (uint64, []byte, error) {
 // NewAddressKey returns a new address for a wallet.
 func (w *Wallet) NewAddressKey(markUsed bool) ([]byte, uint64, []byte, error) {
 	var numberOrder uint64
-	var addr []byte
+	var cryptoAddress []byte
 	var netID []byte
 	err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 		var err error
@@ -1728,8 +1731,8 @@ func (w *Wallet) NewAddressKey(markUsed bool) ([]byte, uint64, []byte, error) {
 		if err != nil {
 			return err
 		}
-		var serializedASksp, serializedASksn, serializedVSk []byte
-		numberOrder, addr, serializedASksp, serializedASksn, serializedVSk, err = w.Manager.GenerateAddressKeys(addrmgrNs, seed)
+		var serializedASksp, serializedASksn, serializedVSk, detectorKey []byte
+		numberOrder, cryptoAddress, serializedASksp, serializedASksn, serializedVSk, detectorKey, err = w.Manager.GenerateAddressKeys(addrmgrNs, seed)
 		if err != nil {
 			return err
 		}
@@ -1744,7 +1747,7 @@ func (w *Wallet) NewAddressKey(markUsed bool) ([]byte, uint64, []byte, error) {
 			return err
 		}
 		addressKeyEnc, err :=
-			w.Manager.Encrypt(waddrmgr.CKTPublic, addr)
+			w.Manager.Encrypt(waddrmgr.CKTPublic, cryptoAddress)
 		if err != nil {
 			return err
 		}
@@ -1753,11 +1756,28 @@ func (w *Wallet) NewAddressKey(markUsed bool) ([]byte, uint64, []byte, error) {
 		if err != nil {
 			return err
 		}
+		detectorKeyEnc, err :=
+			w.Manager.Encrypt(waddrmgr.CKTPublic, detectorKey)
+		if err != nil {
+			return err
+		}
 
-		addKey := chainhash.DoubleHashB(addr[4 : 4+abecryptoparam.PQRingCTPP.AddressPublicKeySerializeSize()])
+		_, coinAddress, _, err := abecryptoxkey.CryptoAddressParse(cryptoAddress)
+		if err != nil {
+			return err
+		}
+		addKey := chainhash.DoubleHashB(coinAddress)
+
+		var publicRand []byte
+		if w.Manager.GetCryptoScheme() == abecryptoxparam.CryptoSchemePQRingCTX {
+			publicRand, err = abecryptoxkey.ExtractPublicRandFromCryptoAddress(cryptoAddress)
+			if err != nil {
+				return err
+			}
+		}
 
 		err = w.Manager.PutAddressKeysEnc(addrmgrNs, numberOrder, addKey[:], valueSecretKeyEnc,
-			addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
+			addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc, detectorKeyEnc, publicRand)
 		if err != nil {
 			return err
 		}
@@ -1774,7 +1794,7 @@ func (w *Wallet) NewAddressKey(markUsed bool) ([]byte, uint64, []byte, error) {
 	if err != nil {
 		return nil, 0, nil, err
 	}
-	return netID, numberOrder, addr, nil
+	return netID, numberOrder, cryptoAddress, nil
 }
 
 // newChangeAddress returns a new change address for the wallet.
@@ -1814,7 +1834,7 @@ func confirms(txHeight, curHeight int32) int32 {
 // SendOutputs creates and sends payment transactions. It returns the
 // transaction upon success.
 
-func (w *Wallet) SendOutputs(outputDescs []*abecrypto.AbeTxOutputDesc,
+func (w *Wallet) SendOutputs(outputDescs []*abecryptox.AbeTxOutputDesc,
 	minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount,
 	utxoSpecified []string, label string, requestHash *chainhash.Hash) (*txauthor.AuthoredTxAbe, error) {
 	// Ensure the outputs to be created adhere to the network's consensus
@@ -1953,7 +1973,7 @@ func (w *Wallet) reliablyPublishTransaction(tx *wire.MsgTxAbe,
 
 		if w.RecordRequestFlag {
 			if requestHash == nil {
-				log.Errorf("request hash is nil but the record request flag is enabled")
+				log.Warnf("request hash is nil but the record request flag is enabled")
 				return errors.New("request hash is nil but the record request flag is enabled")
 			}
 			txmgrNs := dbTx.ReadWriteBucket(wtxmgrNamespaceKey)
@@ -2182,28 +2202,8 @@ func (w *Wallet) GetTxHashRequestHash(requestHash string) (res map[string]interf
 // recommended length is generated.
 
 // TODO(abe):
-func Create(db walletdb.DB, pubPass, privPass, seed []byte, end uint64,
-	params *chaincfg.Params, birthday time.Time) error {
-
-	return create(
-		db, pubPass, privPass, seed, end, params, birthday, false,
-	)
-}
-
-// CreateWatchingOnly creates an new watch-only wallet, writing it to
-// an empty database. No seed can be provided as this wallet will be
-// watching only.  Likewise no private passphrase may be provided
-// either.
-func CreateWatchingOnly(db walletdb.DB, pubPass []byte,
-	params *chaincfg.Params, birthday time.Time) error {
-
-	return create(
-		db, pubPass, nil, nil, 0, params, birthday, true,
-	)
-}
-
-func create(db walletdb.DB, pubPass, privPass, seed []byte, end uint64,
-	params *chaincfg.Params, birthday time.Time, isWatchingOnly bool) error {
+func Create(db walletdb.DB, cryptoScheme abecryptoxparam.CryptoScheme, privacyLevel abecryptoxkey.PrivacyLevel,
+	pubPass, privPass, seed []byte, end uint64, params *chaincfg.Params, birthday time.Time, isWatchingOnly bool) error {
 	// TODO: the following snippet is not run?
 	if !isWatchingOnly {
 		// If a seed was provided, ensure that it is of valid length. Otherwise,
@@ -2233,7 +2233,7 @@ func create(db walletdb.DB, pubPass, privPass, seed []byte, end uint64,
 		}
 
 		err = waddrmgr.Create(
-			addrmgrNs, seed, pubPass, privPass, end, params, nil, birthday,
+			cryptoScheme, privacyLevel, addrmgrNs, seed, pubPass, privPass, end, params, nil, birthday,
 		)
 		if err != nil {
 			return err

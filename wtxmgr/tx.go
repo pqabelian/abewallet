@@ -5,8 +5,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto"
-	"github.com/abesuite/abec/abecrypto/abecryptoparam"
+	"github.com/abesuite/abec/abecryptox"
+	"github.com/abesuite/abec/abecryptox/abecryptoxkey"
+	"github.com/abesuite/abec/abecryptox/abecryptoxparam"
 	"github.com/abesuite/abec/blockchain"
 	"github.com/abesuite/abewallet/waddrmgr"
 	"github.com/abesuite/abewallet/walletdb"
@@ -565,7 +566,7 @@ type RingHashSerialNumbers struct {
 
 // ring hash || transaction number || [transaction hash||output index...]||Origin serial number ||[index||serial number...]||isMy||Spent||Got serial number||[serial number...]
 func (u UTXORing) SerializeSize() int {
-	snSize, _ := abecryptoparam.GetSerialNumberSerializeSize(u.Version)
+	snSize, _ := abecryptoxparam.GetSerialNumberSerializeSize(u.Version)
 	return 4 + 32 + 1 + len(u.TxHashes)*(32+1) + 1 + len(u.OriginSerialNumberes)*(1+snSize) + 2 + 1 + len(u.GotSerialNumberes)*snSize
 
 }
@@ -588,7 +589,7 @@ func (u UTXORing) Serialize() []byte {
 	}
 	res[offset] = uint8(len(u.OriginSerialNumberes))
 	offset += 1
-	snSize, _ := abecryptoparam.GetSerialNumberSerializeSize(u.Version)
+	snSize, _ := abecryptoxparam.GetSerialNumberSerializeSize(u.Version)
 	for index, sn := range u.OriginSerialNumberes {
 		res[offset] = index
 		offset += 1
@@ -635,7 +636,7 @@ func (u *UTXORing) Deserialize(b []byte) error {
 	}
 	originSnSize := int(b[offset])
 	offset += 1
-	snSize, _ := abecryptoparam.GetSerialNumberSerializeSize(u.Version)
+	snSize, _ := abecryptoxparam.GetSerialNumberSerializeSize(u.Version)
 	for i := 0; i < originSnSize; i++ {
 		h := make([]byte, snSize)
 		copy(h, b[offset+1:offset+1+snSize])
@@ -967,129 +968,58 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 	return nil
 }
 
-func (s *Store) InsertGenesisBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb.ReadWriteBucket, block *BlockRecord) error {
-	balance, err := fetchMinedBalance(txMgrNs)
+func (s *Store) ReceiveTxo(txOut *wire.TxOutAbe, addrMgrNs walletdb.ReadWriteBucket) (valid bool, v uint64, addrIdx uint64, err error) {
+	coinAddr, err := abecryptox.ExtractCoinAddressFromTxo(txOut)
 	if err != nil {
-		return err
+		return false, 0, 0, err
 	}
-	spendableBal, err := fetchSpenableBalance(txMgrNs)
+	// fetch address
+	addressEnc, _, _, valueSecretKeyEnc, _, _, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
 	if err != nil {
-		return err
+		return false, 0, 0, err
 	}
-	immatureCBBal, err := fetchImmatureCoinbaseBalance(txMgrNs)
-	if err != nil {
-		return err
-	}
-	immatureTRBal, err := fetchImmatureTransferBalance(txMgrNs)
-	if err != nil {
-		return err
-	}
-	unconfirmedBal, err := fetchUnconfirmedBalance(txMgrNs)
-	if err != nil {
-		return err
+	if addressEnc == nil {
+		return false, 0, 0, nil
 	}
 
-	// put the genesis block into database
-	err = putBlockRecord(txMgrNs, block)
+	addressBytes, _, _, vskBytes, _, err := s.manager.DecryptAddressKey(addressEnc, nil, nil, valueSecretKeyEnc, nil)
 	if err != nil {
-		return err
+		return false, 0, 0, err
 	}
-	b := Block{
-		Hash:   block.Hash,
-		Height: block.Height,
-	}
-	blockOutputs := make(map[Block][]wire.OutPointAbe) // if the block height meet the requirement, it also store previous two block outputs belong the wallet
 
-	coinbaseTx := block.TxRecords[0].MsgTx
-	coinbaseOutput := make(map[wire.OutPointAbe]*UnspentUTXO)
-	for i := 0; i < len(coinbaseTx.TxOuts); i++ {
-		// TODO: the genesis block is handled when creating a new wallet, so this time the address would be just initial address
-		coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(coinbaseTx.TxOuts[i].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
-		if err != nil {
-			return err
-		}
-		addressEnc, _, _, valueSecretKeyEnc, addrIdx, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
-		if err != nil {
-			return err
-		}
-		addressBytes, _, _, vskBytes, err := s.manager.DecryptAddressKey(addressEnc, nil, nil, valueSecretKeyEnc)
-		if err != nil {
-			return err
-		}
-		if vskBytes == nil {
-			continue
-		}
-		copyedVskBytes := make([]byte, len(vskBytes))
-		copy(copyedVskBytes, vskBytes)
-		valid, v, err := abecrypto.TxoCoinReceive(coinbaseTx.TxOuts[i], addressBytes, copyedVskBytes)
-		if err != nil {
-			return err
-		}
-		if valid {
-			// record the idx is used
-			if err = s.manager.MarkAddrUsed(addrMgrNs, addrIdx); err != nil {
-				log.Warnf("fail to mark No.%d address as used", addrIdx)
-			}
-			amt := abeutil.Amount(v)
-			log.Infof("(Coinbase) Find my txo at block height %d (hash %s) with value %v", block.Height, block.Hash, amt.ToABE())
-			immatureCBBal += amt
-			balance += amt
-			k := wire.OutPointAbe{
-				TxHash: coinbaseTx.TxHash(),
-				Index:  uint8(i),
-			}
-			tmp := NewUnspentUTXO(coinbaseTx.TxOuts[i].Version, b.Height, k, true, v, 255, block.RecvTime, chainhash.ZeroHash, 0)
-			coinbaseOutput[k] = tmp
-			blockOutputs[b] = append(blockOutputs[b], k)
-		}
+	if s.manager.GetPrivacyLevel() != abecryptoxkey.PrivacyLevelPSEUDONYM && vskBytes == nil {
+		return false, 0, 0, nil
 	}
-	if len(blockOutputs) != 0 {
-		err := putRawImmaturedCoinbaseOutput(txMgrNs, canonicalBlock(block.Height, block.Hash), valueImmaturedCoinbaseOutput(coinbaseOutput))
-		if err != nil {
-			return err
-		}
-	}
-	if len(blockOutputs) != 0 { //add the block outputs in to bucket block outputs
-		// TODO(abe): this process should transfer to byte slices and then append to given
-		for blk, ops := range blockOutputs {
-			k := canonicalBlock(blk.Height, blk.Hash) // TODO(osy): this process can avoid
-			v := make([]byte, 4+len(ops)*(32+1))
-			offset := 0
-			byteOrder.PutUint32(v[offset:], uint32(len(ops)))
-			offset += 4
-			for j := 0; j < len(ops); j++ {
-				copy(v[offset:], ops[j].TxHash[:])
-				offset += 32
-				v[offset] = ops[j].Index
-				offset += 1
-			}
-			err := putBlockOutput(txMgrNs, k, v)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	// update the balances
-	// return handle
-	err = putSpenableBalance(txMgrNs, spendableBal)
+
+	copyedVskBytes := make([]byte, len(vskBytes))
+	copy(copyedVskBytes, vskBytes)
+	valid, v, err = abecryptox.TxoCoinReceive(txOut, addressBytes, copyedVskBytes)
 	if err != nil {
-		return err
+		return false, 0, 0, err
 	}
-	err = putImmatureCoinbaseBalance(txMgrNs, immatureCBBal)
-	if err != nil {
-		return err
-	}
-	err = putImmatureTransferBalance(txMgrNs, immatureTRBal)
-	if err != nil {
-		return err
-	}
-	err = putUnconfirmedBalance(txMgrNs, unconfirmedBal)
-	if err != nil {
-		return err
-	}
-	return putMinedBalance(txMgrNs, balance)
+	return valid, v, addrIdx, nil
 }
+func (s *Store) GenSNForTxo(txOut *wire.TxOutAbe, addrMgrNs walletdb.ReadWriteBucket, ringHash chainhash.Hash, index uint8) ([]byte, error) {
+	coinAddr, err := abecryptox.ExtractCoinAddressFromTxo(txOut)
+	if err != nil {
+		return nil, err
+	}
+	// fetch address
+	_, _, addressSecretSnEnc, _, _, _, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
+	if err != nil {
+		return nil, err
+	}
+	_, _, asksn, _, _, err := s.manager.DecryptAddressKey(nil, nil, addressSecretSnEnc, nil, nil)
+	if err != nil {
+		return nil, err
+	}
 
+	sn, err := abecryptox.TxoCoinSerialNumberGen(txOut, ringHash, index, asksn)
+	if err != nil {
+		return nil, err
+	}
+	return sn, nil
+}
 func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb.ReadWriteBucket, block *BlockRecord, extraBlock map[uint32]*BlockRecord, maturedBlockHashs []*chainhash.Hash) error {
 	log.Infof("Current sync height %d", block.Height)
 
@@ -1141,24 +1071,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 
 	// store all outputs of coinbaseTx which belong to us into a map : coinbaseOutput
 	for i := 0; i < len(coinbaseTx.TxOuts); i++ {
-		coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(coinbaseTx.TxOuts[i].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
-		if err != nil {
-			return err
-		}
-		addressEnc, _, _, valueSecretKeyEnc, addrIdx, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
-		if err != nil {
-			return err
-		}
-		addressBytes, _, _, vskBytes, err := s.manager.DecryptAddressKey(addressEnc, nil, nil, valueSecretKeyEnc)
-		if err != nil {
-			return err
-		}
-		if vskBytes == nil {
-			continue
-		}
-		copyedVskBytes := make([]byte, len(vskBytes))
-		copy(copyedVskBytes, vskBytes)
-		valid, v, err := abecrypto.TxoCoinReceive(coinbaseTx.TxOuts[i], addressBytes, copyedVskBytes)
+		valid, v, addrIdx, err := s.ReceiveTxo(coinbaseTx.TxOuts[i], addrMgrNs)
 		if err != nil {
 			return err
 		}
@@ -1196,10 +1109,11 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 		// TODO:need to check for this section
 		trFlag := false
 		for j := 0; j < len(txi.TxIns); j++ {
+			serialNumber := txi.TxIns[j].SerialNumber
+
 			// compute the ring hash of each input in every transaction to match the utxo in the database
 			ringHash := txi.TxIns[j].PreviousOutPointRing.Hash()
 			u, ok := relevantUTXORings[ringHash] // firstly, check it exist in relevantUTXORing
-			serialNumber := txi.TxIns[j].SerialNumber
 			if !ok {
 				// TODO(abe):why in the bucket utxo ring, this entry which is keyed by ringHash is not found?
 				key, value := existsUTXORing(txMgrNs, ringHash) // if not, check it the bucket
@@ -1236,57 +1150,59 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			}
 
 			for index, sn := range u.OriginSerialNumberes {
-				if bytes.Equal(sn, serialNumber) {
-					// it means that the consumed input belongs wallet
-					trFlag = true
-					// add it's hash to relevant bucket
-					k := canonicalOutPointAbe(u.TxHashes[index], u.OutputIndexes[index])
-					txiHash := txi.TxHash()
-					// read relevant transaction hashes
-					relevantTxs := existsRawReleventTxs(txMgrNs, k)
-					// check the current transaction is included or not in relevant transaction
-					// remove the relevant except current transaction in unconfirmed bucket into invalid transaction bucket
-					flag := false
-					if len(relevantTxs) != 0 {
-						offset := 0
-						for offset+chainhash.HashSize <= len(relevantTxs) {
-							if bytes.Equal(txiHash[:], relevantTxs[offset:offset+chainhash.HashSize]) {
-								// it means that the wallet know the transaction
-								flag = true
-								offset += chainhash.HashSize
-								continue
-							}
-							conflictTx := existsRawUnconfirmedTx(txMgrNs, relevantTxs[offset:offset+chainhash.HashSize])
-							if len(conflictTx) != 0 {
-								err = deleteRawUnconfirmedTx(txMgrNs, relevantTxs[offset:offset+chainhash.HashSize])
-								if err != nil {
-									return err
-								}
-								err = putRawInvalidTx(txMgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
-								if err != nil {
-									return err
-								}
-								txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
-								// TODO(202211) send invalid notification to registered client
-								s.NotifyTransactionInvalid(&TransactionInfo{
-									TxHash: txHash,
-									Height: block.Height,
-								})
-								log.Infof("send invalid transaction notification %v at height %d", txHash, block.Height)
-							}
-							offset += chainhash.HashSize
-						}
-					}
-					if !flag {
-						// add relevant relation: outpoint(txHash,Index) -> TxHash
-						relevantTxs = append(relevantTxs, txiHash[:]...)
-						err = putRawRelevantTxs(txMgrNs, k, relevantTxs)
-						if err != nil {
-							return err
-						}
-					}
-					break
+				if !bytes.Equal(sn, serialNumber) {
+					continue
 				}
+
+				// it means that the consumed input belongs wallet
+				trFlag = true
+				// add it's hash to relevant bucket
+				k := canonicalOutPointAbe(u.TxHashes[index], u.OutputIndexes[index])
+				txiHash := txi.TxHash()
+				// read relevant transaction hashes
+				relevantTxs := existsRawReleventTxs(txMgrNs, k)
+				// check the current transaction is included or not in relevant transaction
+				// remove the relevant except current transaction in unconfirmed bucket into invalid transaction bucket
+				flag := false
+				if len(relevantTxs) != 0 {
+					offset := 0
+					for offset+chainhash.HashSize <= len(relevantTxs) {
+						if bytes.Equal(txiHash[:], relevantTxs[offset:offset+chainhash.HashSize]) {
+							// it means that the wallet know the transaction
+							flag = true
+							offset += chainhash.HashSize
+							continue
+						}
+						conflictTx := existsRawUnconfirmedTx(txMgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+						if len(conflictTx) != 0 {
+							err = deleteRawUnconfirmedTx(txMgrNs, relevantTxs[offset:offset+chainhash.HashSize])
+							if err != nil {
+								return err
+							}
+							err = putRawInvalidTx(txMgrNs, relevantTxs[offset:offset+chainhash.HashSize], conflictTx)
+							if err != nil {
+								return err
+							}
+							txHash, _ := chainhash.NewHash(relevantTxs[offset : offset+chainhash.HashSize])
+							// TODO(202211) send invalid notification to registered client
+							s.NotifyTransactionInvalid(&TransactionInfo{
+								TxHash: txHash,
+								Height: block.Height,
+							})
+							log.Infof("send invalid transaction notification %v at height %d", txHash, block.Height)
+						}
+						offset += chainhash.HashSize
+					}
+				}
+				if !flag {
+					// add relevant relation: outpoint(txHash,Index) -> TxHash
+					relevantTxs = append(relevantTxs, txiHash[:]...)
+					err = putRawRelevantTxs(txMgrNs, k, relevantTxs)
+					if err != nil {
+						return err
+					}
+				}
+				break
 			}
 			blockInputs.serialNumbers[ringHash] = append(blockInputs.serialNumbers[ringHash], serialNumber)
 			// copy a new utxoring and update the new utxoring variable
@@ -1414,24 +1330,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 
 		// traverse all outputs of a transaction and check if it is ours
 		for j := 0; j < len(txi.TxOuts); j++ {
-			coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(txi.TxOuts[j].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
-			if err != nil {
-				return err
-			}
-			addressEnc, _, _, valueSecretKeyEnc, addrIdx, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
-			if err != nil {
-				return err
-			}
-			addressBytes, _, _, vskBytes, err := s.manager.DecryptAddressKey(addressEnc, nil, nil, valueSecretKeyEnc)
-			if err != nil {
-				return err
-			}
-			if vskBytes == nil {
-				continue
-			}
-			copyedVskBytes := make([]byte, len(vskBytes))
-			copy(copyedVskBytes, vskBytes)
-			valid, v, err := abecrypto.TxoCoinReceive(txi.TxOuts[j], addressBytes, copyedVskBytes)
+			valid, v, addrIdx, err := s.ReceiveTxo(txi.TxOuts[j], addrMgrNs)
 			if err != nil {
 				return err
 			}
@@ -1642,64 +1541,28 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			}
 		}
 		ringBlockHeight := block.Height
-		allCoinBaseRmTxos := make([]*blockchain.RingMemberTxo, 0, coinBaseRmTxoNum)
-		allTransferRmTxos := make([]*blockchain.RingMemberTxo, 0, transferRmTxoNum)
 
-		//allCoinBaseRmTxos, allTransferRmTxos := blockchain.NewUTXORingEntriesPreparation(blocks)
-		// str = block1.hash, block2.hash, block3.hash, blockhash, txHash, outIndex
-		// all Txos are ordered by Hash(str), then grouped into rings
-		txoSortStr := make([]byte, blocksNum*chainhash.HashSize+chainhash.HashSize+chainhash.HashSize+1)
-		for i := 0; i < blocksNum; i++ {
-			copy(txoSortStr[i*chainhash.HashSize:], blocks[i].Hash()[:])
-		}
-
-		for i := 0; i < blocksNum; i++ {
-			block := blocks[i]
-			blockHash := block.Hash()
-			blockHeight := block.Height()
-
-			copy(txoSortStr[blocksNum*chainhash.HashSize:], blockHash[:])
-
-			coinBaseTx := block.Transactions()[0]
-			txHash := coinBaseTx.Hash()
-			copy(txoSortStr[(blocksNum+1)*chainhash.HashSize:], txHash[:])
-			for outIndex, txOut := range coinBaseTx.MsgTx().TxOuts {
-				txoSortStr[(blocksNum+2)*chainhash.HashSize] = uint8(outIndex)
-
-				txoOrderHash := chainhash.DoubleHashH(txoSortStr)
-
-				ringMemberTxo := blockchain.NewRingMemberTxo(coinBaseTx.MsgTx().Version, &txoOrderHash, blockHash, blockHeight, txHash, uint8(outIndex), txOut)
-				allCoinBaseRmTxos = append(allCoinBaseRmTxos, ringMemberTxo)
-			}
-			for _, tx := range block.Transactions()[1:] {
-				txHash := tx.Hash()
-				copy(txoSortStr[(blocksNum+1)*chainhash.HashSize:], txHash[:])
-
-				for outIndex, txOut := range tx.MsgTx().TxOuts {
-					txoSortStr[(blocksNum+2)*chainhash.HashSize] = uint8(outIndex)
-
-					txoOrderHash := chainhash.DoubleHashH(txoSortStr)
-
-					ringMemberTxo := blockchain.NewRingMemberTxo(tx.MsgTx().Version, &txoOrderHash, blockHash, blockHeight, txHash, uint8(outIndex), txOut)
-					allTransferRmTxos = append(allTransferRmTxos, ringMemberTxo)
-				}
-			}
-		}
 		//create a view to generate the all rings
-		view := blockchain.NewUtxoRingViewpoint()
-		err = view.NewUtxoRingEntriesFromTxos(allCoinBaseRmTxos, ringBlockHeight, blockHashs, int(wire.GetTxoRingSizeByBlockHeight(ringBlockHeight)), true)
+		txoRingSize := int(wire.GetTxoRingSizeByBlockHeight(block.Height))
+		newTxoRings, err := blockchain.BuildTxoRingsMLP(int(blockNum), txoRingSize, blocks)
 		if err != nil {
 			return err
 		}
 
-		err = view.NewUtxoRingEntriesFromTxos(allTransferRmTxos, ringBlockHeight, blockHashs, int(wire.GetTxoRingSizeByBlockHeight(ringBlockHeight)), false)
-		if err != nil {
-			return err
+		entries := map[chainhash.Hash]*blockchain.UtxoRingEntry{}
+		for ringId, txoRing := range newTxoRings {
+			if _, ok := entries[ringId]; ok {
+				err = fmt.Errorf("InsertBlock: Found a hash collision (by RingId) when calling newUtxoRingEntriesMLP with blocks (hash %v, ringHeight %d, ringId %v)",
+					block.Hash, ringBlockHeight, ringId)
+				return err
+			}
+			newUtxoRingEntry := blockchain.InitNewUtxoRingEntryMLP(txoRing)
+			entries[ringId] = newUtxoRingEntry
 		}
 
 		willAddUTXORing := make(map[chainhash.Hash]*UTXORing)
 		willAddRing := make(map[chainhash.Hash]*Ring)
-		for ringHash, utxoRingEntry := range view.Entries() {
+		for ringHash, utxoRingEntry := range entries {
 			for _, outpoint := range utxoRingEntry.OutPointRing().OutPoints {
 				var utxo *UnspentUTXO
 				var curMap int
@@ -1778,23 +1641,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 
 					// update the serialNumber
 					ring := willAddRing[ringHash]
-					coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(ring.TxoScripts[index], abecryptoparam.CryptoSchemePQRingCT)
-					if err != nil {
-						return err
-					}
-					_, _, addressSecretSnEnc, _, _, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
-					if err != nil {
-						return err
-					}
-					_, _, asksn, _, err := s.manager.DecryptAddressKey(nil, nil, addressSecretSnEnc, nil)
-					if err != nil {
-						return err
-					}
-
-					sn, err := abecrypto.TxoCoinSerialNumberGen(&wire.TxOutAbe{
-						Version:   ring.Version,
-						TxoScript: ring.TxoScripts[index],
-					}, utxoRing.RingHash, uint8(index), asksn)
+					sn, err := s.GenSNForTxo(wire.NewTxOutAbe(ring.Version, ring.TxoScripts[index]), addrMgrNs, utxoRing.RingHash, uint8(index))
 					if err != nil {
 						return err
 					}
@@ -1900,6 +1747,127 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 		}
 	}
 
+	// update the balances
+	// return handle
+	err = putSpenableBalance(txMgrNs, spendableBal)
+	if err != nil {
+		return err
+	}
+	err = putImmatureCoinbaseBalance(txMgrNs, immatureCBBal)
+	if err != nil {
+		return err
+	}
+	err = putImmatureTransferBalance(txMgrNs, immatureTRBal)
+	if err != nil {
+		return err
+	}
+	err = putUnconfirmedBalance(txMgrNs, unconfirmedBal)
+	if err != nil {
+		return err
+	}
+	return putMinedBalance(txMgrNs, balance)
+}
+func (s *Store) InsertGenesisBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb.ReadWriteBucket, block *BlockRecord) error {
+	balance, err := fetchMinedBalance(txMgrNs)
+	if err != nil {
+		return err
+	}
+	spendableBal, err := fetchSpenableBalance(txMgrNs)
+	if err != nil {
+		return err
+	}
+	immatureCBBal, err := fetchImmatureCoinbaseBalance(txMgrNs)
+	if err != nil {
+		return err
+	}
+	immatureTRBal, err := fetchImmatureTransferBalance(txMgrNs)
+	if err != nil {
+		return err
+	}
+	unconfirmedBal, err := fetchUnconfirmedBalance(txMgrNs)
+	if err != nil {
+		return err
+	}
+
+	// put the genesis block into database
+	err = putBlockRecord(txMgrNs, block)
+	if err != nil {
+		return err
+	}
+	b := Block{
+		Hash:   block.Hash,
+		Height: block.Height,
+	}
+	blockOutputs := make(map[Block][]wire.OutPointAbe) // if the block height meet the requirement, it also store previous two block outputs belong the wallet
+
+	coinbaseTx := block.TxRecords[0].MsgTx
+	coinbaseOutput := make(map[wire.OutPointAbe]*UnspentUTXO)
+	for i := 0; i < len(coinbaseTx.TxOuts); i++ {
+		coinAddr, err := abecryptox.ExtractCoinAddressFromTxo(coinbaseTx.TxOuts[i])
+		if err != nil {
+			return err
+		}
+		addressEnc, _, _, valueSecretKeyEnc, addrIdx, _, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
+		if err != nil {
+			return err
+		}
+		addressBytes, _, _, vskBytes, _, err := s.manager.DecryptAddressKey(addressEnc, nil, nil, valueSecretKeyEnc, nil)
+		if err != nil {
+			return err
+		}
+		if vskBytes == nil {
+			continue
+		}
+		copyedVskBytes := make([]byte, len(vskBytes))
+		copy(copyedVskBytes, vskBytes)
+		valid, v, err := abecryptox.TxoCoinReceive(coinbaseTx.TxOuts[i], addressBytes, copyedVskBytes)
+		if err != nil {
+			return err
+		}
+		if valid {
+			// record the idx is used
+			if err = s.manager.MarkAddrUsed(addrMgrNs, addrIdx); err != nil {
+				log.Warnf("fail to mark No.%d address as used", addrIdx)
+			}
+			amt := abeutil.Amount(v)
+			log.Infof("(Coinbase) Find my txo at block height %d (hash %s) with value %v", block.Height, block.Hash, amt.ToABE())
+			immatureCBBal += amt
+			balance += amt
+			k := wire.OutPointAbe{
+				TxHash: coinbaseTx.TxHash(),
+				Index:  uint8(i),
+			}
+			tmp := NewUnspentUTXO(coinbaseTx.TxOuts[i].Version, b.Height, k, true, v, 255, block.RecvTime, chainhash.ZeroHash, 0)
+			coinbaseOutput[k] = tmp
+			blockOutputs[b] = append(blockOutputs[b], k)
+		}
+	}
+	if len(blockOutputs) != 0 {
+		err := putRawImmaturedCoinbaseOutput(txMgrNs, canonicalBlock(block.Height, block.Hash), valueImmaturedCoinbaseOutput(coinbaseOutput))
+		if err != nil {
+			return err
+		}
+	}
+	if len(blockOutputs) != 0 { //add the block outputs in to bucket block outputs
+		// TODO(abe): this process should transfer to byte slices and then append to given
+		for blk, ops := range blockOutputs {
+			k := canonicalBlock(blk.Height, blk.Hash) // TODO(osy): this process can avoid
+			v := make([]byte, 4+len(ops)*(32+1))
+			offset := 0
+			byteOrder.PutUint32(v[offset:], uint32(len(ops)))
+			offset += 4
+			for j := 0; j < len(ops); j++ {
+				copy(v[offset:], ops[j].TxHash[:])
+				offset += 32
+				v[offset] = ops[j].Index
+				offset += 1
+			}
+			err := putBlockOutput(txMgrNs, k, v)
+			if err != nil {
+				return err
+			}
+		}
+	}
 	// update the balances
 	// return handle
 	err = putSpenableBalance(txMgrNs, spendableBal)

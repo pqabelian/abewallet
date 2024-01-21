@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto"
+	"github.com/abesuite/abec/abecryptox"
 	"github.com/abesuite/abec/abejson"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abewallet/wallet/txrules"
@@ -1185,8 +1185,8 @@ func checkValidAddress(addr []byte, chainParams *chaincfg.Params) error {
 	return nil
 }
 
-func makeOutputDescsForPairs(w *wallet.Wallet, pairs []abejson.Pair, chainParams *chaincfg.Params) ([]*abecrypto.AbeTxOutputDesc, error) {
-	outputDescs := make([]*abecrypto.AbeTxOutputDesc, 0, len(pairs))
+func makeOutputDescsForPairs(w *wallet.Wallet, pairs []abejson.Pair, chainParams *chaincfg.Params) ([]*abecryptox.AbeTxOutputDesc, error) {
+	outputDescs := make([]*abecryptox.AbeTxOutputDesc, 0, len(pairs))
 	for i := 0; i < len(pairs); i++ {
 		addr, err := hex.DecodeString(pairs[i].Address)
 		if err != nil {
@@ -1198,15 +1198,15 @@ func makeOutputDescsForPairs(w *wallet.Wallet, pairs []abejson.Pair, chainParams
 		}
 		targetAmount := uint64(pairs[i].Amount)
 		addr = addr[1 : len(addr)-32]
-		outputDesc := abecrypto.NewAbeTxOutDesc(addr, targetAmount)
+		outputDesc := abecryptox.NewAbeTxOutDesc(addr, targetAmount)
 
 		outputDescs = append(outputDescs, outputDesc)
 	}
 	return outputDescs, nil
 }
 
-func makeOutputDescs(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) ([]*abecrypto.AbeTxOutputDesc, error) {
-	outputDescs := make([]*abecrypto.AbeTxOutputDesc, 0, len(pairs))
+func makeOutputDescs(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) ([]*abecryptox.AbeTxOutputDesc, error) {
+	outputDescs := make([]*abecryptox.AbeTxOutputDesc, 0, len(pairs))
 	for addrStr, amt := range pairs {
 		//payeeManager, err := w.FetchPayeeManager(name)
 		//if payeeManager == nil {
@@ -1224,7 +1224,7 @@ func makeOutputDescs(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainPar
 		// TODO: check the net ID and the check hash
 		// discard the heading net ID and tailing hash in address
 		addr = addr[1 : len(addr)-32]
-		outputDesc := abecrypto.NewAbeTxOutDesc(addr, targetAmount)
+		outputDesc := abecryptox.NewAbeTxOutDesc(addr, targetAmount)
 
 		outputDescs = append(outputDescs, outputDesc)
 	}
@@ -1292,7 +1292,7 @@ func sendAddressAbe(w *wallet.Wallet, amounts []abejson.Pair,
 		return "", err
 	}
 	var requestHash *chainhash.Hash
-	if w.RecordRequestFlag {
+	if w.RecordRequestFlag && len(utxoSpecified) != 0 {
 		requestContentBuff := &bytes.Buffer{}
 		for i := 0; i < len(outputDescs); i++ {
 			requestContentBuff.WriteString(amounts[i].Address)

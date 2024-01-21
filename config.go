@@ -120,6 +120,8 @@ type config struct {
 	MyPassword           string `long:"mypassword" description:"Password in non-interactive mode"`
 	MyRestoreNumber      uint64 `long:"myrestorenumber" description:"Number of restore address in non-interactive mode"`
 	MyWalletPass         string `long:"mywalletpass" description:"The public passphrase in non-interactive mode"`
+	WithPrivacyLevel     bool   `long:"withprivacylevel" description:"Whether or not the args containing privacy level"`
+	MyPrivacyLevel       uint8  `long:"myprivacylevel" description:"The privacy level in non-interactive mode"`
 }
 
 // cleanAndExpandPath expands environement variables and leading ~ in the
