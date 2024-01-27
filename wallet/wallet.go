@@ -11,6 +11,7 @@ import (
 	"github.com/abesuite/abec/abecryptox/abecryptoxparam"
 	"github.com/abesuite/abec/abejson"
 	"github.com/abesuite/abec/abeutil"
+	"github.com/abesuite/abec/aut"
 	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/wire"
@@ -127,7 +128,8 @@ type Wallet struct {
 	// call the rescan RPC.
 
 	// Channel for transaction creation requests.
-	createTxRequests chan createTxRequest
+	createTxRequests    chan createTxRequest
+	createTxAUTRequests chan createTxAUTRequest
 
 	// Channels for the manager locker.
 	unlockRequests     chan unlockRequest
@@ -661,6 +663,20 @@ type (
 		tx  *txauthor.AuthoredTxAbe
 		err error
 	}
+
+	createTxAUTRequest struct {
+		autTransaction          aut.Transaction
+		txOutDescs              []*abecryptox.AbeTxOutputDesc
+		minconf                 int32
+		feePerKbSpecified       abeutil.Amount
+		autIssueTokenThreshold  uint8
+		autIssueUpdateThreshold uint8
+		resp                    chan createTxAUTResponse
+	}
+	createTxAUTResponse struct {
+		tx  *txauthor.AuthoredTxAbe
+		err error
+	}
 )
 
 // txCreator is responsible for the input selection and creation of
@@ -689,6 +705,17 @@ out:
 
 			heldUnlock.release()
 			txr.resp <- createTxResponse{tx, err}
+		case txr := <-w.createTxAUTRequests:
+			heldUnlock, err := w.holdUnlock()
+			if err != nil {
+				txr.resp <- createTxAUTResponse{nil, err}
+				continue
+			}
+
+			tx, err := w.txPqringCTToOutputsMLPAUT(txr.autTransaction, txr.txOutDescs, txr.minconf, txr.feePerKbSpecified, txr.autIssueTokenThreshold, txr.autIssueUpdateThreshold)
+
+			heldUnlock.release()
+			txr.resp <- createTxAUTResponse{tx, err}
 		case <-quit:
 			break out
 		}
@@ -718,6 +745,23 @@ func (w *Wallet) CreateSimpleTx(outputDescs []*abecryptox.AbeTxOutputDesc, minco
 		resp:              make(chan createTxResponse),
 	}
 	w.createTxRequests <- req
+	resp := <-req.resp
+	return resp.tx, resp.err
+}
+
+func (w *Wallet) CreateSimpleTxAUT(autTransaction aut.Transaction, outputDescs []*abecryptox.AbeTxOutputDesc, minconf int32,
+	feePerKbSpecified abeutil.Amount, autIssueTokenThreshold uint8, autIssueUpdateThreshold uint8) (*txauthor.AuthoredTxAbe, error) {
+
+	req := createTxAUTRequest{
+		autTransaction:          autTransaction,
+		txOutDescs:              outputDescs,
+		minconf:                 minconf,
+		feePerKbSpecified:       feePerKbSpecified,
+		autIssueTokenThreshold:  autIssueTokenThreshold,
+		autIssueUpdateThreshold: autIssueUpdateThreshold,
+		resp:                    make(chan createTxAUTResponse),
+	}
+	w.createTxAUTRequests <- req
 	resp := <-req.resp
 	return resp.tx, resp.err
 }
@@ -1885,6 +1929,53 @@ func (w *Wallet) SendOutputs(outputDescs []*abecryptox.AbeTxOutputDesc,
 	return createdTx, nil
 }
 
+func (w *Wallet) SendOutputsAUT(autTransaction aut.Transaction, outputDescs []*abecryptox.AbeTxOutputDesc,
+	minconf int32, feePerKbSpecified abeutil.Amount, autIssueTokenThreshold uint8, autIssueUpdateThreshold uint8) (*txauthor.AuthoredTxAbe, error) {
+	// Ensure the outputs to be created adhere to the network's consensus
+	// rules.
+	for _, txOutDesc := range outputDescs {
+		err := txrules.CheckOutputDescAbe(
+			txOutDesc, txrules.DefaultRelayFeePerKb,
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Create the transaction and broadcast it to the network. The
+	// transaction will be added to the database in order to ensure that we
+	// continue to re-broadcast the transaction upon restarts until it has
+	// been confirmed.
+	createdTx, err := w.CreateSimpleTxAUT(autTransaction, outputDescs, minconf, feePerKbSpecified, autIssueTokenThreshold, autIssueUpdateThreshold)
+	if err != nil {
+		return nil, err
+	}
+
+	// it means that the transaction is created successful
+	txHash, err := w.reliablyPublishTransaction(createdTx.Tx, "", nil)
+	if err != nil {
+		// the wallet would fetch the transaction
+		// due to error double spending
+		// And then insert the transaction into database
+		// But current do nothing? TODO 202207
+		if _, ok := err.(*ErrDoubleSpend); ok {
+			// do nothing
+		}
+		return nil, err
+	}
+
+	for i := 0; i < len(createdTx.Tx.TxOuts); i++ {
+		log.Debugf("tx output [%d] = %x\n", i, createdTx.Tx.TxOuts[i].TxoScript)
+	}
+	// Sanity check on the returned tx hash.
+	// something error ?
+	if *txHash != createdTx.Tx.TxHash() {
+		return nil, errors.New("tx hash mismatch")
+	}
+
+	return createdTx, nil
+}
+
 // SignTransaction uses secrets of the wallet, as well as additional secrets
 // passed in by the caller, to create and add input signatures to a transaction.
 //
@@ -2301,6 +2392,7 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 		resendUnminedTxFlag: atomic.Value{},
 		recoveryWindow:      recoveryWindow,
 		createTxRequests:    make(chan createTxRequest),
+		createTxAUTRequests: make(chan createTxAUTRequest),
 		unlockRequests:      make(chan unlockRequest),
 		lockRequests:        make(chan struct{}),
 		holdUnlockRequests:  make(chan chan heldUnlock),

@@ -72,6 +72,8 @@ var (
 	bucketSpentButUnmined         = []byte("spentbutumined")
 	bucketSpentConfirmed          = []byte("spentconfirmed")
 
+	bucketAUTEntry = []byte("autentry")
+
 	bucketUTXORing    = []byte("utxoring")
 	bucketRingDetails = []byte("utxoringdetails") //TODO(abe):we should add a block height in database, meaning that the txo in ring had consumed completely .
 
@@ -1071,10 +1073,25 @@ func deleteMaturedOutput(ns walletdb.ReadWriteBucket, k []byte) error {
 	return nil
 }
 
+func spendAUTCoin(ns walletdb.ReadWriteBucket, k []byte) error {
+	autEntryBucket := ns.NestedReadWriteBucket(bucketAUTEntry)
+	v := autEntryBucket.Get(k)
+	if len(v) == 0 {
+		return nil
+	}
+	v[len(v)-1] = 1
+	err := autEntryBucket.Put(k, v)
+	if err != nil {
+		str := "failed to delete unspent output"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+
 // UnspentTXO: store the relevant output which is unspent by current wallet
 // its key is transaction hash with the output index
 // its value is relevant information : From height,Fromcoinbase,amount,generation time, rinhash
-func valueUnspentTXO(fromCoinBase bool, version uint32, height int32, amount uint64, index uint8, generationTime time.Time, ringHash chainhash.Hash, ringSize uint8) []byte {
+func valueUnspentTXO(fromCoinBase bool, isAUTCoin bool, version uint32, height int32, amount uint64, index uint8, generationTime time.Time, ringHash chainhash.Hash, ringSize uint8) []byte {
 	size := 4 + 4 + 1 + 8 + 1 + 8 + 32 + 1
 	//	todo: should use HashSize, rather than 32
 	v := make([]byte, size)
@@ -1083,11 +1100,14 @@ func valueUnspentTXO(fromCoinBase bool, version uint32, height int32, amount uin
 	offset += 4
 	byteOrder.PutUint32(v[offset:offset+4], uint32(height))
 	offset += 4
+	flagBits := byte(0)
 	if fromCoinBase {
-		v[offset] = byte(1)
-	} else {
-		v[offset] = byte(0)
+		flagBits |= 1
 	}
+	if isAUTCoin {
+		flagBits |= 2
+	}
+	v[offset] = flagBits
 	offset += 1
 	byteOrder.PutUint64(v[offset:offset+8], amount)
 	offset += 8
@@ -1106,7 +1126,7 @@ func valueUnspentTXO(fromCoinBase bool, version uint32, height int32, amount uin
 // its key is transaction hash with the output index
 // its value is relevant information :
 // height, from coinbase,amount,generation time, rinhash,serialNumber，spentBy, spentTime,
-func valueSpentButUnminedTXO(version uint32, height int, fromCoinBase bool, amount int64, index uint8, generationTime time.Time,
+func valueSpentButUnminedTXO(version uint32, height int, fromCoinBase bool, isAUTCoin bool, amount int64, index uint8, generationTime time.Time,
 	ringHash chainhash.Hash, ringSize uint8, spentBy chainhash.Hash, spentTime time.Time) []byte {
 	size := 4 + 4 + 1 + 8 + 1 + 8 + 32 + 1 + 32 + 8
 	v := make([]byte, size)
@@ -1115,11 +1135,14 @@ func valueSpentButUnminedTXO(version uint32, height int, fromCoinBase bool, amou
 	offset += 4
 	byteOrder.PutUint32(v[offset:offset+4], uint32(height))
 	offset += 4
+	flagBits := byte(0)
 	if fromCoinBase {
-		v[offset] = byte(1)
-	} else {
-		v[offset] = byte(0)
+		flagBits |= 1
 	}
+	if isAUTCoin {
+		flagBits |= 2
+	}
+	v[offset] = flagBits
 	offset += 1
 	byteOrder.PutUint64(v[offset:offset+8], uint64(amount))
 	offset += 8
@@ -1161,10 +1184,11 @@ func fetchSpentButUnminedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, i
 	offset += 4
 	t := v[offset]
 	offset += 1
-	if t == 0 {
-		sbu.FromCoinBase = false
-	} else {
+	if t&1 == 1 {
 		sbu.FromCoinBase = true
+	}
+	if t&2 == 1 {
+		sbu.IsAUTCoin = true
 	}
 	sbu.Amount = byteOrder.Uint64(v[offset : offset+8])
 	offset += 8
@@ -1199,7 +1223,7 @@ func deleteSpentButUnminedTXO(ns walletdb.ReadWriteBucket, k []byte) error {
 // SpentConfirmedTXO: store the relevant output which is spent by current wallet and now is contained in a block
 // its key is transaction hash with the output index
 // its value is relevant information : height,From coinbase,amount,generation time, rinhash,serialNumber，spentTime,confirmedTime
-func valueSpentConfirmedTXO(version uint32, height int, fromCoinBase bool, amount int64, index uint8, generationTime time.Time,
+func valueSpentConfirmedTXO(version uint32, height int, fromCoinBase bool, isAUTCoin bool, amount int64, index uint8, generationTime time.Time,
 	ringHash chainhash.Hash, ringSize uint8, spentBy chainhash.Hash, spentTime time.Time, confirmTime time.Time) []byte {
 	size := 4 + 4 + 1 + 8 + 1 + 8 + 32 + 1 + 32 + 8 + 8
 	v := make([]byte, size)
@@ -1208,11 +1232,14 @@ func valueSpentConfirmedTXO(version uint32, height int, fromCoinBase bool, amoun
 	offset += 4
 	byteOrder.PutUint32(v[offset:offset+4], uint32(height))
 	offset += 4
+	flagBits := byte(0)
 	if fromCoinBase {
-		v[offset] = byte(1)
-	} else {
-		v[offset] = byte(0)
+		flagBits |= 1
 	}
+	if isAUTCoin {
+		flagBits |= 2
+	}
+	v[offset] = flagBits
 	offset += 1
 	byteOrder.PutUint64(v[offset:offset+8], uint64(amount))
 	offset += 8
@@ -1256,10 +1283,11 @@ func fetchSpentConfirmedTXO(ns walletdb.ReadWriteBucket, hash chainhash.Hash, in
 	offset += 4
 	t := v[offset]
 	offset += 1
-	if t == 0 {
-		sct.FromCoinBase = false
-	} else {
+	if t&1 == 1 {
 		sct.FromCoinBase = true
+	}
+	if t&2 == 1 {
+		sct.IsAUTCoin = true
 	}
 	sct.Amount = byteOrder.Uint64(v[offset : offset+8])
 	offset += 8
@@ -1996,6 +2024,11 @@ func createBuckets(ns walletdb.ReadWriteBucket) error {
 		return storeError(ErrDatabase, str, err)
 	}
 
+	if _, err := ns.CreateBucket(bucketAUTEntry); err != nil {
+		str := "fialed to create aut entry bucket"
+		return storeError(ErrDatabase, str, err)
+	}
+
 	return nil
 }
 
@@ -2063,6 +2096,11 @@ func deleteBuckets(ns walletdb.ReadWriteBucket) error {
 
 	if err := ns.DeleteNestedBucket(bucketRelevantTxs); err != nil {
 		str := "failed to delete relevant transactions bucket"
+		return storeError(ErrDatabase, str, err)
+	}
+
+	if err := ns.DeleteNestedBucket(bucketAUTEntry); err != nil {
+		str := "fialed to delete aut entry bucket"
 		return storeError(ErrDatabase, str, err)
 	}
 
