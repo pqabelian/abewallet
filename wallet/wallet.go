@@ -1898,7 +1898,7 @@ func (w *Wallet) SendOutputs(outputDescs []*abecryptox.AbeTxOutputDesc,
 	// been confirmed.
 	createdTx, err := w.CreateSimpleTx(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, false)
 	if err != nil {
-		if w.RecordRequestFlag {
+		if w.RecordRequestFlag && len(utxoSpecified) != 0 {
 			log.Errorf("can not create a transaction for request hash %s with specified utxo %s", requestHash, utxoSpecified)
 		}
 		return nil, err

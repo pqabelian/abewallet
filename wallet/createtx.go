@@ -510,7 +510,7 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 	//	todo: Amount seems useless
 	targetValue := abeutil.Amount(0)
 	outForRing := 0
-	vPublic := int64(0)
+	outputPublic := int64(0)
 	outputCoinAddresses := make([][]byte, len(txOutDescs))
 	for i := 0; i < len(txOutDescs); i++ {
 		privacyLevel, coinAddress, _, err := abecryptoxkey.CryptoAddressParse(txOutDescs[i].CryptoAddress())
@@ -519,7 +519,7 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 		}
 		outputCoinAddresses[i] = coinAddress
 		if privacyLevel == abecryptoxkey.PrivacyLevelPSEUDONYM {
-			vPublic += int64(txOutDescs[i].Value())
+			outputPublic += int64(txOutDescs[i].Value())
 		} else if privacyLevel == abecryptoxkey.PrivacyLevelRINGCTPre || privacyLevel == abecryptoxkey.PrivacyLevelRINGCT {
 			outForRing++
 		} else {
@@ -546,7 +546,6 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 		return nil, err
 	}
 	if len(eligible) == 0 {
-
 		return nil, errors.New("not Enough")
 	}
 	sort.Sort(sort.Reverse(byAmount(eligible)))
@@ -558,8 +557,11 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 	privacyLevel := w.Manager.GetPrivacyLevel()
 
 	selectedTxos := make([]*wtxmgr.UnspentUTXO, 0, len(eligible))
-	inputRingVersions := make([]uint32, 0, len(eligible))
-	selectedRingSizes := make([]uint8, 0, len(eligible))
+	inputRingVersionsForAll := make([]uint32, 0, len(eligible))
+	inRingSizesForAll := make([]uint8, 0, len(eligible))
+	inputRingVersionsForRing := make([]uint32, 0, len(eligible))
+	inRingSizesForRing := make([]uint8, 0, len(eligible))
+	inputPublic := uint64(0)
 	var currentTotal abeutil.Amount
 	var txFee abeutil.Amount
 
@@ -567,9 +569,17 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 	if feeSpecified > 0 && utxoSpecified == nil {
 		for i := 0; i < len(eligible); i++ {
 			currentUtxo := &eligible[i]
+
 			selectedTxos = append(selectedTxos, currentUtxo)
-			selectedRingSizes = append(selectedRingSizes, currentUtxo.RingSize)
-			inputRingVersions = append(inputRingVersions, currentUtxo.Version)
+			if privacyLevel == abecryptoxkey.PrivacyLevelRINGCT || privacyLevel == abecryptoxkey.PrivacyLevelRINGCTPre {
+				inputRingVersionsForRing = append(inputRingVersionsForRing, currentUtxo.Version)
+				inRingSizesForRing = append(inRingSizesForRing, currentUtxo.RingSize)
+			} else if privacyLevel == abecryptoxkey.PrivacyLevelPSEUDONYM {
+				inputPublic += currentUtxo.Amount
+			}
+
+			inputRingVersionsForAll = append(inputRingVersionsForAll, currentUtxo.Version)
+			inRingSizesForAll = append(inRingSizesForAll, currentUtxo.RingSize)
 			currentTotal = currentTotal + abeutil.Amount(currentUtxo.Amount)
 			if currentTotal >= targetValue+feeSpecified {
 				break
@@ -585,8 +595,17 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 		}
 		for _, txo := range selectedTxos {
 			currentTotal = currentTotal + abeutil.Amount(txo.Amount)
-			inputRingVersions = append(inputRingVersions, txo.Version)
-			selectedRingSizes = append(selectedRingSizes, txo.RingSize)
+
+			if privacyLevel == abecryptoxkey.PrivacyLevelRINGCT || privacyLevel == abecryptoxkey.PrivacyLevelRINGCTPre {
+				inputRingVersionsForRing = append(inputRingVersionsForRing, txo.Version)
+				inRingSizesForRing = append(inRingSizesForRing, txo.RingSize)
+			} else if privacyLevel == abecryptoxkey.PrivacyLevelPSEUDONYM {
+				inputPublic += txo.Amount
+			}
+
+			inputRingVersionsForAll = append(inputRingVersionsForAll, txo.Version)
+			inRingSizesForAll = append(inRingSizesForAll, txo.RingSize)
+
 		}
 		log.Infof("utxoSpecified: targetValue %d, feeSpecified %d, currentTotal %d", targetValue, feeSpecified, currentTotal)
 		if currentTotal < targetValue+feeSpecified {
@@ -608,12 +627,16 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 		}
 	}
 
-	computeFee := func(txVersion uint32, inputRingVersions []uint32, selectedRingSizes []uint8, inForRing uint8, inForSingleDistinct uint8, vPublic int64) (abeutil.Amount, error) {
-		txConSize, err := wire.PrecomputeTrTxConSizeMLP(txVersion, inputRingVersions, selectedRingSizes, outputCoinAddresses, abecryptoparam.MaxAllowedTxMemoSize)
+	computeFee := func(txVersion uint32,
+		inputRingVersionForAll []uint32, inRingSizesForAll []uint8, // all inputs
+		inputRingVersionsForRing []uint32, inRingSizeForRing []uint8, // ring inputs
+		inForRing uint8, inForSingleDistinct uint8,
+		vPublic int64) (abeutil.Amount, error) {
+		txConSize, err := wire.PrecomputeTrTxConSizeMLP(txVersion, inputRingVersionForAll, inRingSizesForAll, outputCoinAddresses, abecryptoparam.MaxAllowedTxMemoSize)
 		if err != nil {
 			return 0, err
 		}
-		witnessSize, err := abecryptox.GetTrTxWitnessSerializeSizeApprox(txVersion, inForRing, inForSingleDistinct, selectedRingSizes, uint8(outForRing), vPublic)
+		witnessSize, err := abecryptox.GetTrTxWitnessSerializeSizeApprox(txVersion, inForRing, inForSingleDistinct, inRingSizeForRing, uint8(outForRing), vPublic)
 		if err != nil {
 			return 0, err
 		}
@@ -626,7 +649,6 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 	if feeSpecified == 0 && feePerKbSpecified > 0 && utxoSpecified == nil {
 		nextUTXOIdx := 0
 		inForRing := uint8(0)
-		inRingSize := make([]uint8, 0, len(eligible))
 		inForSingleDistinct := uint8(0) // TODO distinguish input address
 		for nextUTXOIdx < len(eligible) {
 			currentUtxo := &eligible[nextUTXOIdx]
@@ -634,19 +656,21 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 
 			if privacyLevel == abecryptoxkey.PrivacyLevelRINGCT || privacyLevel == abecryptoxkey.PrivacyLevelRINGCTPre {
 				inForRing++
-				inRingSize = append(inRingSize, currentUtxo.RingSize)
+				inputRingVersionsForRing = append(inputRingVersionsForRing, currentUtxo.Version)
+				inRingSizesForRing = append(inRingSizesForRing, currentUtxo.RingSize)
 			} else if privacyLevel == abecryptoxkey.PrivacyLevelPSEUDONYM {
+				inputPublic += currentUtxo.Amount
 				inForSingleDistinct++
 			}
+			inputRingVersionsForAll = append(inputRingVersionsForAll, currentUtxo.Version)
+			inRingSizesForAll = append(inRingSizesForAll, currentUtxo.RingSize)
+
 			selectedTxos = append(selectedTxos, currentUtxo)
-			selectedRingSizes = append(selectedRingSizes, currentUtxo.RingSize)
-			inputRingVersions = append(inputRingVersions, currentUtxo.Version)
 			currentTotal = currentTotal + abeutil.Amount(currentUtxo.Amount)
 			if currentTotal < targetValue {
 				continue
 			}
-
-			fee, err := computeFee(wire.TxVersion, inputRingVersions, selectedRingSizes, inForRing, inForSingleDistinct, vPublic)
+			fee, err := computeFee(wire.TxVersion, inputRingVersionsForAll, inRingSizesForAll, inputRingVersionsForRing, inRingSizesForRing, inForRing, inForSingleDistinct, outputPublic-int64(inputPublic))
 			if err != nil {
 				return nil, err
 			}
@@ -673,21 +697,25 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 		inRingSize := make([]uint8, 0, len(eligible))
 		inForSingleDistinct := uint8(0) // TODO distinguish input address
 		for _, txo := range selectedTxos {
-			if privacyLevel == abecryptoxkey.PrivacyLevelRINGCT {
+			if privacyLevel == abecryptoxkey.PrivacyLevelRINGCT || privacyLevel == abecryptoxkey.PrivacyLevelRINGCTPre {
 				inForRing++
 				inRingSize = append(inRingSize, txo.RingSize)
+				inputRingVersionsForRing = append(inputRingVersionsForRing, txo.Version)
+				inRingSizesForRing = append(inRingSizesForRing, txo.RingSize)
 			} else if privacyLevel == abecryptoxkey.PrivacyLevelPSEUDONYM {
+				inputPublic += txo.Amount
 				inForSingleDistinct++
 			}
+
+			inputRingVersionsForAll = append(inputRingVersionsForAll, txo.Version)
+			inRingSizesForAll = append(inRingSizesForAll, txo.RingSize)
 			currentTotal = currentTotal + abeutil.Amount(txo.Amount)
-			inputRingVersions = append(inputRingVersions, txo.Version)
-			selectedRingSizes = append(selectedRingSizes, txo.RingSize)
 		}
 		if currentTotal < targetValue {
 			return nil, errors.New("please specify enough amount to transfer: input < output")
 		}
 
-		fee, err := computeFee(wire.TxVersion, inputRingVersions, selectedRingSizes, inForRing, inForSingleDistinct, vPublic)
+		fee, err := computeFee(wire.TxVersion, inputRingVersionsForAll, inRingSizesForAll, inputRingVersionsForRing, inRingSizesForRing, inForRing, inForSingleDistinct, outputPublic-int64(inputPublic))
 		if err != nil {
 			return nil, err
 		}
@@ -846,6 +874,17 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 	if err != nil {
 		return nil, errors.New("error for creating a transfer transaction template ")
 	}
+
+	// adjust the order of output descs
+	sort.SliceStable(txOutDescs, func(i, j int) bool {
+		outputIAddressPrivacyLevel, _, _, _ := abecryptoxkey.CryptoAddressParse(txOutDescs[i].CryptoAddress())
+		outputJAddressPrivacyLevel, _, _, _ := abecryptoxkey.CryptoAddressParse(txOutDescs[j].CryptoAddress())
+		if outputIAddressPrivacyLevel != abecryptoxkey.PrivacyLevelPSEUDONYM && outputJAddressPrivacyLevel == abecryptoxkey.PrivacyLevelPSEUDONYM {
+			return true
+		}
+		return false
+	})
+
 	transferTx, err := abecryptox.TransferTxGenByKeys(abeTxInputDescs, txOutDescs, transferTxTemplate)
 	if err != nil {
 		return nil, err
