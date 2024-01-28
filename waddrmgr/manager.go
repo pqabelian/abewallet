@@ -406,12 +406,18 @@ func (m *Manager) DecryptAddressKey(addressEnc, addressSecretSpEnc, addressSecre
 			return nil, nil, nil, nil, nil, err
 		}
 	}
-	var detectoyKey []byte
+	if len(addressSecretSnBytes) == 0 {
+		addressSecretSnBytes = nil
+	}
+	var detectorKey []byte
 	if detectorKeyEnc != nil {
-		detectoyKey, err = m.Decrypt(CKTPublic, detectorKeyEnc)
+		detectorKey, err = m.Decrypt(CKTPublic, detectorKeyEnc)
 		if err != nil {
 			return nil, nil, nil, nil, nil, err
 		}
+	}
+	if len(detectorKey) == 0 {
+		detectorKey = nil
 	}
 
 	var addressSecretSpBytes []byte
@@ -422,9 +428,9 @@ func (m *Manager) DecryptAddressKey(addressEnc, addressSecretSpEnc, addressSecre
 				return nil, nil, nil, nil, nil, err
 			}
 		}
-
 	}
-	return addressBytes, addressSecretSpBytes, addressSecretSnBytes, valueSecretKeyBytes, detectoyKey, nil
+
+	return addressBytes, addressSecretSpBytes, addressSecretSnBytes, valueSecretKeyBytes, detectorKey, nil
 }
 
 // FetchAddressKeyEnc got addressEnc, addressSecretSpEnc, addressSecretSnEnc, valueSecretKeyEnc,
