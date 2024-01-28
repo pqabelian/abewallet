@@ -682,10 +682,12 @@ func putAddressKeysEnc(ns walletdb.ReadWriteBucket, idx uint64, addrKey []byte, 
 
 	if detectorKeyEnc != nil {
 		detectorKeyBukcet := mainBucket.NestedReadWriteBucket(detectorBukcetName)
-		err := detectorKeyBukcet.Put(addrKey, detectorKeyEnc)
-		if err != nil {
-			str := "failed to store encrypted master public key"
-			return managerError(ErrDatabase, str, err)
+		if detectorKeyBukcet != nil {
+			err := detectorKeyBukcet.Put(addrKey, detectorKeyEnc)
+			if err != nil {
+				str := "failed to store encrypted master public key"
+				return managerError(ErrDatabase, str, err)
+			}
 		}
 	}
 
@@ -703,8 +705,10 @@ func fetchAddressKeyEnc(ns walletdb.ReadBucket, addrKey []byte) ([]byte, []byte,
 	askspEnc := askspBucket.Get(addrKey)
 	asksnBucket := mainBucket.NestedReadBucket(asksnBukcetName)
 	asksnEnc := asksnBucket.Get(addrKey)
-	detectorKeyBucket := mainBucket.NestedReadBucket(detectorBukcetName)
-	detecorKeyEnc := detectorKeyBucket.Get(addrKey)
+	var detecorKeyEnc []byte
+	if detectorKeyBucket := mainBucket.NestedReadBucket(detectorBukcetName); detectorKeyBucket != nil {
+		detecorKeyEnc = detectorKeyBucket.Get(addrKey)
+	}
 
 	idxAddrBucket := mainBucket.NestedReadBucket(idxAddrBucketName)
 	addrIdx := uint64(0)
@@ -865,12 +869,12 @@ func putWatchingOnly(ns walletdb.ReadWriteBucket, watchingOnly bool) error {
 	return nil
 }
 
-// putCryptoScheme stores the weaker-privacy flag to the database.
+// putCryptoScheme stores the crypto scheme to the database.
 func putCryptoScheme(ns walletdb.ReadWriteBucket, cryptoScheme abecryptoxparam.CryptoScheme) error {
 	bucket := ns.NestedReadWriteBucket(mainBucketName)
 
 	if err := bucket.Put(cryptoSchemeName, []byte{byte(cryptoScheme)}); err != nil {
-		str := "failed to store weaker privacy flag"
+		str := "failed to store crypto scheme "
 		return managerError(ErrDatabase, str, err)
 	}
 	return nil
@@ -882,7 +886,7 @@ func fetchCryptoScheme(ns walletdb.ReadBucket) (abecryptoxparam.CryptoScheme, er
 
 	buf := bucket.Get(cryptoSchemeName)
 	if len(buf) != 1 {
-		str := "malformed weaker privacy flag stored in database"
+		str := "malformed crypto scheme flag stored in database"
 		return 0, managerError(ErrDatabase, str, nil)
 	}
 
@@ -894,7 +898,7 @@ func putPrivacyLevel(ns walletdb.ReadWriteBucket, privacyLevel abecryptoxkey.Pri
 	bucket := ns.NestedReadWriteBucket(mainBucketName)
 
 	if err := bucket.Put(privacyLevelName, []byte{byte(privacyLevel)}); err != nil {
-		str := "failed to store weaker privacy flag"
+		str := "failed to store privacy flag"
 		return managerError(ErrDatabase, str, err)
 	}
 	return nil
@@ -906,7 +910,7 @@ func fetchPrivacyLevel(ns walletdb.ReadBucket) (abecryptoxkey.PrivacyLevel, erro
 
 	buf := bucket.Get(privacyLevelName)
 	if len(buf) != 1 {
-		str := "malformed weaker privacy flag stored in database"
+		str := "malformed privacy flag stored in database"
 		return 0, managerError(ErrDatabase, str, nil)
 	}
 

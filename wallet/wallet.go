@@ -2062,11 +2062,7 @@ func (w *Wallet) reliablyPublishTransaction(tx *wire.MsgTxAbe,
 			return err
 		}
 
-		if w.RecordRequestFlag {
-			if requestHash == nil {
-				log.Warnf("request hash is nil but the record request flag is enabled")
-				return errors.New("request hash is nil but the record request flag is enabled")
-			}
+		if w.RecordRequestFlag && requestHash != nil {
 			txmgrNs := dbTx.ReadWriteBucket(wtxmgrNamespaceKey)
 			err = w.TxStore.PutRequestHashAndTxHash(txmgrNs, requestHash.String(), hash.String())
 			if err != nil {

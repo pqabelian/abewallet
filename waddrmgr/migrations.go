@@ -335,8 +335,12 @@ func populateIdxAddrBucket(addrMgr walletdb.ReadWriteBucket) error {
 func populatePrivacyLevel(addrMgr walletdb.ReadWriteBucket) error {
 	mainBucket := addrMgr.NestedReadWriteBucket(mainBucketName)
 
+	if err := mainBucket.Put(cryptoSchemeName, []byte{0}); err != nil {
+		str := "failed to populate crypto scheme"
+		return managerError(ErrDatabase, str, err)
+	}
 	if err := mainBucket.Put(privacyLevelName, []byte{0}); err != nil {
-		str := "failed to store weaker privacy flag"
+		str := "failed to populate privacy flag"
 		return managerError(ErrDatabase, str, err)
 	}
 

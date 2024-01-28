@@ -632,7 +632,7 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 			currentUtxo := &eligible[nextUTXOIdx]
 			nextUTXOIdx++
 
-			if privacyLevel == abecryptoxkey.PrivacyLevelRINGCT {
+			if privacyLevel == abecryptoxkey.PrivacyLevelRINGCT || privacyLevel == abecryptoxkey.PrivacyLevelRINGCTPre {
 				inForRing++
 				inRingSize = append(inRingSize, currentUtxo.RingSize)
 			} else if privacyLevel == abecryptoxkey.PrivacyLevelPSEUDONYM {
