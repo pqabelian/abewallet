@@ -215,8 +215,9 @@ type AUTCoin struct {
 	Spent         bool
 }
 
-func NewAUTCoin(autName []byte, isAUTRootCoin bool, autCoinValue uint64, addrKey []byte) *AUTCoin {
+func NewAUTCoin(outpoint wire.OutPointAbe, autName []byte, isAUTRootCoin bool, autCoinValue uint64, addrKey []byte) *AUTCoin {
 	return &AUTCoin{
+		TxOutput:      outpoint,
 		AUTName:       autName,
 		IsAUTRootCoin: isAUTRootCoin,
 		AUTCoinValue:  autCoinValue,
@@ -235,9 +236,23 @@ func (utxo *AUTCoin) Deserialize(op *wire.OutPointAbe, v []byte) error {
 	}
 	utxo.TxOutput.TxHash = op.TxHash
 	utxo.TxOutput.Index = op.Index
+
 	offset := 0
-	autNameSize := int(v[offset])
+	txHash, _ := chainhash.NewHash(v[offset : offset+chainhash.HashSize])
+	offset += chainhash.HashSize
+	if !op.TxHash.IsEqual(txHash) {
+		str := "unmatched aut coin with outpoint"
+		return fmt.Errorf(str)
+	}
+	index := v[offset]
 	offset += 1
+	if index != op.Index {
+		str := "unmatched aut coin with outpoint"
+		return fmt.Errorf(str)
+	}
+
+	autNameSize := int(byteOrder.Uint32(v[offset:]))
+	offset += 4
 	utxo.AUTName = v[offset : offset+autNameSize]
 	offset += autNameSize
 
@@ -252,8 +267,8 @@ func (utxo *AUTCoin) Deserialize(op *wire.OutPointAbe, v []byte) error {
 	utxo.AUTCoinValue = byteOrder.Uint64(v[offset : offset+8])
 	offset += 8
 
-	addrKeySize := int(v[offset])
-	offset += 1
+	addrKeySize := int(byteOrder.Uint32(v[offset:]))
+	offset += 4
 	utxo.AddrKey = v[offset : offset+addrKeySize]
 	offset += addrKeySize
 
@@ -1416,13 +1431,12 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 		}
 
 		for j := 0; j < len(consumedAUTCoin); j++ {
-			err = spendAUTCoin(txMgrNs, consumedAUTCoin[j])
+			err = spendAUTCoin(txMgrNs, autTx.AUTName(), consumedAUTCoin[j])
 			if err != nil {
 				return err
 			}
 		}
 
-		autCoins := make([]*AUTCoin, 0, len(txi.TxOuts))
 		// traverse all outputs of a transaction and check if it is ours
 		for j := 0; j < len(txi.TxOuts); j++ {
 			valid, v, addrKey, addrIdx, err := s.ReceiveTxo(txi.TxOuts[j], addrMgrNs)
@@ -1447,7 +1461,11 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 
 				if autTx != nil && j < len(autTx.Outs()) {
 					isAUTRootCoin := autTx.Type() == aut.Registration || autTx.Type() == aut.ReRegistration
-					autCoins = append(autCoins, NewAUTCoin(autTx.AUTName(), isAUTRootCoin, autTx.Value(uint8(j)), addrKey))
+
+					err = putRawAUTCoin(txMgrNs, autTx.AUTName(), canonicalOutPointAbe(k.TxHash, k.Index), valueAUTCoin(NewAUTCoin(k, autTx.AUTName(), isAUTRootCoin, autTx.Value(uint8(j)), addrKey)))
+					if err != nil {
+						return err
+					}
 					tmp.IsAUTCoin = true
 				}
 			}
@@ -3087,25 +3105,29 @@ func (s *Store) UnspentOutputsAUT(ns walletdb.ReadBucket, autName []byte) ([]AUT
 	unspent := make([]AUTCoin, 0)
 
 	var op wire.OutPointAbe
-	err := ns.NestedReadBucket(bucketAUTEntry).NestedReadBucket(autName).ForEach(func(k, v []byte) error {
-		err := readCanonicalOutPointAbe(k, &op)
+	autEntryBucket := ns.NestedReadBucket(bucketAUTEntry)
+	autBucket := autEntryBucket.NestedReadBucket(autName)
+	if autBucket != nil {
+		err := autBucket.ForEach(func(k, v []byte) error {
+			err := readCanonicalOutPointAbe(k, &op)
+			if err != nil {
+				return err
+			}
+			ust := new(AUTCoin)
+			err = ust.Deserialize(&op, v)
+			if err != nil {
+				return err
+			}
+			unspent = append(unspent, *ust)
+			return nil
+		})
 		if err != nil {
-			return err
+			if _, ok := err.(Error); ok {
+				return nil, err
+			}
+			str := "failed iterating unspent aut bucket"
+			return nil, storeError(ErrDatabase, str, err)
 		}
-		ust := new(AUTCoin)
-		err = ust.Deserialize(&op, v)
-		if err != nil {
-			return err
-		}
-		unspent = append(unspent, *ust)
-		return nil
-	})
-	if err != nil {
-		if _, ok := err.(Error); ok {
-			return nil, err
-		}
-		str := "failed iterating unspent aut bucket"
-		return nil, storeError(ErrDatabase, str, err)
 	}
 
 	//	todo(ABE): For ABE, only the Txos confirmed by blocks and contained in some ring are spentable.

@@ -3,6 +3,7 @@ package wtxmgr
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/chainhash"
@@ -861,6 +862,49 @@ func deleteBlockInput(ns walletdb.ReadWriteBucket, k []byte) error {
 }
 
 // block height || block hash -> version + []UnspentTXO 【txhash + index + amount + generationTime + ringhash】
+func valueAUTCoin(coin *AUTCoin) []byte {
+	res := make([]byte, chainhash.HashSize+1+4+len(coin.AUTName)+1+8+4+len(coin.AddrKey)+1)
+
+	offset := 0
+	copy(res[offset:], coin.TxOutput.TxHash[:])
+	offset += chainhash.HashSize
+	res[offset] = coin.TxOutput.Index
+	offset += 1
+
+	byteOrder.PutUint32(res[offset:], uint32(len(coin.AUTName)))
+	offset += 4
+	copy(res[offset:], coin.AUTName)
+	offset += len(coin.AUTName)
+
+	//_ = coin.IsAUTRootCoin //  byte 1
+	if coin.IsAUTRootCoin {
+		res[offset] = 1
+	} else {
+		res[offset] = 0
+	}
+	offset += 1
+
+	//_ = coin.AUTCoinValue  //   8
+	byteOrder.PutUint64(res[offset:], coin.AUTCoinValue)
+	offset += 8
+
+	byteOrder.PutUint32(res[offset:], uint32(len(coin.AddrKey)))
+	offset += 4
+	copy(res[offset:], coin.AddrKey)
+	offset += len(coin.AddrKey)
+
+	//_ = coin.Spent         //   byte 1
+	if coin.Spent {
+		res[offset] = 1
+	} else {
+		res[offset] = 0
+	}
+	offset += 1
+
+	return res
+}
+
+// block height || block hash -> version + []UnspentTXO 【txhash + index + amount + generationTime + ringhash】
 func valueImmaturedCoinbaseOutput(immatured map[wire.OutPointAbe]*UnspentUTXO) []byte {
 	//res := make([]byte, len(immatured)*(32+1+8+8+32))
 	res := make([]byte, len(immatured)*(4+4+32+1+8+1+8+32+1)) // todo: should not use hard codes. and the version field is the same so it can be optimized
@@ -1073,16 +1117,35 @@ func deleteMaturedOutput(ns walletdb.ReadWriteBucket, k []byte) error {
 	return nil
 }
 
-func spendAUTCoin(ns walletdb.ReadWriteBucket, k []byte) error {
+// bucketAUTEntry:[autName -> [outpoint->aut coins]
+func spendAUTCoin(ns walletdb.ReadWriteBucket, autName []byte, k []byte) error {
 	autEntryBucket := ns.NestedReadWriteBucket(bucketAUTEntry)
-	v := autEntryBucket.Get(k)
+	autBucket := autEntryBucket.NestedReadWriteBucket(autName)
+	if autBucket == nil {
+		return errors.New("non-exist aut bucket with specified aut name")
+	}
+	v := autBucket.Get(k)
 	if len(v) == 0 {
 		return nil
 	}
-	v[len(v)-1] = 1
-	err := autEntryBucket.Put(k, v)
+	newv := make([]byte, len(v))
+	for i := 0; i < len(newv)-1; i++ {
+		newv[i] = v[i]
+	}
+	newv[len(newv)-1] = 1
+	err := autBucket.Put(k, newv)
 	if err != nil {
 		str := "failed to delete unspent output"
+		return storeError(ErrDatabase, str, err)
+	}
+	return nil
+}
+func putRawAUTCoin(ns walletdb.ReadWriteBucket, autName []byte, k, v []byte) error {
+	autEntryBucket := ns.NestedReadWriteBucket(bucketAUTEntry)
+	autBucket, err := autEntryBucket.CreateBucketIfNotExists(autName)
+	err = autBucket.Put(k, v)
+	if err != nil {
+		str := "failed to put immature coinbase output"
 		return storeError(ErrDatabase, str, err)
 	}
 	return nil

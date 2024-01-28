@@ -122,7 +122,8 @@ var rpcHandlers = map[string]struct {
 	"sendtoaddressesabe":       {handler: sendToAddressesAbe},
 	"registeraut":              {handler: registerAUTTransaction},
 	"issueaut":                 {handler: issueAUTTransaction},
-	"sendtoaddressabeaut":      {handler: sendToAddressesAbeAUT},
+	"reregisteraut":            {handler: reRegisterAUTTransaction},
+	"transferaut":              {handler: transferAUT},
 	"generateaddressabe":       {handler: generateAddressAbe},
 	"addressmaxsequencenumber": {handler: addressMaxSequenceNumber},
 	"addressrange":             {handler: addressRange},
@@ -1348,27 +1349,6 @@ func sendAddressAbeAUT(w *wallet.Wallet, autTransaction aut.Transaction, amounts
 	if err != nil {
 		return "", err
 	}
-	switch autTx := autTransaction.(type) {
-	case *aut.RegistrationTx:
-		autTx.IssuerTokens = make([][]byte, 0, len(outputDescs))
-		for i := 0; i < len(outputDescs); i++ {
-			autTx.IssuerTokens = append(autTx.IssuerTokens, outputDescs[i].CryptoAddress())
-		}
-	case *aut.ReRegistrationTx:
-		autTx.IssuerTokens = make([][]byte, 0, len(outputDescs))
-		for i := 0; i < len(outputDescs); i++ {
-			autTx.IssuerTokens = append(autTx.IssuerTokens, outputDescs[i].CryptoAddress())
-		}
-	case *aut.MintTx:
-		// nothing to do
-	case *aut.TransferTx:
-		// nothing to do
-	case *aut.BurnTx:
-		return "", errors.New("unimplemented feature")
-	default:
-		return "", errors.New("unsupported aut transaction type")
-	}
-
 	tx, err := w.SendOutputsAUT(autTransaction, outputDescs, minconf, feePerKbSpecified, autIssueTokenThreshold, autIssueUpdateThreshold)
 	if err != nil {
 		if err == txrules.ErrAmountNegative {
@@ -1653,10 +1633,21 @@ func registerAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, er
 	// according command to  build the output
 	// unique issuer token check
 	existIssuerToken := map[string]struct{}{}
+	issuerTokens := make([][]byte, 0, len(cmd.IssuerTokens))
 	for i := 0; i < len(cmd.IssuerTokens); i++ {
 		if _, ok := existIssuerToken[cmd.IssuerTokens[i]]; !ok {
 			existIssuerToken[cmd.IssuerTokens[i]] = struct{}{}
 		}
+		instanceAddress, err := hex.DecodeString(cmd.IssuerTokens[i])
+		if err != nil {
+			return nil, fmt.Errorf("%d-th issuer token can not be decoded", i)
+		}
+		err = checkValidAddress(instanceAddress, w.ChainParams())
+		if err != nil {
+			return nil, err
+		}
+		cryptoAddress := instanceAddress[1 : len(instanceAddress)-32]
+		issuerTokens = append(issuerTokens, cryptoAddress)
 	}
 	if len(existIssuerToken) != len(cmd.IssuerTokens) {
 		return nil, errors.New("issuer token can not contain duplicate one")
@@ -1677,39 +1668,75 @@ func registerAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, er
 		}
 	}
 
-	var autTransaction aut.Transaction
-	if cmd.AUTType == "register" {
-		autTransaction = &aut.RegistrationTx{
-			AutName:               []byte(cmd.AUTName),
-			IssuerTokens:          nil, // will be populated later
-			ExpireHeight:          cmd.ExpireHeight,
-			IssueTokensThreshold:  cmd.IssuerTokenThreshold,
-			IssuerUpdateThreshold: cmd.IssuerUpdateThreshold,
-			OutAutRootCoinNum:     uint8(len(outputs)),
-			AutMemo:               []byte{},
-			PlannedTotalAmount:    cmd.PlannedTotalAmount,
-			UnitName:              []byte(cmd.UnitName),
-			MinUnitName:           []byte(cmd.MinUnitName),
-			UnitScale:             cmd.UnitScale,
-		}
-		return sendAddressAbeAUT(w, autTransaction, outputs, 0, txrules.DefaultRelayFeePerKb, 0, 0)
-	} else if cmd.AUTType == "reregister" {
-		autTransaction = &aut.ReRegistrationTx{
-			Name:                  []byte(cmd.AUTName),
-			IssuerTokens:          nil, // will be populated later
-			ExpireHeight:          cmd.ExpireHeight,
-			IssuerUpdateThreshold: cmd.IssuerTokenThreshold,
-			IssueTokensThreshold:  cmd.IssuerUpdateThreshold,
-			InAutRootCoinNum:      0, // will be populated
-			OutAutRootCoinNum:     uint8(len(outputs)),
-			Memo:                  []byte{},
-			PlannedTotalAmount:    cmd.PlannedTotalAmount,
-			UnitScale:             cmd.UnitScale,
-		}
-		return sendAddressAbeAUT(w, autTransaction, outputs, 0, txrules.DefaultRelayFeePerKb, 0, cmd.AUTIssuerUpdateThreshold)
-	} else {
-		return nil, errors.New("unsupported aut type")
+	autTransaction := &aut.RegistrationTx{
+		AutName:               []byte(cmd.AUTName),
+		IssuerTokens:          issuerTokens, // will be populated later
+		ExpireHeight:          cmd.ExpireHeight,
+		IssueTokensThreshold:  cmd.IssuerTokenThreshold,
+		IssuerUpdateThreshold: cmd.IssuerUpdateThreshold,
+		OutAutRootCoinNum:     uint8(len(outputs)),
+		AutMemo:               []byte{},
+		PlannedTotalAmount:    cmd.PlannedTotalAmount,
+		UnitName:              []byte(cmd.UnitName),
+		MinUnitName:           []byte(cmd.MinUnitName),
+		UnitScale:             cmd.UnitScale,
 	}
+	return sendAddressAbeAUT(w, autTransaction, outputs, 0, txrules.DefaultRelayFeePerKb, 0, 0)
+}
+
+func reRegisterAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.ReRegisterAUTTransactionCmd)
+	// according command to  build the output
+	// unique issuer token check
+	existIssuerToken := map[string]struct{}{}
+	issuerTokens := make([][]byte, 0, len(cmd.IssuerTokens))
+	for i := 0; i < len(cmd.IssuerTokens); i++ {
+		if _, ok := existIssuerToken[cmd.IssuerTokens[i]]; !ok {
+			existIssuerToken[cmd.IssuerTokens[i]] = struct{}{}
+		}
+		instanceAddress, err := hex.DecodeString(cmd.IssuerTokens[i])
+		if err != nil {
+			return nil, fmt.Errorf("%d-th issuer token can not be decoded", i)
+		}
+		err = checkValidAddress(instanceAddress, w.ChainParams())
+		if err != nil {
+			return nil, err
+		}
+		cryptoAddress := instanceAddress[1 : len(instanceAddress)-32]
+		issuerTokens = append(issuerTokens, cryptoAddress)
+	}
+	if len(existIssuerToken) != len(cmd.IssuerTokens) {
+		return nil, errors.New("issuer token can not contain duplicate one")
+	}
+	if len(cmd.IssuerTokens) < int(cmd.IssuerTokenThreshold) {
+		return nil, errors.New("the number of issuer token must more than the issue threshold")
+	}
+	if len(cmd.IssuerTokens) < int(cmd.IssuerUpdateThreshold) {
+		return nil, errors.New("the number of issuer token must more than the update threshold")
+	}
+	outputs := make([]abejson.Pair, 0, cmd.IssuerTimes*len(cmd.IssuerTokens))
+	for i := 0; i < len(cmd.IssuerTokens); i++ {
+		for j := 0; j < cmd.IssuerTimes; j++ {
+			outputs = append(outputs, abejson.Pair{
+				Address: cmd.IssuerTokens[i],
+				Amount:  1,
+			})
+		}
+	}
+
+	autTransaction := &aut.ReRegistrationTx{
+		Name:                  []byte(cmd.AUTName),
+		IssuerTokens:          issuerTokens,
+		ExpireHeight:          cmd.ExpireHeight,
+		IssuerUpdateThreshold: cmd.IssuerTokenThreshold,
+		IssueTokensThreshold:  cmd.IssuerUpdateThreshold,
+		InAutRootCoinNum:      0, // will be populated
+		OutAutRootCoinNum:     uint8(len(outputs)),
+		Memo:                  []byte{},
+		PlannedTotalAmount:    cmd.PlannedTotalAmount,
+		UnitScale:             cmd.UnitScale,
+	}
+	return sendAddressAbeAUT(w, autTransaction, outputs, 0, txrules.DefaultRelayFeePerKb, 0, cmd.AUTIssuerUpdateThreshold)
 }
 
 func issueAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
@@ -1726,26 +1753,21 @@ func issueAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error
 		txoValues = append(txoValues, cmd.Outputs[i].Value)
 	}
 
-	var autTransaction aut.Transaction
-	if cmd.AUTType == "mint" {
-		autTransaction = &aut.MintTx{
-			Name:             []byte(cmd.AUTName),
-			InAutRootCoinNum: 0, // will be populated later
-			OutAutCoinNum:    uint8(len(cmd.Outputs)),
-			TxoAUTValues:     txoValues,
-			Memo:             []byte{},
-		}
-	} else {
-		return nil, errors.New("unsupported aut type")
+	autTransaction := &aut.MintTx{
+		Name:             []byte(cmd.AUTName),
+		InAutRootCoinNum: 0, // will be populated later
+		OutAutCoinNum:    uint8(len(cmd.Outputs)),
+		TxoAUTValues:     txoValues,
+		Memo:             []byte{},
 	}
 	return sendAddressAbeAUT(w, autTransaction, outputs, 0, txrules.DefaultRelayFeePerKb, cmd.AUTIssueThreshold, 0)
 }
 
-func sendToAddressesAbeAUT(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+func transferAUT(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.TransferAUTTransactionCmd)
 	// according command to  build the output
-	outputs := make([]abejson.Pair, 0)
-	txoValues := make([]uint64, 0, len(cmd.Outputs))
+	outputs := make([]abejson.Pair, 0, len(cmd.Outputs)+1)
+	txoValues := make([]uint64, 0, len(cmd.Outputs)+1)
 	for i := 0; i < len(cmd.Outputs); i++ {
 		outputs = append(outputs, abejson.Pair{
 			Address: cmd.Outputs[i].Address,
@@ -1753,19 +1775,17 @@ func sendToAddressesAbeAUT(icmd interface{}, w *wallet.Wallet) (interface{}, err
 		})
 		txoValues = append(txoValues, cmd.Outputs[i].Value)
 	}
-	var autTransaction aut.Transaction
-	if cmd.AUTType == "transfer" {
-		autTransaction = &aut.TransferTx{
-			Name:          []byte(cmd.AUTName),
-			InAutCoinNum:  0, // will be populated later
-			OutAutCoinNum: uint8(len(cmd.Outputs)),
-			TxoAUTValues:  txoValues,
-			Memo:          []byte{},
-		}
-	} else if cmd.AUTType == "burn" {
-		return nil, errors.New("unimplemented feature")
-	} else {
-		return nil, errors.New("unsupported aut type")
+	outputs = append(outputs, abejson.Pair{
+		Address: cmd.AUTChangeAddress,
+		Amount:  float64(1),
+	})
+	txoValues = append(txoValues, 0)
+	autTransaction := &aut.TransferTx{
+		Name:          []byte(cmd.AUTName),
+		InAutCoinNum:  0, // will be populated later
+		OutAutCoinNum: uint8(len(cmd.Outputs)),
+		TxoAUTValues:  txoValues,
+		Memo:          []byte{},
 	}
 	return sendAddressAbeAUT(w, autTransaction, outputs, 0, txrules.DefaultRelayFeePerKb, 0, 0)
 }
