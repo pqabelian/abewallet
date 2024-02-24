@@ -1006,16 +1006,30 @@ func (w *Wallet) ChangePassphrases(publicOld, publicNew, privateOld,
 // the balance will be calculated based on how many how many blocks
 // include a UTXO.
 
-func (w *Wallet) CalculateBalance(confirms int32) ([]abeutil.Amount, error) {
+func (w *Wallet) CalculateBalance(confirms int32) ([]abeutil.Amount, []map[string]uint64, []map[string]uint64, error) {
 	var balances []abeutil.Amount
+	var autRootCoinNums, autBalances []map[string]uint64
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		var err error
 		blk := w.Manager.SyncedTo()
 		balances, err = w.TxStore.Balance(txmgrNs, confirms, blk.Height)
-		return err
+		if err != nil {
+			return err
+		}
+
+		autRootCoinNums, err = w.TxStore.AUTRootCoinNum(txmgrNs, confirms, blk.Height)
+		if err != nil {
+			return err
+		}
+		autBalances, err = w.TxStore.AUTBalance(txmgrNs, confirms, blk.Height)
+		if err != nil {
+			return err
+		}
+
+		return nil
 	})
-	return balances, err
+	return balances, autRootCoinNums, autBalances, err
 }
 
 func (w *Wallet) FetchUnmatruedUTXOSet() ([]wtxmgr.UnspentUTXO, error) {

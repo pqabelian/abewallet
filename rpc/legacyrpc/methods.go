@@ -346,9 +346,10 @@ func getBalances(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	currentTime := time.Now().String()
 	bs := w.Manager.SyncedTo()
 	var balances []abeutil.Amount
+	var autRootCoinNums, autBalances []map[string]uint64
 	//var needUpdateNum int
 	var err error
-	balances, err = w.CalculateBalance(int32(*cmd.Minconf))
+	balances, autRootCoinNums, autBalances, err = w.CalculateBalance(int32(*cmd.Minconf))
 	if err != nil {
 		return nil, err
 	}
@@ -361,22 +362,36 @@ func getBalances(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 		ImmatureCBBalance  float64 `json:"immature_cb_balance"`
 		ImmatureTRBalance  float64 `json:"immature_tr_balance"`
 		UnconfirmedBalance float64 `json:"unconfirmed_balance"`
+
+		AUTRootCoinNums          map[string]uint64 `json:"aut_root_coin_numes"`
+		AUTImmatureRootCoinNums  map[string]uint64 `json:"aut_immature_root_coin_numes"`
+		AUTSpendableRootCoinNums map[string]uint64 `json:"aut_spendable_root_coin_numes"`
+		UnconfirmedRootCoinNums  map[string]uint64 `json:"aut_unconfirmed_root_coin_numes"`
+
+		AUTBalances            map[string]uint64 `json:"aut_balances"`
+		AUTImmatureBalances    map[string]uint64 `json:"aut_immature_balances"`
+		AUTSpendableBalances   map[string]uint64 `json:"aut_spendable_balances"`
+		AUTUnconfirmedBalances map[string]uint64 `json:"aut_unconfirmed_balances"`
 	}
 	res := &tt{
-		CurrentTime:        currentTime,
-		CurrentHeight:      bs.Height,
-		CurrentBlockHash:   bs.Hash.String(),
-		TotalBalance:       balances[0].ToABE(),
-		SpendableBalance:   balances[1].ToABE(),
-		ImmatureCBBalance:  balances[2].ToABE(),
-		ImmatureTRBalance:  balances[3].ToABE(),
-		UnconfirmedBalance: balances[4].ToABE(),
+		CurrentTime:              currentTime,
+		CurrentHeight:            bs.Height,
+		CurrentBlockHash:         bs.Hash.String(),
+		TotalBalance:             balances[0].ToABE(),
+		SpendableBalance:         balances[1].ToABE(),
+		ImmatureCBBalance:        balances[2].ToABE(),
+		ImmatureTRBalance:        balances[3].ToABE(),
+		UnconfirmedBalance:       balances[4].ToABE(),
+		AUTRootCoinNums:          autRootCoinNums[0],
+		AUTImmatureRootCoinNums:  autRootCoinNums[1],
+		AUTSpendableRootCoinNums: autRootCoinNums[2],
+		UnconfirmedRootCoinNums:  autRootCoinNums[3],
+		AUTBalances:              autBalances[0],
+		AUTSpendableBalances:     autBalances[1],
+		AUTImmatureBalances:      autBalances[2],
+		AUTUnconfirmedBalances:   autBalances[3],
 	}
-	marshal, err := json.Marshal(res)
-	if err != nil {
-		return nil, err
-	}
-	return string(marshal), nil
+	return res, nil
 }
 
 // getDetailedUtxos is a temporary command for convenience of test.
@@ -432,7 +447,10 @@ func getInfo(icmd interface{}, w *wallet.Wallet, chainClient *chain.RPCClient) (
 	}
 	// TODO(abe):need add the update number into result struct
 	//bal, err := w.CalculateBalance(1)  // switch to calculateBalanceAbe
-	bal, err := w.CalculateBalance(1)
+	balances, autRootCoinNums, autBalances, err := w.CalculateBalance(1)
+	if err != nil {
+		return nil, err
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -440,7 +458,9 @@ func getInfo(icmd interface{}, w *wallet.Wallet, chainClient *chain.RPCClient) (
 	// TODO(davec): This should probably have a database version as opposed
 	// to using the manager version.
 	info.WalletVersion = int32(waddrmgr.LatestMgrVersion)
-	info.Balance = bal[1].ToABE()
+	info.Balance = balances[1].ToABE()
+	info.AUTBalances = autBalances[0]
+	info.AUTRootCoins = autRootCoinNums[0]
 	info.PaytxFee = float64(txrules.DefaultRelayFeePerKb)
 	// We don't set the following since they don't make much sense in the
 	// wallet architecture:

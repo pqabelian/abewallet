@@ -3,7 +3,6 @@ package wtxmgr
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/chainhash"
@@ -73,7 +72,9 @@ var (
 	bucketSpentButUnmined         = []byte("spentbutumined")
 	bucketSpentConfirmed          = []byte("spentconfirmed")
 
-	bucketAUTEntry = []byte("autentry")
+	//bucketAUTEntry = []byte("autentry") // autname -> autentry [outpoint -> aut coin]
+
+	bucketAUTPoint = []byte("autpoint") // outpoint -> aut coin
 
 	bucketUTXORing    = []byte("utxoring")
 	bucketRingDetails = []byte("utxoringdetails") //TODO(abe):we should add a block height in database, meaning that the txo in ring had consumed completely .
@@ -96,6 +97,18 @@ var (
 	rootImmatureTransferBalance = []byte("immaturetrbal")  // immature transfer balance
 	rootUnconfirmedBalance      = []byte("unconfirmedbal") // spendable balance
 	rootFreezedBalance          = []byte("freezedbal")     // freeze balance
+
+	rootAUTBalance                = []byte("autbal")              // total balance for aut
+	rootAUTImmatureRootCoinNum    = []byte("autimmaturecbnum")    // immature transfer balance for aut
+	rootAUTSpendableRootCoinNum   = []byte("autspendablecbnum")   // spendable balance for aut
+	rootAUTUnconfirmedRootCoinNum = []byte("autunconfirmedcbnum") // spendable balance for aut
+
+	rootAUTRootCoinNum             = []byte("autcbnum")          // total balance for aut
+	rootAUTImmatureTransferBalance = []byte("autimmaturetrbal")  // immature transfer balance for aut
+	rootAUTSpendableBalance        = []byte("autspendablebal")   // spendable balance for aut
+	rootAUTUnconfirmedBalance      = []byte("autunconfirmedbal") // spendable balance for aut
+
+	rootAUTFreezedBalance = []byte("autfreezedbal") // freeze balance for aut, this type balance for aut is not supported now
 )
 
 // The root bucket's mined balance k/v pair records the total balance for all
@@ -986,10 +999,10 @@ func deleteImmaturedCoinbaseOutput(ns walletdb.ReadWriteBucket, k []byte) error 
 	return nil
 }
 
-// block height || block hash -> []UnspentTXO 【txhash + index + amount + generationTime + ringhash】
+// block height || block hash -> []UnspentTXO 【txhash + index + amount + generationTime + ringhash + application_flags 】
 func valueImmaturedOutput(immatured map[wire.OutPointAbe]*UnspentUTXO) []byte {
 	//res := make([]byte, len(immatured)*(32+1+8+8+32))
-	res := make([]byte, len(immatured)*(4+4+32+1+8+1+8+32+1)) // todo: should not use hard code
+	res := make([]byte, len(immatured)*(4+4+32+1+8+1+8+32+1+1)) // todo: should not use hard code
 	offset := 0
 	for _, utxo := range immatured {
 		byteOrder.PutUint32(res[offset:offset+4], utxo.Version)
@@ -1010,7 +1023,14 @@ func valueImmaturedOutput(immatured map[wire.OutPointAbe]*UnspentUTXO) []byte {
 		offset += 32
 
 		res[offset] = utxo.RingSize
+		offset += 1
 
+		flagBits := byte(0)
+		if utxo.IsAUTCoin {
+			flagBits |= 1
+		}
+		res[offset] = flagBits
+		offset += 1
 	}
 	return res
 }
@@ -1050,6 +1070,13 @@ func fetchImmaturedOutput(ns walletdb.ReadBucket, height int32, hash chainhash.H
 		offset += 32
 
 		tmp.RingSize = v[offset]
+		offset += 1
+
+		t := v[offset]
+		offset += 1
+		if t&1 == 1 {
+			tmp.IsAUTCoin = true
+		}
 
 		op[tmp.TxOutput] = tmp
 	}
@@ -1069,18 +1096,23 @@ func deleteImmaturedOutput(ns walletdb.ReadWriteBucket, k []byte) error {
 	return nil
 }
 
-func valueMaturedOutput(fromCoinBase bool, height int32, amount int64, generationTime time.Time, ringHash chainhash.Hash) []byte {
+func valueMaturedOutput(fromCoinBase bool, isAUTCoin bool, height int32, amount int64, generationTime time.Time, ringHash chainhash.Hash) []byte {
 	size := 4 + 1 + 8 + 8 + 32
 	v := make([]byte, size)
 	offset := 0
 	byteOrder.PutUint32(v[offset:offset+4], uint32(height))
 	offset += 4
+
+	flagBits := byte(0)
 	if fromCoinBase {
-		v[offset] = byte(1)
-	} else {
-		v[offset] = byte(0)
+		flagBits |= 1
 	}
+	if isAUTCoin {
+		flagBits |= 2
+	}
+	v[offset] = flagBits
 	offset += 1
+
 	byteOrder.PutUint64(v[offset:offset+8], uint64(amount))
 	offset += 8
 	byteOrder.PutUint64(v[offset:offset+8], uint64(generationTime.Unix()))
@@ -1117,43 +1149,9 @@ func deleteMaturedOutput(ns walletdb.ReadWriteBucket, k []byte) error {
 	return nil
 }
 
-// bucketAUTEntry:[autName -> [outpoint->aut coins]
-func spendAUTCoin(ns walletdb.ReadWriteBucket, autName []byte, k []byte) error {
-	autEntryBucket := ns.NestedReadWriteBucket(bucketAUTEntry)
-	autBucket := autEntryBucket.NestedReadWriteBucket(autName)
-	if autBucket == nil {
-		return errors.New("non-exist aut bucket with specified aut name")
-	}
-	v := autBucket.Get(k)
-	if len(v) == 0 {
-		return nil
-	}
-	newv := make([]byte, len(v))
-	for i := 0; i < len(newv)-1; i++ {
-		newv[i] = v[i]
-	}
-	newv[len(newv)-1] = 1
-	err := autBucket.Put(k, newv)
-	if err != nil {
-		str := "failed to delete unspent output"
-		return storeError(ErrDatabase, str, err)
-	}
-	return nil
-}
-func putRawAUTCoin(ns walletdb.ReadWriteBucket, autName []byte, k, v []byte) error {
-	autEntryBucket := ns.NestedReadWriteBucket(bucketAUTEntry)
-	autBucket, err := autEntryBucket.CreateBucketIfNotExists(autName)
-	err = autBucket.Put(k, v)
-	if err != nil {
-		str := "failed to put immature coinbase output"
-		return storeError(ErrDatabase, str, err)
-	}
-	return nil
-}
-
 // UnspentTXO: store the relevant output which is unspent by current wallet
 // its key is transaction hash with the output index
-// its value is relevant information : From height,Fromcoinbase,amount,generation time, rinhash
+// its value is relevant information : From height,Fromcoinbase|isAUTCoin,amount,generation time, rinhash
 func valueUnspentTXO(fromCoinBase bool, isAUTCoin bool, version uint32, height int32, amount uint64, index uint8, generationTime time.Time, ringHash chainhash.Hash, ringSize uint8) []byte {
 	size := 4 + 4 + 1 + 8 + 1 + 8 + 32 + 1
 	//	todo: should use HashSize, rather than 32
@@ -1388,9 +1386,35 @@ func ConfirmSpentTXO(ns walletdb.ReadWriteBucket, txHash chainhash.Hash, index u
 	if err != nil {
 		return err
 	}
+
+	autRootCoinNums, err := fetchAUTRootCoinNum(ns)
+	if err != nil {
+		return err
+	}
+	autSpendableRootCoinNums, err := fetchAUTSpenableRootCoinNum(ns)
+	if err != nil {
+		return err
+	}
+	autBals, err := fetchAUTMinedBalance(ns)
+	if err != nil {
+		return err
+	}
+	autSpendableBals, err := fetchAUTSpenableBalance(ns)
+	if err != nil {
+		return err
+	}
 	// if this output is in unspent txo bucket
 	v := existsRawMaturedOutput(ns, k)
 	if v != nil { //from the MaturedOutput
+		utxo := &UnspentUTXO{}
+		err = utxo.Deserialize(&wire.OutPointAbe{
+			TxHash: txHash,
+			Index:  index,
+		}, v)
+		if err != nil {
+			return err
+		}
+
 		//otherwise it has been moved to spentButUnmined bucket
 		// update the balances
 		amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
@@ -1405,9 +1429,33 @@ func ConfirmSpentTXO(ns walletdb.ReadWriteBucket, txHash chainhash.Hash, index u
 		if err != nil {
 			return err
 		}
+
+		if utxo.IsAUTCoin {
+			autCoin, err := fetchRawAUTCoin(ns, k)
+			if err != nil {
+				return err
+			}
+			if autCoin.IsAUTRootCoin {
+				autSpendableRootCoinNums[string(autCoin.AUTName)] -= 1
+				autRootCoinNums[string(autCoin.AUTName)] -= 1
+			} else {
+				autSpendableBals[string(autCoin.AUTName)] -= autCoin.AUTCoinValue
+				autBals[string(autCoin.AUTName)] -= autCoin.AUTCoinValue
+			}
+		}
+
 	} else { //from the spentButUnmined bucket
 		v = existsRawSpentButUnminedTXO(ns, k)
 		if v != nil { //otherwise it has been moved to spentButUnmined bucket
+			utxo := &SpentButUnminedTXO{}
+			err = utxo.Deserialize(&wire.OutPointAbe{
+				TxHash: txHash,
+				Index:  index,
+			}, v)
+			if err != nil {
+				return err
+			}
+
 			amt := abeutil.Amount(byteOrder.Uint64(v[5:13]))
 			balance -= amt
 			// freezedBal -= amt
@@ -1418,6 +1466,18 @@ func ConfirmSpentTXO(ns walletdb.ReadWriteBucket, txHash chainhash.Hash, index u
 			err = deleteSpentButUnminedTXO(ns, k)
 			if err != nil {
 				return err
+			}
+
+			if utxo.IsAUTCoin {
+				autCoin, err := fetchRawAUTCoin(ns, k)
+				if err != nil {
+					return err
+				}
+				if autCoin.IsAUTRootCoin {
+					autRootCoinNums[string(autCoin.AUTName)] -= 1
+				} else {
+					autBals[string(autCoin.AUTName)] -= autCoin.AUTCoinValue
+				}
 			}
 		}
 	}
@@ -1430,7 +1490,28 @@ func ConfirmSpentTXO(ns walletdb.ReadWriteBucket, txHash chainhash.Hash, index u
 	if err != nil {
 		return err
 	}
-	return putMinedBalance(ns, balance)
+	err = putMinedBalance(ns, balance)
+	if err != nil {
+		return err
+	}
+	err = putAUTRootCoinNum(ns, autRootCoinNums)
+	if err != nil {
+		return err
+	}
+	err = putAUTSpenableRootCoinNum(ns, autSpendableRootCoinNums)
+	if err != nil {
+		return err
+	}
+	err = putAUTMinedBalance(ns, autBals)
+	if err != nil {
+		return err
+	}
+	err = putAUTSpenableBalance(ns, autSpendableBals)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // All the relevant UTXORing are keyed as such:
@@ -2087,8 +2168,8 @@ func createBuckets(ns walletdb.ReadWriteBucket) error {
 		return storeError(ErrDatabase, str, err)
 	}
 
-	if _, err := ns.CreateBucket(bucketAUTEntry); err != nil {
-		str := "fialed to create aut entry bucket"
+	if _, err := ns.CreateBucket(bucketAUTPoint); err != nil {
+		str := "fialed to create aut point bucket"
 		return storeError(ErrDatabase, str, err)
 	}
 
@@ -2162,8 +2243,8 @@ func deleteBuckets(ns walletdb.ReadWriteBucket) error {
 		return storeError(ErrDatabase, str, err)
 	}
 
-	if err := ns.DeleteNestedBucket(bucketAUTEntry); err != nil {
-		str := "fialed to delete aut entry bucket"
+	if err := ns.DeleteNestedBucket(bucketAUTPoint); err != nil {
+		str := "fialed to delete aut point bucket"
 		return storeError(ErrDatabase, str, err)
 	}
 
