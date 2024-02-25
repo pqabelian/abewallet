@@ -672,6 +672,7 @@ type (
 		autIssueTokenThreshold  uint8
 		autIssueUpdateThreshold uint8
 		resp                    chan createTxAUTResponse
+		utxoSpecified           []string
 	}
 	createTxAUTResponse struct {
 		tx  *txauthor.AuthoredTxAbe
@@ -712,7 +713,7 @@ out:
 				continue
 			}
 
-			tx, err := w.txPqringCTToOutputsMLPAUT(txr.autTransaction, txr.txOutDescs, txr.minconf, txr.feePerKbSpecified, txr.autIssueTokenThreshold, txr.autIssueUpdateThreshold)
+			tx, err := w.txPqringCTToOutputsMLPAUT(txr.autTransaction, txr.txOutDescs, txr.minconf, txr.feePerKbSpecified, txr.autIssueTokenThreshold, txr.autIssueUpdateThreshold, txr.utxoSpecified)
 
 			heldUnlock.release()
 			txr.resp <- createTxAUTResponse{tx, err}
@@ -750,7 +751,7 @@ func (w *Wallet) CreateSimpleTx(outputDescs []*abecryptox.AbeTxOutputDesc, minco
 }
 
 func (w *Wallet) CreateSimpleTxAUT(autTransaction aut.Transaction, outputDescs []*abecryptox.AbeTxOutputDesc, minconf int32,
-	feePerKbSpecified abeutil.Amount, autIssueTokenThreshold uint8, autIssueUpdateThreshold uint8) (*txauthor.AuthoredTxAbe, error) {
+	feePerKbSpecified abeutil.Amount, autIssueTokenThreshold uint8, autIssueUpdateThreshold uint8, utxoSpecified []string) (*txauthor.AuthoredTxAbe, error) {
 
 	req := createTxAUTRequest{
 		autTransaction:          autTransaction,
@@ -760,6 +761,7 @@ func (w *Wallet) CreateSimpleTxAUT(autTransaction aut.Transaction, outputDescs [
 		autIssueTokenThreshold:  autIssueTokenThreshold,
 		autIssueUpdateThreshold: autIssueUpdateThreshold,
 		resp:                    make(chan createTxAUTResponse),
+		utxoSpecified:           utxoSpecified,
 	}
 	w.createTxAUTRequests <- req
 	resp := <-req.resp
@@ -1076,6 +1078,19 @@ func (w *Wallet) FetchSpentAndConfirmedTXOSet() ([]wtxmgr.SpentConfirmedTXO, err
 	})
 	return utxos, err
 }
+
+func (w *Wallet) FetchAUTCoins(autName string, isRootCoin bool) ([]*wtxmgr.AUTCoin, []*wtxmgr.UnspentUTXO, error) {
+	var coins []*wtxmgr.AUTCoin
+	var utxos []*wtxmgr.UnspentUTXO
+	var err error
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		coins, utxos, err = w.TxStore.UnspentOutputsAUT(txmgrNs, []byte(autName), isRootCoin)
+		return err
+	})
+	return coins, utxos, err
+}
+
 func (w *Wallet) FetchConfirmedTxHashs() ([]*chainhash.Hash, error) {
 	var txHashs []*chainhash.Hash
 	var err error
@@ -1944,7 +1959,7 @@ func (w *Wallet) SendOutputs(outputDescs []*abecryptox.AbeTxOutputDesc,
 }
 
 func (w *Wallet) SendOutputsAUT(autTransaction aut.Transaction, outputDescs []*abecryptox.AbeTxOutputDesc,
-	minconf int32, feePerKbSpecified abeutil.Amount, autIssueTokenThreshold uint8, autIssueUpdateThreshold uint8) (*txauthor.AuthoredTxAbe, error) {
+	minconf int32, feePerKbSpecified abeutil.Amount, autIssueTokenThreshold uint8, autIssueUpdateThreshold uint8, utxoSpecified []string) (*txauthor.AuthoredTxAbe, error) {
 	// Ensure the outputs to be created adhere to the network's consensus
 	// rules.
 	for _, txOutDesc := range outputDescs {
@@ -1960,7 +1975,7 @@ func (w *Wallet) SendOutputsAUT(autTransaction aut.Transaction, outputDescs []*a
 	// transaction will be added to the database in order to ensure that we
 	// continue to re-broadcast the transaction upon restarts until it has
 	// been confirmed.
-	createdTx, err := w.CreateSimpleTxAUT(autTransaction, outputDescs, minconf, feePerKbSpecified, autIssueTokenThreshold, autIssueUpdateThreshold)
+	createdTx, err := w.CreateSimpleTxAUT(autTransaction, outputDescs, minconf, feePerKbSpecified, autIssueTokenThreshold, autIssueUpdateThreshold, utxoSpecified)
 	if err != nil {
 		return nil, err
 	}

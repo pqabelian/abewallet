@@ -46,7 +46,7 @@ func (s byAmount) Less(i, j int) bool {
 }
 func (s byAmount) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 
-type byAUTCoinValue []wtxmgr.AUTCoin
+type byAUTCoinValue []*wtxmgr.AUTCoin
 
 func (s byAUTCoinValue) Len() int { return len(s) }
 func (s byAUTCoinValue) Less(i, j int) bool {
@@ -469,7 +469,12 @@ func fetchSpecifiedUTXO(eligible []wtxmgr.UnspentUTXO, utxoSpecified []string) (
 	return selected, nil
 }
 
-func fetchUTXOForAUT(eligible []wtxmgr.UnspentUTXO, eligibleAUT []wtxmgr.AUTCoin) ([]wtxmgr.UnspentUTXO, map[string]wtxmgr.UnspentUTXO, error) {
+func fetchUTXOForAUT(eligible []wtxmgr.UnspentUTXO, eligibleAUT []*wtxmgr.AUTCoin, utxoSpecified []string) ([]wtxmgr.UnspentUTXO, map[string]wtxmgr.UnspentUTXO, error) {
+	utxoSpecifiedMapping := map[string]struct{}{}
+	for i := 0; i < len(utxoSpecified); i++ {
+		utxoSpecifiedMapping[utxoSpecified[i]] = struct{}{}
+	}
+	specified := len(utxoSpecified) != 0
 	outputStrs := make(map[string]struct{}, len(eligibleAUT))
 	for i := 0; i < len(eligibleAUT); i++ {
 		outputStrs[eligibleAUT[i].TxOutput.String()] = struct{}{}
@@ -480,6 +485,9 @@ func fetchUTXOForAUT(eligible []wtxmgr.UnspentUTXO, eligibleAUT []wtxmgr.AUTCoin
 
 	for i := 0; i < len(eligible); i++ {
 		if _, ok := outputStrs[eligible[i].TxOutput.String()]; ok {
+			if _, exist := utxoSpecifiedMapping[eligible[i].Hash().String()]; specified && !exist {
+				continue
+			}
 			utxosforAUT[eligible[i].TxOutput.String()] = eligible[i]
 		} else {
 			remainUTXOs = append(remainUTXOs, eligible[i])
@@ -905,7 +913,8 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 }
 
 func (w *Wallet) txPqringCTToOutputsMLPAUT(autTransaction aut.Transaction, txOutDescs []*abecryptox.AbeTxOutputDesc,
-	minconf int32, feePerKbSpecified abeutil.Amount, autIssueTokenThreshold uint8, autIssueUpdateThreshold uint8) (unsignedTx *txauthor.AuthoredTxAbe, err error) {
+	minconf int32, feePerKbSpecified abeutil.Amount, autIssueTokenThreshold uint8, autIssueUpdateThreshold uint8,
+	utxoSpecified []string) (unsignedTx *txauthor.AuthoredTxAbe, err error) {
 	chainClient, err := w.requireChainClient()
 	if err != nil {
 		return nil, err
@@ -955,7 +964,7 @@ func (w *Wallet) txPqringCTToOutputsMLPAUT(autTransaction aut.Transaction, txOut
 		return nil, fmt.Errorf("target output value %v exceeds the maximum allowd value %v", targetValue, abeutil.MaxNeutrino)
 	}
 
-	var eligibleAUT []wtxmgr.AUTCoin
+	var eligibleAUT []*wtxmgr.AUTCoin
 	if autTransaction.Type() != aut.Registration {
 		err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 			txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
@@ -987,13 +996,14 @@ func (w *Wallet) txPqringCTToOutputsMLPAUT(autTransaction aut.Transaction, txOut
 		return nil, err
 	}
 	// filter with AUT coin
-	eligible, eligibleForAUTMapping, err := fetchUTXOForAUT(eligible, eligibleAUT)
+	eligible, eligibleForAUTMapping, err := fetchUTXOForAUT(eligible, eligibleAUT, utxoSpecified)
 	if err != nil {
 		return nil, errors.New("can not filter AUT coin")
 	}
 	if len(eligible) == 0 {
 		return nil, errors.New("not Enough")
 	}
+
 	sort.Sort(sort.Reverse(byAmount(eligible)))
 	log.Tracef("Find eligible: ")
 	for idx, txo := range eligible {
@@ -1024,12 +1034,12 @@ func (w *Wallet) txPqringCTToOutputsMLPAUT(autTransaction aut.Transaction, txOut
 		// nothing
 	case *aut.MintTx:
 		// select the aut root coin
-		nextAUTUTXOIdx := 0
+		nextAUTCoinIdx := 0
 		// TODO How to check the issuer token threshold
 		existIssuerToken := map[string]struct{}{}
-		for nextAUTUTXOIdx < len(eligibleAUT) {
-			currentUtxo := &eligibleAUT[nextAUTUTXOIdx]
-			nextAUTUTXOIdx++
+		for nextAUTCoinIdx < len(eligibleAUT) {
+			currentUtxo := eligibleAUT[nextAUTCoinIdx]
+			nextAUTCoinIdx++
 
 			if !currentUtxo.IsAUTRootCoin {
 				continue
@@ -1060,43 +1070,6 @@ func (w *Wallet) txPqringCTToOutputsMLPAUT(autTransaction aut.Transaction, txOut
 		if len(existIssuerToken) < int(autIssueTokenThreshold) {
 			return nil, errors.New("exist AUT coin can not reach the issue token threshold")
 		}
-	case *aut.ReRegistrationTx:
-		// select the aut root coin
-		nextAUTUTXOIdx := 0
-		// TODO How to check the issuer update threshold
-		existIssuerToken := map[string]struct{}{}
-		for nextAUTUTXOIdx < len(eligibleAUT) {
-			currentUtxo := &eligibleAUT[nextAUTUTXOIdx]
-			nextAUTUTXOIdx++
-
-			if !currentUtxo.IsAUTRootCoin {
-				continue
-			}
-			if _, ok := existIssuerToken[hex.EncodeToString(currentUtxo.AddrKey)]; ok {
-				continue
-			}
-
-			if unspentUTXO, ok := eligibleForAUTMapping[currentUtxo.TxOutput.String()]; ok {
-				inputPublic += unspentUTXO.Amount
-				inForSingleDistinct++
-
-				inputRingVersionsForAll = append(inputRingVersionsForAll, unspentUTXO.Version)
-				inRingSizesForAll = append(inRingSizesForAll, unspentUTXO.RingSize)
-
-				// todo check address
-				selectedTxos = append(selectedTxos, &unspentUTXO)
-				currentTotal += +abeutil.Amount(unspentUTXO.Amount)
-
-				autTx.InAutRootCoinNum++
-
-				if len(existIssuerToken) >= int(autIssueUpdateThreshold) {
-					break
-				}
-			}
-		}
-		if len(existIssuerToken) < int(autIssueUpdateThreshold) {
-			return nil, errors.New("exist AUT coins can not reach the update threshold")
-		}
 
 	case *aut.TransferTx:
 		var currentAUTTotal uint64
@@ -1105,7 +1078,7 @@ func (w *Wallet) txPqringCTToOutputsMLPAUT(autTransaction aut.Transaction, txOut
 		// TODO How to check the issuer token threshold
 		//existIssuerToken := map[string]struct{}{}
 		for nextAUTUTXOIdx < len(eligibleAUT) {
-			currentAUTUtxo := &eligibleAUT[nextAUTUTXOIdx]
+			currentAUTUtxo := eligibleAUT[nextAUTUTXOIdx]
 			nextAUTUTXOIdx++
 			if currentAUTUtxo.IsAUTRootCoin {
 				continue
@@ -1154,8 +1127,82 @@ func (w *Wallet) txPqringCTToOutputsMLPAUT(autTransaction aut.Transaction, txOut
 			autTx.OutAutCoinNum++
 			targetAUTValue += currentAUTTotal
 		}
+	case *aut.ReRegistrationTx:
+		// select the aut root coin
+		nextAUTCoinIdx := 0
+		// TODO How to check the issuer update threshold
+		existIssuerToken := map[string]struct{}{}
+		for nextAUTCoinIdx < len(eligibleAUT) {
+			currentAUTCoin := eligibleAUT[nextAUTCoinIdx]
+			nextAUTCoinIdx++
+
+			if !currentAUTCoin.IsAUTRootCoin {
+				continue
+			}
+			if _, ok := existIssuerToken[hex.EncodeToString(currentAUTCoin.AddrKey)]; ok {
+				continue
+			}
+
+			if unspentUTXO, ok := eligibleForAUTMapping[currentAUTCoin.TxOutput.String()]; ok {
+				inputPublic += unspentUTXO.Amount
+				inForSingleDistinct++
+
+				inputRingVersionsForAll = append(inputRingVersionsForAll, unspentUTXO.Version)
+				inRingSizesForAll = append(inRingSizesForAll, unspentUTXO.RingSize)
+
+				// todo check address
+				selectedTxos = append(selectedTxos, &unspentUTXO)
+				currentTotal += +abeutil.Amount(unspentUTXO.Amount)
+
+				autTx.InAutRootCoinNum++
+
+				existIssuerToken[hex.EncodeToString(currentAUTCoin.AddrKey)] = struct{}{}
+				if len(existIssuerToken) >= int(autIssueUpdateThreshold) {
+					break
+				}
+			}
+		}
+		if len(existIssuerToken) < int(autIssueUpdateThreshold) {
+			return nil, errors.New("exist AUT coins can not reach the update threshold")
+		}
 	case *aut.BurnTx:
-		return nil, errors.New("unimplemented AUT feature")
+		utxoSpecifiedMapping := map[string]struct{}{}
+		for i := 0; i < len(utxoSpecified); i++ {
+			utxoSpecifiedMapping[utxoSpecified[i]] = struct{}{}
+		}
+
+		// select the aut root coin
+		nextAUTCoinIdx := 0
+		for nextAUTCoinIdx < len(eligibleAUT) {
+			currentAUTCoin := eligibleAUT[nextAUTCoinIdx]
+			nextAUTCoinIdx++
+
+			if unspentUTXO, ok := eligibleForAUTMapping[currentAUTCoin.TxOutput.String()]; ok {
+				if _, specified := utxoSpecifiedMapping[unspentUTXO.Hash().String()]; specified {
+					if currentAUTCoin.IsAUTRootCoin {
+						return nil, errors.New("burn transaction can not operate root coin")
+					}
+
+					inputPublic += unspentUTXO.Amount
+					inForSingleDistinct++
+
+					inputRingVersionsForAll = append(inputRingVersionsForAll, unspentUTXO.Version)
+					inRingSizesForAll = append(inRingSizesForAll, unspentUTXO.RingSize)
+
+					// todo check address
+					selectedTxos = append(selectedTxos, &unspentUTXO)
+					currentTotal += +abeutil.Amount(unspentUTXO.Amount)
+
+					autTx.InAutCoinNum++
+				}
+			}
+		}
+
+		// compare the specified with selected
+		if len(utxoSpecified) != len(selectedTxos) {
+			return nil, errors.New("not all specified AUT coins can be selected for generate burn transaction")
+		}
+
 	default:
 		return nil, errors.New("unsupported aut type")
 	}
@@ -1915,8 +1962,8 @@ func (w *Wallet) findEligibleTxosAbe(txmgrNs walletdb.ReadBucket, minconf int32,
 	return eligible, nil
 }
 
-func (w *Wallet) findEligibleTxosAbeAUT(txmgrNs walletdb.ReadBucket, minconf int32, bs *waddrmgr.BlockStamp, autName []byte) ([]wtxmgr.AUTCoin, error) {
-	unspent, err := w.TxStore.UnspentOutputsAUT(txmgrNs, autName) // In ABE, this result will be spendable for the logic of store
+func (w *Wallet) findEligibleTxosAbeAUT(txmgrNs walletdb.ReadBucket, minconf int32, bs *waddrmgr.BlockStamp, autName []byte) ([]*wtxmgr.AUTCoin, error) {
+	unspent, _, err := w.TxStore.UnspentOutputsAUT(txmgrNs, autName, false) // In ABE, this result will be spendable for the logic of store
 	if err != nil {
 		return nil, err
 	}
@@ -1926,7 +1973,7 @@ func (w *Wallet) findEligibleTxosAbeAUT(txmgrNs walletdb.ReadBucket, minconf int
 	// Because one of these filters requires matching the output script to
 	// the desired account, this change depends on making wtxmgr a waddrmgr
 	// dependancy and requesting unspent outputs for a single account.
-	eligible := make([]wtxmgr.AUTCoin, 0, len(unspent))
+	eligible := make([]*wtxmgr.AUTCoin, 0, len(unspent))
 	for i := range unspent {
 		output := unspent[i]
 

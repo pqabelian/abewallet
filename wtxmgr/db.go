@@ -74,7 +74,8 @@ var (
 
 	//bucketAUTEntry = []byte("autentry") // autname -> autentry [outpoint -> aut coin]
 
-	bucketAUTPoint = []byte("autpoint") // outpoint -> aut coin
+	bucketAUTPoint              = []byte("autpoint") // outpoint -> aut coin
+	bucketBlockDisabledAUTPoint = []byte("blockdisabledautpoints")
 
 	bucketUTXORing    = []byte("utxoring")
 	bucketRingDetails = []byte("utxoringdetails") //TODO(abe):we should add a block height in database, meaning that the txo in ring had consumed completely .
@@ -872,49 +873,6 @@ func deleteBlockInput(ns walletdb.ReadWriteBucket, k []byte) error {
 		return storeError(ErrDatabase, str, err)
 	}
 	return nil
-}
-
-// block height || block hash -> version + []UnspentTXO 【txhash + index + amount + generationTime + ringhash】
-func valueAUTCoin(coin *AUTCoin) []byte {
-	res := make([]byte, chainhash.HashSize+1+4+len(coin.AUTName)+1+8+4+len(coin.AddrKey)+1)
-
-	offset := 0
-	copy(res[offset:], coin.TxOutput.TxHash[:])
-	offset += chainhash.HashSize
-	res[offset] = coin.TxOutput.Index
-	offset += 1
-
-	byteOrder.PutUint32(res[offset:], uint32(len(coin.AUTName)))
-	offset += 4
-	copy(res[offset:], coin.AUTName)
-	offset += len(coin.AUTName)
-
-	//_ = coin.IsAUTRootCoin //  byte 1
-	if coin.IsAUTRootCoin {
-		res[offset] = 1
-	} else {
-		res[offset] = 0
-	}
-	offset += 1
-
-	//_ = coin.AUTCoinValue  //   8
-	byteOrder.PutUint64(res[offset:], coin.AUTCoinValue)
-	offset += 8
-
-	byteOrder.PutUint32(res[offset:], uint32(len(coin.AddrKey)))
-	offset += 4
-	copy(res[offset:], coin.AddrKey)
-	offset += len(coin.AddrKey)
-
-	//_ = coin.Spent         //   byte 1
-	if coin.Spent {
-		res[offset] = 1
-	} else {
-		res[offset] = 0
-	}
-	offset += 1
-
-	return res
 }
 
 // block height || block hash -> version + []UnspentTXO 【txhash + index + amount + generationTime + ringhash】
@@ -2172,6 +2130,10 @@ func createBuckets(ns walletdb.ReadWriteBucket) error {
 		str := "fialed to create aut point bucket"
 		return storeError(ErrDatabase, str, err)
 	}
+	if _, err := ns.CreateBucket(bucketBlockDisabledAUTPoint); err != nil {
+		str := "fialed to create block disbaled aut point bucket"
+		return storeError(ErrDatabase, str, err)
+	}
 
 	return nil
 }
@@ -2245,6 +2207,10 @@ func deleteBuckets(ns walletdb.ReadWriteBucket) error {
 
 	if err := ns.DeleteNestedBucket(bucketAUTPoint); err != nil {
 		str := "fialed to delete aut point bucket"
+		return storeError(ErrDatabase, str, err)
+	}
+	if err := ns.DeleteNestedBucket(bucketBlockDisabledAUTPoint); err != nil {
+		str := "fialed to delete block disabled aut point bucket"
 		return storeError(ErrDatabase, str, err)
 	}
 
