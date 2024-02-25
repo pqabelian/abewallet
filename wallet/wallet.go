@@ -2083,7 +2083,6 @@ func (w *Wallet) reliablyPublishTransaction(tx *wire.MsgTxAbe,
 	if err != nil {
 		return nil, err
 	}
-	log.Infof("insert transaction %s into unmined bucket", tx.TxHash())
 	// add the transaction into unmined bucket
 	err = walletdb.Update(w.db, func(dbTx walletdb.ReadWriteTx) error {
 		if err := w.addRelevantTx(dbTx, txRec, nil); err != nil {
@@ -2091,6 +2090,7 @@ func (w *Wallet) reliablyPublishTransaction(tx *wire.MsgTxAbe,
 			return err
 		}
 
+		log.Infof("insert transaction %s into unmined bucket", tx.TxHash())
 		if w.RecordRequestFlag && requestHash != nil {
 			txmgrNs := dbTx.ReadWriteBucket(wtxmgrNamespaceKey)
 			err = w.TxStore.PutRequestHashAndTxHash(txmgrNs, requestHash.String(), hash.String())

@@ -990,7 +990,6 @@ func (w *Wallet) txPqringCTToOutputsMLPAUT(autTransaction aut.Transaction, txOut
 		//eligible, rings, err := w.findEligibleOutputsAbe(txmgrNs, minconf, bs)
 		eligible, err = w.findEligibleTxosAbe(txmgrNs, minconf, bs)
 		return err
-
 	})
 	if err != nil {
 		return nil, err
@@ -1012,7 +1011,7 @@ func (w *Wallet) txPqringCTToOutputsMLPAUT(autTransaction aut.Transaction, txOut
 
 	privacyLevel := w.Manager.GetPrivacyLevel()
 	if privacyLevel != abecryptoxkey.PrivacyLevelPSEUDONYM {
-		return nil, errors.New("non-pseudoym wallet is not support for aut")
+		return nil, errors.New("non-pseudonym wallet is not support for aut")
 	}
 
 	selectedTxos := make([]*wtxmgr.UnspentUTXO, 0, len(eligible))

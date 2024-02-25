@@ -2,6 +2,7 @@ package wtxmgr
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/wire"
@@ -303,7 +304,7 @@ func deleteRawAUTCoin(ns walletdb.ReadWriteBucket, k []byte) error {
 	return nil
 }
 
-func valueBlockDisabledAUTPoints(outpoints []*wire.OutPointAbe) []byte {
+func valueBlockDisabledAUTRootCoins(outpoints []*wire.OutPointAbe) []byte {
 	res := make([]byte, 8+len(outpoints)*(chainhash.HashSize+1))
 	byteOrder.PutUint32(res[0:4], uint32(8+len(outpoints)*(chainhash.HashSize+1)))
 	byteOrder.PutUint32(res[4:8], uint32(len(outpoints)))
@@ -317,7 +318,7 @@ func valueBlockDisabledAUTPoints(outpoints []*wire.OutPointAbe) []byte {
 	}
 	return res
 }
-func putRawBlockDisabledAUTPoints(ns walletdb.ReadWriteBucket, k, v []byte) error {
+func putRawBlockDisabledAUTRootCoins(ns walletdb.ReadWriteBucket, k, v []byte) error {
 	err := ns.NestedReadWriteBucket(bucketBlockDisabledAUTPoint).Put(k, v)
 	if err != nil {
 		str := "failed to put block input"
@@ -326,20 +327,14 @@ func putRawBlockDisabledAUTPoints(ns walletdb.ReadWriteBucket, k, v []byte) erro
 	return nil
 }
 
-func fetchBlockDisabledAUTPoints(ns walletdb.ReadWriteBucket, k []byte) ([]*wire.OutPointAbe, error) {
-	if len(k) < 8 {
-		str := fmt.Sprintf("%s: short read (expected %d bytes, read %d)",
-			bucketBlockDisabledAUTPoint, 8, len(k))
-		return nil, storeError(ErrData, str, nil)
-	}
+func fetchBlockDisabledAUTRootCoins(ns walletdb.ReadWriteBucket, k []byte) ([]*wire.OutPointAbe, error) {
 	v := ns.NestedReadBucket(bucketBlockDisabledAUTPoint).Get(k)
-	if v == nil {
-		return nil, fmt.Errorf("this entry is empty")
+	if len(v) == 0 {
+		return nil, nil
 	}
-	offset := 0
-	_ = byteOrder.Uint32(v[offset : offset+4])
-	offset += 4
-	outpointNum := int(byteOrder.Uint32(v[offset : offset+4]))
+	_ = byteOrder.Uint32(v[0:4])
+	outpointNum := int(byteOrder.Uint32(v[4:8]))
+	offset := 8
 	outpoints := make([]*wire.OutPointAbe, outpointNum)
 	for i := 0; i < outpointNum; i++ {
 		outpoints[i] = new(wire.OutPointAbe)
@@ -347,11 +342,10 @@ func fetchBlockDisabledAUTPoints(ns walletdb.ReadWriteBucket, k []byte) ([]*wire
 		offset += chainhash.HashSize
 		outpoints[i].Index = v[offset]
 		offset += 1
-
 	}
 	return outpoints, nil
 }
-func deleteBlockDisabledAUTPoints(ns walletdb.ReadWriteBucket, k []byte) error {
+func deleteBlockDisabledAUTRootCoins(ns walletdb.ReadWriteBucket, k []byte) error {
 	err := ns.NestedReadWriteBucket(bucketBlockDisabledAUTPoint).Delete(k)
 	if err != nil {
 		str := "failed to delete block input"
@@ -398,7 +392,7 @@ func restoreAUTCoin(ns walletdb.ReadWriteBucket, k []byte) (*AUTCoin, error) {
 	autPointBucket := ns.NestedReadWriteBucket(bucketAUTPoint)
 	v := autPointBucket.Get(k)
 	if len(v) == 0 {
-		return nil, nil
+		return nil, errors.New("non-exist aut coin")
 	}
 
 	autCoin := new(AUTCoin)
