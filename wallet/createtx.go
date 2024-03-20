@@ -9,6 +9,7 @@ import (
 	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abec/abecryptox"
 	"github.com/abesuite/abec/abecryptox/abecryptoxkey"
+	"github.com/abesuite/abec/abecryptox/abecryptoxparam"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/aut"
 	"github.com/abesuite/abec/chainhash"
@@ -582,6 +583,7 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 
 			selectedTxos = append(selectedTxos, currentUtxo)
 			if privacyLevel == abecryptoxkey.PrivacyLevelRINGCT || privacyLevel == abecryptoxkey.PrivacyLevelRINGCTPre {
+				inForRing++
 				inputRingVersionsForRing = append(inputRingVersionsForRing, currentUtxo.Version)
 				inRingSizesForRing = append(inRingSizesForRing, currentUtxo.RingSize)
 			} else if privacyLevel == abecryptoxkey.PrivacyLevelPSEUDONYM {
@@ -607,6 +609,7 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 			currentTotal = currentTotal + abeutil.Amount(txo.Amount)
 
 			if privacyLevel == abecryptoxkey.PrivacyLevelRINGCT || privacyLevel == abecryptoxkey.PrivacyLevelRINGCTPre {
+				inForRing++
 				inputRingVersionsForRing = append(inputRingVersionsForRing, txo.Version)
 				inRingSizesForRing = append(inRingSizesForRing, txo.RingSize)
 			} else if privacyLevel == abecryptoxkey.PrivacyLevelPSEUDONYM {
@@ -646,7 +649,7 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 		if err != nil {
 			return 0, err
 		}
-		witnessSize, err := abecryptox.GetTrTxWitnessSerializeSizeApprox(txVersion, inForRing, inForSingleDistinct, inRingSizeForRing, uint8(outForRing), vPublic)
+		witnessSize, err := abecryptox.GetTrTxWitnessSerializeSizeApprox(txVersion, inForRing, inForSingleDistinct, inRingSizeForRing, uint8(outForRing), 0)
 		if err != nil {
 			return 0, err
 		}
@@ -678,7 +681,12 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 			if currentTotal < targetValue {
 				continue
 			}
-			fee, err := computeFee(wire.TxVersion, inputRingVersionsForAll, inRingSizesForAll, inputRingVersionsForRing, inRingSizesForRing, inForRing, inForSingleDistinct, outputPublic-int64(inputPublic))
+			fee, err := computeFee(wire.TxVersion,
+				inputRingVersionsForAll, inRingSizesForAll,
+				inputRingVersionsForRing, inRingSizesForRing, inForRing,
+				inForSingleDistinct,
+				outputPublic-int64(inputPublic),
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -719,7 +727,12 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 			return nil, errors.New("please specify enough amount to transfer: input < output")
 		}
 
-		fee, err := computeFee(wire.TxVersion, inputRingVersionsForAll, inRingSizesForAll, inputRingVersionsForRing, inRingSizesForRing, inForRing, inForSingleDistinct, outputPublic-int64(inputPublic))
+		fee, err := computeFee(wire.TxVersion,
+			inputRingVersionsForAll, inRingSizesForAll,
+			inputRingVersionsForRing, inRingSizesForRing, inForRing,
+			inForSingleDistinct,
+			outputPublic-int64(inputPublic),
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -761,38 +774,153 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 
 	PrintConsumedUTXOs(selectedTxos)
 
-	serializeAddressBytes := make([][]byte, len(selectedTxos))
-	serializedAskspBytes := make([][]byte, len(selectedTxos))
-	serializedAsksnBytes := make([][]byte, len(selectedTxos))
-	serializedVskBytes := make([][]byte, len(selectedTxos))
-	detectorKeys := make([][]byte, len(selectedTxos))
+	if w.Manager.GetCryptoScheme() == abecryptoxparam.CryptoSchemePQRingCT {
+		serializeAddressBytes := make([][]byte, len(selectedTxos))
+		serializedAskspBytes := make([][]byte, len(selectedTxos))
+		serializedAsksnBytes := make([][]byte, len(selectedTxos))
+		serializedVskBytes := make([][]byte, len(selectedTxos))
+		detectorKeys := make([][]byte, len(selectedTxos))
+		err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+			addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+			var serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, detectorKeyEnc []byte
+			for i := 0; i < len(selectedTxos); i++ {
+				coinAddr, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{
+					Version:   selectedTxos[i].Version,
+					TxoScript: selectedRings[selectedTxos[i].RingHash].TxoScripts[selectedTxos[i].Index],
+				})
+				if err != nil {
+					return err
+				}
+				serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, _, detectorKeyEnc, err = w.Manager.FetchAddressKeyEnc(addrmgrNs, coinAddr)
+				if err != nil {
+					return err
+				}
+				serializeAddressBytes[i], serializedAskspBytes[i], serializedAsksnBytes[i], serializedVskBytes[i], detectorKeys[i], err = w.Manager.DecryptAddressKey(serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, detectorKeyEnc)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		abeTxInputDescs := make([]*abecryptox.AbeTxInputDescByKeys, 0, len(selectedTxos))
+		txIns := make([]*wire.TxInAbe, len(selectedTxos))
+		for i := 0; i < len(selectedTxos); i++ {
+			txIns[i] = &wire.TxInAbe{
+				SerialNumber: nil,
+				PreviousOutPointRing: wire.OutPointRing{
+					Version:    selectedRings[selectedTxos[i].RingHash].Version,
+					BlockHashs: make([]*chainhash.Hash, len(selectedRings[selectedTxos[i].RingHash].BlockHashes)),
+					OutPoints:  make([]*wire.OutPointAbe, len(selectedRings[selectedTxos[i].RingHash].TxHashes)),
+				},
+			}
+			for j := 0; j < len(selectedRings[selectedTxos[i].RingHash].BlockHashes); j++ {
+				txIns[i].PreviousOutPointRing.BlockHashs[j] = &selectedRings[selectedTxos[i].RingHash].BlockHashes[j]
+			}
+
+			for j := 0; j < len(selectedRings[selectedTxos[i].RingHash].TxHashes); j++ {
+				txIns[i].PreviousOutPointRing.OutPoints[j] = &wire.OutPointAbe{
+					TxHash: selectedRings[selectedTxos[i].RingHash].TxHashes[j],
+					Index:  selectedRings[selectedTxos[i].RingHash].Index[j],
+				}
+			}
+
+			serializedTxoLists := make([]*wire.TxOutAbe, 0, len(selectedRings[selectedTxos[i].RingHash].Index))
+			for j := 0; j < len(selectedRings[selectedTxos[i].RingHash].Index); j++ {
+				serializedTxoLists = append(serializedTxoLists, &wire.TxOutAbe{
+					Version:   selectedRings[selectedTxos[i].RingHash].Version,
+					TxoScript: selectedRings[selectedTxos[i].RingHash].TxoScripts[j],
+				})
+			}
+			txoRing := &wire.TxoRing{
+				Version:         selectedTxos[i].Version,
+				RingBlockHeight: selectedTxos[i].Height, // Ring Height
+				OutPointRing:    &txIns[i].PreviousOutPointRing,
+				TxOuts:          serializedTxoLists,
+				IsCoinbase:      selectedTxos[i].FromCoinBase,
+			}
+			// fetch the aSkSpByte from manager
+			var copyedVskBytes []byte
+			if serializedVskBytes[i] != nil {
+				copyedVskBytes = make([]byte, len(serializedVskBytes[i]))
+				copy(copyedVskBytes, serializedVskBytes[i])
+			}
+
+			abeTxInputDescs = append(abeTxInputDescs, abecryptox.NewAbeTxInputDescByKeys(
+				txoRing,
+				selectedTxos[i].Index,
+				serializeAddressBytes[i],
+				serializedAskspBytes[i],
+				serializedAsksnBytes[i],
+				copyedVskBytes,
+				detectorKeys[i],
+				selectedTxos[i].Amount))
+		}
+		usedCntNum := ^uint64(0)
+		if needChangeFlag {
+			var addrBytes []byte
+			// fetch a free address if possible
+			usedCntNum, addrBytes, err = w.FetchChangeAddress(true)
+			if err != nil {
+				// fetch a change address for the change
+				_, usedCntNum, addrBytes, err = w.NewAddressKey(true)
+				if err != nil {
+					return nil, err
+				}
+			}
+			log.Infof("No.%d would be used as change address when generating a transaction", usedCntNum)
+
+			txOutDescs = append(txOutDescs, abecryptox.NewAbeTxOutDesc(addrBytes, uint64(currentTotal-txFee-targetValue)))
+			// random the outputs
+			r, err := rand.Int(rand.Reader, big.NewInt(int64(len(txOutDescs))))
+			if err != nil {
+				return nil, err
+			}
+			index := r.Int64()
+			txOutDescs[len(txOutDescs)-1], txOutDescs[index] = txOutDescs[index], txOutDescs[len(txOutDescs)-1]
+		}
+
+		//PrintNewUTXOs(txOutDescs, needChangeFlag, txFee)
+
+		//TODO(abe) 20210627: to sure the txmemo?
+		transferTxTemplate, err := createTransferTxAbeMsgTemplateMLP(txIns, len(txOutDescs), []byte{}, uint64(txFee))
+		if err != nil {
+			return nil, errors.New("error for creating a transfer transaction template ")
+		}
+
+		// adjust the order of output descs
+		sort.SliceStable(txOutDescs, func(i, j int) bool {
+			outputIAddressPrivacyLevel, _, _, _ := abecryptoxkey.CryptoAddressParse(txOutDescs[i].CryptoAddress())
+			outputJAddressPrivacyLevel, _, _, _ := abecryptoxkey.CryptoAddressParse(txOutDescs[j].CryptoAddress())
+			if outputIAddressPrivacyLevel != abecryptoxkey.PrivacyLevelPSEUDONYM && outputJAddressPrivacyLevel == abecryptoxkey.PrivacyLevelPSEUDONYM {
+				return true
+			}
+			return false
+		})
+
+		transferTx, err := abecryptox.TransferTxGenByKeys(abeTxInputDescs, txOutDescs, transferTxTemplate)
+		if err != nil {
+			return nil, err
+		}
+		resTx := &txauthor.AuthoredTxAbe{
+			Tx:              transferTx,
+			ChangeAddressNo: usedCntNum,
+		}
+		return resTx, nil
+	}
+	//w.Manager.GetCryptoScheme() == abecryptoxparam.CryptoSchemePQRingCTX
+	var spKeyRootSeed, snKeyRootSeed, valueRootSeed, detectorRootKey []byte
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		var serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, detectorKeyEnc []byte
-		for i := 0; i < len(selectedTxos); i++ {
-			coinAddr, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{
-				Version:   selectedTxos[i].Version,
-				TxoScript: selectedRings[selectedTxos[i].RingHash].TxoScripts[selectedTxos[i].Index],
-			})
-			if err != nil {
-				return err
-			}
-			serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, _, detectorKeyEnc, err = w.Manager.FetchAddressKeyEnc(addrmgrNs, coinAddr)
-			if err != nil {
-				return err
-			}
-			serializeAddressBytes[i], serializedAskspBytes[i], serializedAsksnBytes[i], serializedVskBytes[i], detectorKeys[i], err = w.Manager.DecryptAddressKey(serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, detectorKeyEnc)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
+		spKeyRootSeed, snKeyRootSeed, valueRootSeed, detectorRootKey, err = w.Manager.FetchProtectedRootSeeds(addrmgrNs)
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	abeTxInputDescs := make([]*abecryptox.AbeTxInputDescByKeys, 0, len(selectedTxos))
+	abeTxInputDescs := make([]*abecryptox.AbeTxInputDescByRootSeeds, 0, len(selectedTxos))
 	txIns := make([]*wire.TxInAbe, len(selectedTxos))
 	for i := 0; i < len(selectedTxos); i++ {
 		txIns[i] = &wire.TxInAbe{
@@ -828,21 +956,16 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 			TxOuts:          serializedTxoLists,
 			IsCoinbase:      selectedTxos[i].FromCoinBase,
 		}
-		// fetch the aSkSpByte from manager
-		var copyedVskBytes []byte
-		if serializedVskBytes[i] != nil {
-			copyedVskBytes = make([]byte, len(serializedVskBytes[i]))
-			copy(copyedVskBytes, serializedVskBytes[i])
-		}
 
-		abeTxInputDescs = append(abeTxInputDescs, abecryptox.NewAbeTxInputDescByKeys(
+		abeTxInputDescs = append(abeTxInputDescs, abecryptox.NewAbeTxInputDescByRootSeeds(
 			txoRing,
 			selectedTxos[i].Index,
-			serializeAddressBytes[i],
-			serializedAskspBytes[i],
-			serializedAsksnBytes[i],
-			copyedVskBytes,
-			detectorKeys[i],
+			abecryptoxparam.CryptoSchemePQRingCTX,
+			w.Manager.GetPrivacyLevel(),
+			spKeyRootSeed,
+			snKeyRootSeed,
+			valueRootSeed,
+			detectorRootKey,
 			selectedTxos[i].Amount))
 	}
 	usedCntNum := ^uint64(0)
@@ -856,10 +979,8 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 			if err != nil {
 				return nil, err
 			}
-			log.Infof("No.%d would be used as change address when generating a transaction", usedCntNum)
-		} else {
-			log.Infof("No.%d would be used as change address when generating a transaction", usedCntNum)
 		}
+		log.Infof("No.%d would be used as change address when generating a transaction", usedCntNum)
 
 		txOutDescs = append(txOutDescs, abecryptox.NewAbeTxOutDesc(addrBytes, uint64(currentTotal-txFee-targetValue)))
 		// random the outputs
@@ -889,7 +1010,7 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 		return false
 	})
 
-	transferTx, err := abecryptox.TransferTxGenByKeys(abeTxInputDescs, txOutDescs, transferTxTemplate)
+	transferTx, err := abecryptox.TransferTxGenByRootSeeds(abeTxInputDescs, txOutDescs, transferTxTemplate)
 	if err != nil {
 		return nil, err
 	}
@@ -1397,7 +1518,6 @@ func (w *Wallet) createTransactionMLP(
 			index := r.Int64()
 			txOutDescs[len(txOutDescs)-1], txOutDescs[index] = txOutDescs[index], txOutDescs[len(txOutDescs)-1]
 		}
-
 	}
 
 	//TODO(abe) 20210627: to sure the txmemo?

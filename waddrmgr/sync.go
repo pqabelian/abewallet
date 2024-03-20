@@ -93,6 +93,15 @@ func (m *Manager) Birthday() time.Time {
 	return m.birthday
 }
 
+func (m *Manager) SetChangeWithZeroAddr(changeWithZeroAddr bool) error {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	// Update memory now that the database is updated.
+	m.changeWithZeroAddr = changeWithZeroAddr
+	return nil
+}
+
 // SetBirthday sets the birthday, or earliest time a key could have been used,
 // for the manager.
 func (m *Manager) SetBirthday(ns walletdb.ReadWriteBucket,

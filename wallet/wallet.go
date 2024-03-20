@@ -160,8 +160,7 @@ type Wallet struct {
 	quitMu  sync.Mutex
 
 	// Information for syncing.
-	SyncFrom                 int32
-	changeWithInitialAddress bool
+	SyncFrom int32
 }
 
 // Start starts the goroutines necessary to manage a wallet.
@@ -347,7 +346,7 @@ func (w *Wallet) SetChainSynced(synced bool) {
 }
 
 func (w *Wallet) SetChangeWithZeroAddr(changeWithZeroAddr bool) {
-	w.changeWithInitialAddress = changeWithZeroAddr
+	w.Manager.SetChangeWithZeroAddr(changeWithZeroAddr)
 }
 
 // activeData returns the currently-active receiving addresses and all unspent
@@ -1507,6 +1506,7 @@ func (w *Wallet) resendUnminedTx() {
 				log.Errorf("Unable to delete unconfirmed transactions %s which is "+
 					"resended: %v", tx.TxHash(), err)
 			}
+			continue
 		}
 		log.Debugf("Successfully rebroadcast unconfirmed transaction %v",
 			tx.TxHash())
@@ -1526,44 +1526,25 @@ func (w *Wallet) AddressMaxSequenceNumber() (uint64, error) {
 	var err error
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		addressNum, err = waddrmgr.FetchSeedStatus(addrmgrNs)
+		addressNum, err = w.Manager.FetchSeedStatus(addrmgrNs)
 		return err
 	})
 	return addressNum, err
 }
 
 func (w *Wallet) AddressRange(start uint64, end uint64) (res map[uint64]string, err error) {
-	addrKeys := make(map[uint64][]byte, end-start)
-	addresses := make(map[uint64][]byte, end-start)
-	res = make(map[uint64]string, end-start)
+	var addresses map[uint64][]byte
 	var addressMaxNum uint64
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-
-		addressMaxNum, err = waddrmgr.FetchSeedStatus(addrmgrNs)
-		if err != nil {
-			return err
-		}
-
-		addrKeys, err = waddrmgr.FetchAddressKeys(addrmgrNs, start, end)
-		if err != nil {
-			return err
-		}
-		for i := start; i < end && i <= addressMaxNum; i++ {
-			serializedAddressEnc, _, _, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKeys[i])
-			if err != nil {
-				return err
-			}
-			addresses[i], _, _, _, _, err = w.Manager.DecryptAddressKey(serializedAddressEnc, nil, nil, nil, nil)
-			if err != nil {
-				return err
-			}
-		}
+		addressMaxNum, addresses, err = w.Manager.AddressRange(addrmgrNs, start, end)
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
+
+	res = make(map[uint64]string, end-start)
 	for i := start; i < end; i++ {
 		if i <= addressMaxNum {
 			res[i] = w.Export(addresses[i])
@@ -1578,30 +1559,13 @@ func (w *Wallet) ExportAddressKeyRandSeed(start uint64, end uint64) (interface{}
 	if err != nil {
 		return nil, err
 	}
+	defer heldUnlock.release()
+
 	randSeeds := make(map[uint64][]byte, end-start)
 	var addressMaxNum uint64
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-
-		seedEnc, err := w.Manager.FetchSeedEnc(addrmgrNs)
-		if err != nil {
-			return err
-		}
-		seed, err := w.Manager.Decrypt(waddrmgr.CKTSeed, seedEnc)
-		if err != nil {
-			return err
-		}
-
-		addressMaxNum, err = waddrmgr.FetchSeedStatus(addrmgrNs)
-		if err != nil {
-			return err
-		}
-		for i := start; i < end && i <= addressMaxNum; i++ {
-			randSeeds[i], err = w.Manager.GenerateRandSeed(seed, i)
-			if err != nil {
-				return err
-			}
-		}
+		randSeeds, err = w.Manager.ExportRandSeeds(addrmgrNs, start, end)
 		return err
 	})
 	if err != nil {
@@ -1618,80 +1582,6 @@ func (w *Wallet) ExportAddressKeyRandSeed(start uint64, end uint64) (interface{}
 			res[i]["No"] = strconv.Itoa(int(i))
 		}
 	}
-	heldUnlock.release()
-	return res, nil
-}
-
-func (w *Wallet) ExportRange(start uint64, end uint64) (interface{}, error) {
-	heldUnlock, err := w.holdUnlock()
-	if err != nil {
-		return nil, err
-	}
-	addrKeys := make(map[uint64][]byte, end-start)
-	cryptoSeeds := make(map[uint64][]byte, end-start)
-	addresses := make(map[uint64][]byte, end-start)
-	asksps := make(map[uint64][]byte, end-start)
-	asksns := make(map[uint64][]byte, end-start)
-	vsks := make(map[uint64][]byte, end-start)
-	var addressMaxNum uint64
-	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-
-		seedEnc, err := w.Manager.FetchSeedEnc(addrmgrNs)
-		if err != nil {
-			return err
-		}
-		seed, err := w.Manager.Decrypt(waddrmgr.CKTSeed, seedEnc)
-		if err != nil {
-			return err
-		}
-
-		addressMaxNum, err = waddrmgr.FetchSeedStatus(addrmgrNs)
-		if err != nil {
-			return err
-		}
-
-		addrKeys, err = waddrmgr.FetchAddressKeys(addrmgrNs, start, end)
-		if err != nil {
-			return err
-		}
-		for i := start; i < end && i <= addressMaxNum; i++ {
-			cryptoSeeds[i], err = w.Manager.GenerateRandSeed(seed, i)
-			if err != nil {
-				return err
-			}
-			serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKeys[i])
-			if err != nil {
-				return err
-			}
-			addresses[i], asksps[i], asksns[i], vsks[i], _, err = w.Manager.DecryptAddressKey(serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, nil)
-			if err != nil {
-				return err
-			}
-		}
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	res := make(map[uint64]map[string]string, end-start)
-	for i := start; i < end; i++ {
-		res[i] = map[string]string{}
-		if i <= addressMaxNum {
-			res[i]["cryptoseed"] = w.Export(cryptoSeeds[i])
-			res[i]["address"] = w.Export(addresses[i])
-			res[i]["asksp"] = w.Export(asksps[i])
-			res[i]["asksn"] = w.Export(asksns[i])
-			res[i]["vsk"] = w.Export(vsks[i])
-		} else {
-			res[i]["cryptoseed"] = ""
-			res[i]["address"] = ""
-			res[i]["asksp"] = ""
-			res[i]["asksn"] = ""
-			res[i]["vsk"] = ""
-		}
-	}
-	heldUnlock.release()
 	return res, nil
 }
 
@@ -1739,35 +1629,9 @@ func (w *Wallet) FetchChangeAddress(markUsed bool) (uint64, []byte, error) {
 	var address []byte
 	var err error
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		var addrKey []byte
 		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		if w.changeWithInitialAddress {
-			addrKeys, err := waddrmgr.FetchAddressKeys(addrmgrNs, 0, 1)
-			if err != nil {
-				return err
-			}
-			addrKey = addrKeys[0]
-			sequenceNumber = 0
-		} else {
-			sequenceNumber, addrKey, err = w.Manager.FetchNextFreeAddressKey(addrmgrNs)
-			if err != nil {
-				return err
-			}
-			if addrKey == nil {
-				return errors.New("no free address")
-			}
-		}
-		serializedAddressEnc, _, _, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKey)
-		if err != nil {
-			return err
-		}
-
-		address, _, _, _, _, err = w.Manager.DecryptAddressKey(serializedAddressEnc, nil, nil, nil, nil)
-		if err != nil {
-			return err
-		}
-
-		return nil
+		sequenceNumber, address, err = w.Manager.FetchChangeAddress(addrmgrNs)
+		return err
 	})
 	if err != nil {
 		return 0, nil, err
@@ -1796,70 +1660,10 @@ func (w *Wallet) NewAddressKey(markUsed bool) ([]byte, uint64, []byte, error) {
 		if err != nil {
 			return err
 		}
-		seedEnc, err := w.Manager.FetchSeedEnc(addrmgrNs)
-		if err != nil {
-			return err
-		}
-		seed, err := w.Manager.Decrypt(waddrmgr.CKTSeed, seedEnc)
-		if err != nil {
-			return err
-		}
-		var serializedASksp, serializedASksn, serializedVSk, detectorKey []byte
-		numberOrder, cryptoAddress, serializedASksp, serializedASksn, serializedVSk, detectorKey, err = w.Manager.GenerateAddressKeys(addrmgrNs, seed)
-		if err != nil {
-			return err
-		}
-		addressSecretKeySpEnc, err :=
-			w.Manager.Encrypt(waddrmgr.CKTPrivate, serializedASksp)
-		if err != nil {
-			return err
-		}
-		addressSecretKeySnEnc, err :=
-			w.Manager.Encrypt(waddrmgr.CKTPublic, serializedASksn)
-		if err != nil {
-			return err
-		}
-		addressKeyEnc, err :=
-			w.Manager.Encrypt(waddrmgr.CKTPublic, cryptoAddress)
-		if err != nil {
-			return err
-		}
-		valueSecretKeyEnc, err :=
-			w.Manager.Encrypt(waddrmgr.CKTPublic, serializedVSk)
-		if err != nil {
-			return err
-		}
-		detectorKeyEnc, err :=
-			w.Manager.Encrypt(waddrmgr.CKTPublic, detectorKey)
-		if err != nil {
-			return err
-		}
 
-		_, coinAddress, _, err := abecryptoxkey.CryptoAddressParse(cryptoAddress)
+		numberOrder, cryptoAddress, _, _, _, _, err = w.Manager.GenerateAddressKeys(addrmgrNs, markUsed)
 		if err != nil {
 			return err
-		}
-		addKey := chainhash.DoubleHashB(coinAddress)
-
-		var publicRand []byte
-		if w.Manager.GetCryptoScheme() == abecryptoxparam.CryptoSchemePQRingCTX {
-			publicRand, err = abecryptoxkey.ExtractPublicRandFromCryptoAddress(cryptoAddress)
-			if err != nil {
-				return err
-			}
-		}
-
-		err = w.Manager.PutAddressKeysEnc(addrmgrNs, numberOrder, addKey[:], valueSecretKeyEnc,
-			addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc, detectorKeyEnc, publicRand)
-		if err != nil {
-			return err
-		}
-
-		if markUsed {
-			err = w.Manager.MarkAddrUsed(addrmgrNs, numberOrder)
-			if err != nil {
-				return err
-			}
 		}
 
 		return err

@@ -245,6 +245,13 @@ var (
 	addrStatusName = []byte("addrstatus") // bitmap
 	netIDName      = []byte("netid")
 
+	// sn root seed
+	snKeyRootSeedKeyName = []byte("snseed")
+	// value root seed
+	valueRootSeedKeyName = []byte("vkseed")
+	// detector root key
+	detectorRootKeyName = []byte("dkseed")
+
 	// masterHDPubName is the name of the key that stores the master HD
 	// public key. This key is encrypted with the master public crypto
 	// encryption key. This reside under the main bucket.
@@ -424,14 +431,6 @@ func putMasterKeyParams(ns walletdb.ReadWriteBucket, pubParams, privParams []byt
 // putMasterHDKeys stores the encrypted master HD keys in the top level main
 // bucket. These are required in order to create any new manager scopes, as
 // those are created via hardened derivation of the children of this key.
-
-func FetchSeedStatus(ns walletdb.ReadBucket) (uint64, error) {
-	return fetchSeedStatus(ns)
-}
-
-func FetchAddressKeys(ns walletdb.ReadBucket, start uint64, end uint64) (map[uint64][]byte, error) {
-	return fetchAddressKeys(ns, start, end)
-}
 
 func fetchAddressKeys(ns walletdb.ReadBucket, start uint64, end uint64) (addrKeys map[uint64][]byte, err error) {
 	addrKeys = make(map[uint64][]byte, end-start)
@@ -738,6 +737,43 @@ func putSeedEnc(ns walletdb.ReadWriteBucket, seedEnc []byte) error {
 	}
 	return nil
 }
+func putSNKeyRootSeedEnc(ns walletdb.ReadWriteBucket, seedEnc []byte) error {
+	bucket := ns.NestedReadWriteBucket(mainBucketName)
+
+	if seedEnc != nil {
+		err := bucket.Put(snKeyRootSeedKeyName, seedEnc)
+		if err != nil {
+			str := "failed to store encrypted value root seed"
+			return managerError(ErrDatabase, str, err)
+		}
+	}
+	return nil
+}
+func putValueRootSeedEnc(ns walletdb.ReadWriteBucket, seedEnc []byte) error {
+	bucket := ns.NestedReadWriteBucket(mainBucketName)
+
+	if seedEnc != nil {
+		err := bucket.Put(valueRootSeedKeyName, seedEnc)
+		if err != nil {
+			str := "failed to store encrypted value root seed"
+			return managerError(ErrDatabase, str, err)
+		}
+	}
+	return nil
+}
+func putDetectorRootKeyEnc(ns walletdb.ReadWriteBucket, seedEnc []byte) error {
+	bucket := ns.NestedReadWriteBucket(mainBucketName)
+
+	if seedEnc != nil {
+		err := bucket.Put(detectorRootKeyName, seedEnc)
+		if err != nil {
+			str := "failed to store encrypted detector root key"
+			return managerError(ErrDatabase, str, err)
+		}
+	}
+	return nil
+}
+
 func fetchNetID(ns walletdb.ReadBucket) ([]byte, error) {
 	bucket := ns.NestedReadBucket(mainBucketName)
 	return bucket.Get(netIDName), nil
@@ -747,6 +783,40 @@ func fetchSeedEnc(ns walletdb.ReadBucket) ([]byte, error) {
 	var seedEnc []byte
 
 	key := bucket.Get(seedKeyName)
+	if key != nil {
+		seedEnc = make([]byte, len(key))
+		copy(seedEnc[:], key)
+	}
+	return seedEnc, nil
+}
+
+func fetchSNKeyRootSeedEnc(ns walletdb.ReadBucket) ([]byte, error) {
+	bucket := ns.NestedReadBucket(mainBucketName)
+	var seedEnc []byte
+
+	key := bucket.Get(snKeyRootSeedKeyName)
+	if key != nil {
+		seedEnc = make([]byte, len(key))
+		copy(seedEnc[:], key)
+	}
+	return seedEnc, nil
+}
+func fetchValueRootSeedEnc(ns walletdb.ReadBucket) ([]byte, error) {
+	bucket := ns.NestedReadBucket(mainBucketName)
+	var seedEnc []byte
+
+	key := bucket.Get(valueRootSeedKeyName)
+	if key != nil {
+		seedEnc = make([]byte, len(key))
+		copy(seedEnc[:], key)
+	}
+	return seedEnc, nil
+}
+func fetchDetectorRootKeyEnc(ns walletdb.ReadBucket) ([]byte, error) {
+	bucket := ns.NestedReadBucket(mainBucketName)
+	var seedEnc []byte
+
+	key := bucket.Get(detectorRootKeyName)
 	if key != nil {
 		seedEnc = make([]byte, len(key))
 		copy(seedEnc[:], key)
