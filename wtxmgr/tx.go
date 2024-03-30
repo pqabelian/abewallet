@@ -1784,12 +1784,12 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 				log.Infof("(ABEL) Find transfer txo (hash %s, index %d) at block height %d (hash %s) with value %v ABEL",
 					txi.TxHash(), j, block.Height, block.Hash, amt.ToABE())
 
-				if autTx != nil && j < len(autTx.Outs()) {
+				if autTx != nil && j < len(autTx.TxOutputs()) {
 					tmp.IsAUTCoin = true
 
 					isAUTRootCoin := autTx.Type() == aut.Registration || autTx.Type() == aut.ReRegistration
 
-					autCoin := NewAUTCoin(k, autTx.AUTName(), isAUTRootCoin, autTx.Value(uint8(j)), addrKey)
+					autCoin := NewAUTCoin(k, autTx.AUTIdentifier(), isAUTRootCoin, autTx.ValueAt(uint8(j)), addrKey)
 					err = putRawAUTCoin(txMgrNs, canonicalOutPointAbe(k.TxHash, k.Index), valueAUTCoin(autCoin))
 					if err != nil {
 						return err
@@ -1810,7 +1810,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 
 		// if the type of aut transaction is re-registration, need to consume exist root coin
 		if autTx != nil && autTx.Type() == aut.ReRegistration {
-			remainRootCoins, _, err := s.UnspentOutputsAUT(txMgrNs, autTx.AUTName(), true)
+			remainRootCoins, _, err := s.UnspentOutputsAUT(txMgrNs, autTx.AUTIdentifier(), true)
 			if err != nil {
 				return err
 			}

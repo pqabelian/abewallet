@@ -1078,7 +1078,7 @@ func (w *Wallet) txPqringCTToOutputsMLPAUT(autTransaction aut.Transaction, txOut
 		}
 		outputPublic += int64(txOutDescs[i].Value())
 		targetValue += abeutil.Amount(1)
-		targetAUTValue += autTransaction.Value(uint8(i))
+		targetAUTValue += autTransaction.ValueAt(uint8(i))
 	}
 
 	if targetValue < 0 || targetValue > abeutil.Amount(abeutil.MaxNeutrino) {
@@ -1089,7 +1089,7 @@ func (w *Wallet) txPqringCTToOutputsMLPAUT(autTransaction aut.Transaction, txOut
 	if autTransaction.Type() != aut.Registration {
 		err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 			txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
-			eligibleAUT, err = w.findEligibleTxosAbeAUT(txmgrNs, minconf, bs, autTransaction.AUTName())
+			eligibleAUT, err = w.findEligibleTxosAbeAUT(txmgrNs, minconf, bs, autTransaction.AUTIdentifier())
 			return err
 		})
 		if err != nil {
@@ -1099,7 +1099,7 @@ func (w *Wallet) txPqringCTToOutputsMLPAUT(autTransaction aut.Transaction, txOut
 			return nil, errors.New("not enough AUT coin to spend")
 		}
 		sort.Sort(sort.Reverse(byAUTCoinValue(eligibleAUT)))
-		log.Tracef("Find AUT (Name %s) eligibleAUT: ", autTransaction.AUTName())
+		log.Tracef("Find AUT (Name %s) eligibleAUT: ", autTransaction.AUTIdentifier())
 		for idx, txo := range eligibleAUT {
 			log.Tracef("(%d) AUT Coin (%s:%d) Value: %v", idx, txo.TxOutput.TxHash, txo.TxOutput.Index, txo.AUTCoinValue)
 		}

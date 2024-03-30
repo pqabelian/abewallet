@@ -1716,7 +1716,8 @@ func registerAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, er
 	}
 
 	autTransaction := &aut.RegistrationTx{
-		AutName:               []byte(cmd.AUTName),
+		AutIdentifier:         []byte(cmd.AUTIdentifier),
+		AutSymbol:             []byte(cmd.AUTSymbol),
 		IssuerTokens:          issuerTokens, // will be populated later
 		ExpireHeight:          cmd.ExpireHeight,
 		IssueTokensThreshold:  cmd.IssuerTokenThreshold,
@@ -1746,7 +1747,7 @@ func mintAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 	}
 
 	autTransaction := &aut.MintTx{
-		AutName:          []byte(cmd.AUTName),
+		AutIdentifier:    []byte(cmd.AUTIdentifier),
 		InAutRootCoinNum: 0, // will be populated later
 		OutAutCoinNum:    uint8(len(cmd.Outputs)),
 		TxoAUTValues:     txoValues,
@@ -1773,7 +1774,7 @@ func transferAUT(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	})
 	txoValues = append(txoValues, 0)
 	autTransaction := &aut.TransferTx{
-		AutName:       []byte(cmd.AUTName),
+		AutIdentifier: []byte(cmd.AUTIdentifier),
 		InAutCoinNum:  0, // will be populated later
 		OutAutCoinNum: uint8(len(cmd.Outputs)),
 		TxoAUTValues:  txoValues,
@@ -1823,7 +1824,8 @@ func reRegisterAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, 
 	}
 
 	autTransaction := &aut.ReRegistrationTx{
-		AutName:               []byte(cmd.AUTName),
+		AutIdentifier:         []byte(cmd.AUTIdentifier),
+		AutSymbol:             []byte(cmd.AUTSymbol),
 		IssuerTokens:          issuerTokens,
 		ExpireHeight:          cmd.ExpireHeight,
 		IssuerUpdateThreshold: cmd.IssuerTokenThreshold,
@@ -1854,9 +1856,9 @@ func burnAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 	}
 
 	autTransaction := &aut.BurnTx{
-		AutName:      []byte(cmd.AUTName),
-		InAutCoinNum: 0, // will be populated
-		Memo:         []byte{},
+		AutIdentifier: []byte(cmd.AUTIdentifier),
+		InAutCoinNum:  0, // will be populated
+		Memo:          []byte{},
 	}
 	return sendAddressAbeAUT(w, autTransaction, nil, 0, txrules.DefaultRelayFeePerKb, 0, 0, utxosSpecified)
 }
