@@ -1134,6 +1134,10 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 		Height: block.Height,
 	}
 
+	if len(block.TxRecords) == 0 {
+		log.Warnf("Block %s with height %d has %d transaction, please check the connected node and status of blockchain", block.Hash, block.Height, len(block.TxRecords))
+		return nil
+	}
 	coinbaseTx := block.TxRecords[0].MsgTx
 
 	coinbaseOutput := make(map[wire.OutPointAbe]*UnspentUTXO)
