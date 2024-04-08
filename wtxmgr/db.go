@@ -1404,11 +1404,11 @@ func ConfirmSpentTXO(ns walletdb.ReadWriteBucket, txHash chainhash.Hash, index u
 				return err
 			}
 			if autCoin.IsAUTRootCoin {
-				autSpendableRootCoinNums[string(autCoin.AUTName)] -= 1
-				autRootCoinNums[string(autCoin.AUTName)] -= 1
+				autSpendableRootCoinNums[string(autCoin.AUTIdentifier)] -= 1
+				autRootCoinNums[string(autCoin.AUTIdentifier)] -= 1
 			} else {
-				autSpendableBals[string(autCoin.AUTName)] -= autCoin.AUTCoinValue
-				autBals[string(autCoin.AUTName)] -= autCoin.AUTCoinValue
+				autSpendableBals[string(autCoin.AUTIdentifier)] -= autCoin.AUTCoinValue
+				autBals[string(autCoin.AUTIdentifier)] -= autCoin.AUTCoinValue
 			}
 		}
 
@@ -1442,9 +1442,9 @@ func ConfirmSpentTXO(ns walletdb.ReadWriteBucket, txHash chainhash.Hash, index u
 					return err
 				}
 				if autCoin.IsAUTRootCoin {
-					autRootCoinNums[string(autCoin.AUTName)] -= 1
+					autRootCoinNums[string(autCoin.AUTIdentifier)] -= 1
 				} else {
-					autBals[string(autCoin.AUTName)] -= autCoin.AUTCoinValue
+					autBals[string(autCoin.AUTIdentifier)] -= autCoin.AUTCoinValue
 				}
 			}
 		}

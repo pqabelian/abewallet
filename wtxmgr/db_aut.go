@@ -11,7 +11,7 @@ import (
 
 // block height || block hash -> version + []UnspentTXO 【txhash + index + amount + generationTime + ringhash】
 func valueAUTCoin(coin *AUTCoin) []byte {
-	res := make([]byte, chainhash.HashSize+1+4+len(coin.AUTName)+1+8+4+len(coin.AddrKey)+1)
+	res := make([]byte, chainhash.HashSize+1+4+len(coin.AUTIdentifier)+1+8+4+len(coin.AddrKey)+1)
 
 	offset := 0
 	copy(res[offset:], coin.TxOutput.TxHash[:])
@@ -19,10 +19,10 @@ func valueAUTCoin(coin *AUTCoin) []byte {
 	res[offset] = coin.TxOutput.Index
 	offset += 1
 
-	byteOrder.PutUint32(res[offset:], uint32(len(coin.AUTName)))
+	byteOrder.PutUint32(res[offset:], uint32(len(coin.AUTIdentifier)))
 	offset += 4
-	copy(res[offset:], coin.AUTName)
-	offset += len(coin.AUTName)
+	copy(res[offset:], coin.AUTIdentifier)
+	offset += len(coin.AUTIdentifier)
 
 	//_ = coin.IsAUTRootCoin //  byte 1
 	if coin.IsAUTRootCoin {

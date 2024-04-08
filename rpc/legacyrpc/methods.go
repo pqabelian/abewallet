@@ -12,7 +12,6 @@ import (
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/aut"
 	"github.com/abesuite/abewallet/wallet/txrules"
-	"github.com/abesuite/abewallet/wtxmgr"
 	"sort"
 	"strings"
 	"sync"
@@ -951,23 +950,33 @@ func listAUTCoins(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.ListAUTCoinsCmd)
 
 	rootCoinOnly := cmd.RootCoinOnly != nil && *cmd.RootCoinOnly
-	autName := ""
-	if cmd.AUTName != nil {
-		autName = *cmd.AUTName
+	autIdentifier := ""
+	if cmd.AUTIdentifier != nil {
+		autIdentifier = *cmd.AUTIdentifier
 	}
-	autCoins, utxos, err := w.FetchAUTCoins(autName, rootCoinOnly)
+	autCoins, utxos, err := w.FetchAUTCoins(autIdentifier, rootCoinOnly)
 	if err != nil {
 		return nil, err
 	}
 
 	type tt struct {
-		*wtxmgr.AUTCoin
-		UTXOHash string
+		TxOutput      wire.OutPointAbe
+		AUTIdentifier string
+		IsAUTRootCoin bool
+		AUTCoinValue  uint64
+		AddrKey       []byte
+		Spent         bool
+		UTXOHash      string
 	}
 	res := make([]*tt, len(autCoins))
 	for i := 0; i < len(autCoins); i++ {
 		res[i] = &tt{
-			AUTCoin: autCoins[i],
+			TxOutput:      autCoins[i].TxOutput,
+			AUTIdentifier: string(autCoins[i].AUTIdentifier),
+			IsAUTRootCoin: autCoins[i].IsAUTRootCoin,
+			AUTCoinValue:  autCoins[i].AUTCoinValue,
+			AddrKey:       autCoins[i].AddrKey,
+			Spent:         autCoins[i].Spent,
 		}
 
 		if utxos[i] != nil {
@@ -1399,13 +1408,15 @@ func sendAddressAbe(w *wallet.Wallet, amounts []abejson.Pair,
 }
 
 func sendAddressAbeAUT(w *wallet.Wallet, autTransaction aut.Transaction, amounts []abejson.Pair,
-	minconf int32, feePerKbSpecified abeutil.Amount, autIssueTokenThreshold uint8, autIssueUpdateThreshold uint8, utxoSpecified []string) (string, error) {
+	minconf int32, feePerKbSpecified abeutil.Amount,
+	autIssueTokenThreshold uint8, autIssueUpdateThreshold uint8, utxoSpecified []string) (string, error) {
 
 	outputDescs, err := makeOutputDescsForPairs(w, amounts, w.ChainParams())
 	if err != nil {
 		return "", err
 	}
-	tx, err := w.SendOutputsAUT(autTransaction, outputDescs, minconf, feePerKbSpecified, autIssueTokenThreshold, autIssueUpdateThreshold, utxoSpecified)
+	tx, err := w.SendOutputsAUT(autTransaction, outputDescs, minconf, feePerKbSpecified,
+		autIssueTokenThreshold, autIssueUpdateThreshold, utxoSpecified)
 	if err != nil {
 		if err == txrules.ErrAmountNegative {
 			return "", ErrNeedPositiveAmount
@@ -1678,6 +1689,14 @@ func sendToAddressesAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 func registerAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.RegisterAUTTransactionCmd)
 	// according command to  build the output
+
+	if len(cmd.AUTIdentifier) != aut.IdentifierLength {
+		return nil, fmt.Errorf("the length of identifier is expected %d, but got %d", aut.IdentifierLength, len(cmd.AUTIdentifier))
+	}
+	if len(cmd.AUTSymbol) > aut.MaxSymbolLength {
+		return nil, fmt.Errorf("the length of symbol is expected no more than %d, but got %d", aut.MaxSymbolLength, len(cmd.AUTSymbol))
+	}
+
 	// unique issuer token check
 	existIssuerToken := map[string]struct{}{}
 	issuerTokens := make([][]byte, 0, len(cmd.IssuerTokens))
@@ -1697,14 +1716,21 @@ func registerAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, er
 		issuerTokens = append(issuerTokens, cryptoAddress)
 	}
 	if len(existIssuerToken) != len(cmd.IssuerTokens) {
-		return nil, errors.New("issuer token can not contain duplicate one")
+		return nil, errors.New("issuer token can not contain duplicate")
 	}
-	if len(cmd.IssuerTokens) < int(cmd.IssuerTokenThreshold) {
-		return nil, errors.New("the number of issuer token must more than the issue threshold")
+	if int(cmd.IssuerTokenThreshold) > len(cmd.IssuerTokens) {
+		return nil, fmt.Errorf("the issue threshold should not exceed declared issuer tokens %d", len(cmd.IssuerTokens))
 	}
-	if len(cmd.IssuerTokens) < int(cmd.IssuerUpdateThreshold) {
-		return nil, errors.New("the number of issuer token must more than the update threshold")
+	if int(cmd.IssuerUpdateThreshold) > len(cmd.IssuerTokens) {
+		return nil, fmt.Errorf("the update threshold should not exceed declared issuer tokens %d", len(cmd.IssuerTokens))
 	}
+	if len(cmd.UnitName) > aut.MaxUnitLength {
+		return nil, fmt.Errorf("the unit name is expected to no more than %d, but got %d", aut.MaxUnitLength, len(cmd.UnitName))
+	}
+	if len(cmd.MinUnitName) > aut.MaxUnitLength {
+		return nil, fmt.Errorf("the minimum unit name is expected to no more than %d, but got %d", aut.MaxMinUnitLength, len(cmd.MinUnitName))
+	}
+
 	outputs := make([]abejson.Pair, 0, (cmd.IssuerTimes+1)*len(cmd.IssuerTokens))
 	for i := 0; i < len(cmd.IssuerTokens); i++ {
 		for j := 0; j < cmd.IssuerTimes+1; j++ { // additional one for re-registration
@@ -1735,6 +1761,9 @@ func registerAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, er
 func mintAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.MintAUTTransactionCmd)
 	// according command to  build the output
+	if len(cmd.AUTIdentifier) != aut.IdentifierLength {
+		return nil, fmt.Errorf("the length of identifier is expected %d, but got %d", aut.IdentifierLength, len(cmd.AUTIdentifier))
+	}
 	// unique issuer token check
 	outputs := make([]abejson.Pair, 0)
 	txoValues := make([]uint64, 0, len(cmd.Outputs))
@@ -1759,6 +1788,9 @@ func mintAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 func transferAUT(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.TransferAUTTransactionCmd)
 	// according command to  build the output
+	if len(cmd.AUTIdentifier) != aut.IdentifierLength {
+		return nil, fmt.Errorf("the length of identifier is expected %d, but got %d", aut.IdentifierLength, len(cmd.AUTIdentifier))
+	}
 	outputs := make([]abejson.Pair, 0, len(cmd.Outputs)+1)
 	txoValues := make([]uint64, 0, len(cmd.Outputs)+1)
 	for i := 0; i < len(cmd.Outputs); i++ {
@@ -1786,6 +1818,12 @@ func transferAUT(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 func reRegisterAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.ReRegisterAUTTransactionCmd)
 	// according command to  build the output
+	if len(cmd.AUTIdentifier) != aut.IdentifierLength {
+		return nil, fmt.Errorf("the length of identifier is expected %d, but got %d", aut.IdentifierLength, len(cmd.AUTIdentifier))
+	}
+	if len(cmd.AUTSymbol) > aut.MaxSymbolLength {
+		return nil, fmt.Errorf("the length of symbol is expected no more than %d, but got %d", aut.MaxSymbolLength, len(cmd.AUTSymbol))
+	}
 	// unique issuer token check
 	existIssuerToken := map[string]struct{}{}
 	issuerTokens := make([][]byte, 0, len(cmd.IssuerTokens))
@@ -1805,13 +1843,13 @@ func reRegisterAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, 
 		issuerTokens = append(issuerTokens, cryptoAddress)
 	}
 	if len(existIssuerToken) != len(cmd.IssuerTokens) {
-		return nil, errors.New("issuer token can not contain duplicate one")
+		return nil, errors.New("issuer token can not contain duplicate")
 	}
-	if len(cmd.IssuerTokens) < int(cmd.IssuerTokenThreshold) {
-		return nil, errors.New("the number of issuer token must more than the issue threshold")
+	if int(cmd.IssuerTokenThreshold) > len(cmd.IssuerTokens) {
+		return nil, fmt.Errorf("the issue threshold should not exceed declared issuer tokens %d", len(cmd.IssuerTokens))
 	}
-	if len(cmd.IssuerTokens) < int(cmd.IssuerUpdateThreshold) {
-		return nil, errors.New("the number of issuer token must more than the update threshold")
+	if int(cmd.IssuerUpdateThreshold) > len(cmd.IssuerTokens) {
+		return nil, fmt.Errorf("the update threshold should not exceed declared issuer tokens %d", len(cmd.IssuerTokens))
 	}
 	outputs := make([]abejson.Pair, 0, (cmd.IssuerTimes+1)*len(cmd.IssuerTokens))
 	for i := 0; i < len(cmd.IssuerTokens); i++ {
@@ -1845,6 +1883,10 @@ func burnAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 	utxosSpecified := strings.Split(cmd.UTXOSpescified, ",")
 	if len(utxosSpecified) == 0 {
 		return nil, errors.New("specified utxos must more than one")
+	}
+
+	if len(cmd.AUTIdentifier) != aut.IdentifierLength {
+		return nil, fmt.Errorf("the length of identifier is expected %d, but got %d", aut.IdentifierLength, len(cmd.AUTIdentifier))
 	}
 
 	existUTXO := map[string]struct{}{}

@@ -423,8 +423,8 @@ func createTransferTxAbeMsgTemplate(txIn []*wire.TxInAbe, txOutNum int, txMemo [
 func PrintConsumedUTXOs(selectedTxos []*wtxmgr.UnspentUTXO) {
 	log.Infof("Consumed utxos: ")
 	for idx, txo := range selectedTxos {
-		log.Infof("(%d) Value %v at height %d, utxoHash: %s (From Coinbase: %t)",
-			idx, float64(txo.Amount)/math.Pow10(7), txo.Height, txo.Hash().String(), txo.FromCoinBase)
+		log.Infof("(%d) Value %v at height %d, version %08x, utxoHash: %s (From Coinbase: %t)",
+			idx, float64(txo.Amount)/math.Pow10(7), txo.Height, txo.Version, txo.Hash().String(), txo.FromCoinBase)
 	}
 }
 
@@ -772,254 +772,15 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 		return nil, err
 	}
 
-	PrintConsumedUTXOs(selectedTxos)
-
-	if w.Manager.GetCryptoScheme() == abecryptoxparam.CryptoSchemePQRingCT {
-		serializeAddressBytes := make([][]byte, len(selectedTxos))
-		serializedAskspBytes := make([][]byte, len(selectedTxos))
-		serializedAsksnBytes := make([][]byte, len(selectedTxos))
-		serializedVskBytes := make([][]byte, len(selectedTxos))
-		detectorKeys := make([][]byte, len(selectedTxos))
-		err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-			addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-			var serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, detectorKeyEnc []byte
-			for i := 0; i < len(selectedTxos); i++ {
-				coinAddr, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{
-					Version:   selectedTxos[i].Version,
-					TxoScript: selectedRings[selectedTxos[i].RingHash].TxoScripts[selectedTxos[i].Index],
-				})
-				if err != nil {
-					return err
-				}
-				serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, _, detectorKeyEnc, err = w.Manager.FetchAddressKeyEnc(addrmgrNs, coinAddr)
-				if err != nil {
-					return err
-				}
-				serializeAddressBytes[i], serializedAskspBytes[i], serializedAsksnBytes[i], serializedVskBytes[i], detectorKeys[i], err = w.Manager.DecryptAddressKey(serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, detectorKeyEnc)
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
-		abeTxInputDescs := make([]*abecryptox.AbeTxInputDescByKeys, 0, len(selectedTxos))
-		txIns := make([]*wire.TxInAbe, len(selectedTxos))
-		for i := 0; i < len(selectedTxos); i++ {
-			txIns[i] = &wire.TxInAbe{
-				SerialNumber: nil,
-				PreviousOutPointRing: wire.OutPointRing{
-					Version:    selectedRings[selectedTxos[i].RingHash].Version,
-					BlockHashs: make([]*chainhash.Hash, len(selectedRings[selectedTxos[i].RingHash].BlockHashes)),
-					OutPoints:  make([]*wire.OutPointAbe, len(selectedRings[selectedTxos[i].RingHash].TxHashes)),
-				},
-			}
-			for j := 0; j < len(selectedRings[selectedTxos[i].RingHash].BlockHashes); j++ {
-				txIns[i].PreviousOutPointRing.BlockHashs[j] = &selectedRings[selectedTxos[i].RingHash].BlockHashes[j]
-			}
-
-			for j := 0; j < len(selectedRings[selectedTxos[i].RingHash].TxHashes); j++ {
-				txIns[i].PreviousOutPointRing.OutPoints[j] = &wire.OutPointAbe{
-					TxHash: selectedRings[selectedTxos[i].RingHash].TxHashes[j],
-					Index:  selectedRings[selectedTxos[i].RingHash].Index[j],
-				}
-			}
-
-			serializedTxoLists := make([]*wire.TxOutAbe, 0, len(selectedRings[selectedTxos[i].RingHash].Index))
-			for j := 0; j < len(selectedRings[selectedTxos[i].RingHash].Index); j++ {
-				serializedTxoLists = append(serializedTxoLists, &wire.TxOutAbe{
-					Version:   selectedRings[selectedTxos[i].RingHash].Version,
-					TxoScript: selectedRings[selectedTxos[i].RingHash].TxoScripts[j],
-				})
-			}
-			txoRing := &wire.TxoRing{
-				Version:         selectedTxos[i].Version,
-				RingBlockHeight: selectedTxos[i].Height, // Ring Height
-				OutPointRing:    &txIns[i].PreviousOutPointRing,
-				TxOuts:          serializedTxoLists,
-				IsCoinbase:      selectedTxos[i].FromCoinBase,
-			}
-			// fetch the aSkSpByte from manager
-			var copyedVskBytes []byte
-			if serializedVskBytes[i] != nil {
-				copyedVskBytes = make([]byte, len(serializedVskBytes[i]))
-				copy(copyedVskBytes, serializedVskBytes[i])
-			}
-
-			abeTxInputDescs = append(abeTxInputDescs, abecryptox.NewAbeTxInputDescByKeys(
-				txoRing,
-				selectedTxos[i].Index,
-				serializeAddressBytes[i],
-				serializedAskspBytes[i],
-				serializedAsksnBytes[i],
-				copyedVskBytes,
-				detectorKeys[i],
-				selectedTxos[i].Amount))
-		}
-		usedCntNum := ^uint64(0)
-		if needChangeFlag {
-			var addrBytes []byte
-			// fetch a free address if possible
-			usedCntNum, addrBytes, err = w.FetchChangeAddress(true)
-			if err != nil {
-				// fetch a change address for the change
-				_, usedCntNum, addrBytes, err = w.NewAddressKey(true)
-				if err != nil {
-					return nil, err
-				}
-			}
-			log.Infof("No.%d would be used as change address when generating a transaction", usedCntNum)
-
-			txOutDescs = append(txOutDescs, abecryptox.NewAbeTxOutDesc(addrBytes, uint64(currentTotal-txFee-targetValue)))
-			// random the outputs
-			r, err := rand.Int(rand.Reader, big.NewInt(int64(len(txOutDescs))))
-			if err != nil {
-				return nil, err
-			}
-			index := r.Int64()
-			txOutDescs[len(txOutDescs)-1], txOutDescs[index] = txOutDescs[index], txOutDescs[len(txOutDescs)-1]
-		}
-
-		//PrintNewUTXOs(txOutDescs, needChangeFlag, txFee)
-
-		//TODO(abe) 20210627: to sure the txmemo?
-		transferTxTemplate, err := createTransferTxAbeMsgTemplateMLP(txIns, len(txOutDescs), []byte{}, uint64(txFee))
-		if err != nil {
-			return nil, errors.New("error for creating a transfer transaction template ")
-		}
-
-		// adjust the order of output descs
-		sort.SliceStable(txOutDescs, func(i, j int) bool {
-			outputIAddressPrivacyLevel, _, _, _ := abecryptoxkey.CryptoAddressParse(txOutDescs[i].CryptoAddress())
-			outputJAddressPrivacyLevel, _, _, _ := abecryptoxkey.CryptoAddressParse(txOutDescs[j].CryptoAddress())
-			if outputIAddressPrivacyLevel != abecryptoxkey.PrivacyLevelPSEUDONYM && outputJAddressPrivacyLevel == abecryptoxkey.PrivacyLevelPSEUDONYM {
-				return true
-			}
-			return false
-		})
-
-		transferTx, err := abecryptox.TransferTxGenByKeys(abeTxInputDescs, txOutDescs, transferTxTemplate)
-		if err != nil {
-			return nil, err
-		}
-		resTx := &txauthor.AuthoredTxAbe{
-			Tx:              transferTx,
-			ChangeAddressNo: usedCntNum,
-		}
-		return resTx, nil
+	cryptoScheme := w.Manager.GetCryptoScheme()
+	if cryptoScheme == abecryptoxparam.CryptoSchemePQRingCT && privacyLevel == abecryptoxkey.PrivacyLevelRINGCTPre {
+		return w.createTransactionMLPByKeys(selectedTxos, txOutDescs, []byte{}, txFee, needChangeFlag, true)
 	}
-	//w.Manager.GetCryptoScheme() == abecryptoxparam.CryptoSchemePQRingCTX
-	var spKeyRootSeed, snKeyRootSeed, valueRootSeed, detectorRootKey []byte
-	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		spKeyRootSeed, snKeyRootSeed, valueRootSeed, detectorRootKey, err = w.Manager.FetchProtectedRootSeeds(addrmgrNs)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	if cryptoScheme == abecryptoxparam.CryptoSchemePQRingCTX &&
+		(privacyLevel == abecryptoxkey.PrivacyLevelRINGCT || privacyLevel == abecryptoxkey.PrivacyLevelPSEUDONYM) {
+		return w.createTransactionMLPByRootSeeds(selectedTxos, txOutDescs, []byte{}, txFee, needChangeFlag, true)
 	}
-	abeTxInputDescs := make([]*abecryptox.AbeTxInputDescByRootSeeds, 0, len(selectedTxos))
-	txIns := make([]*wire.TxInAbe, len(selectedTxos))
-	for i := 0; i < len(selectedTxos); i++ {
-		txIns[i] = &wire.TxInAbe{
-			SerialNumber: nil,
-			PreviousOutPointRing: wire.OutPointRing{
-				Version:    selectedRings[selectedTxos[i].RingHash].Version,
-				BlockHashs: make([]*chainhash.Hash, len(selectedRings[selectedTxos[i].RingHash].BlockHashes)),
-				OutPoints:  make([]*wire.OutPointAbe, len(selectedRings[selectedTxos[i].RingHash].TxHashes)),
-			},
-		}
-		for j := 0; j < len(selectedRings[selectedTxos[i].RingHash].BlockHashes); j++ {
-			txIns[i].PreviousOutPointRing.BlockHashs[j] = &selectedRings[selectedTxos[i].RingHash].BlockHashes[j]
-		}
-
-		for j := 0; j < len(selectedRings[selectedTxos[i].RingHash].TxHashes); j++ {
-			txIns[i].PreviousOutPointRing.OutPoints[j] = &wire.OutPointAbe{
-				TxHash: selectedRings[selectedTxos[i].RingHash].TxHashes[j],
-				Index:  selectedRings[selectedTxos[i].RingHash].Index[j],
-			}
-		}
-
-		serializedTxoLists := make([]*wire.TxOutAbe, 0, len(selectedRings[selectedTxos[i].RingHash].Index))
-		for j := 0; j < len(selectedRings[selectedTxos[i].RingHash].Index); j++ {
-			serializedTxoLists = append(serializedTxoLists, &wire.TxOutAbe{
-				Version:   selectedRings[selectedTxos[i].RingHash].Version,
-				TxoScript: selectedRings[selectedTxos[i].RingHash].TxoScripts[j],
-			})
-		}
-		txoRing := &wire.TxoRing{
-			Version:         selectedTxos[i].Version,
-			RingBlockHeight: selectedTxos[i].Height, // Ring Height
-			OutPointRing:    &txIns[i].PreviousOutPointRing,
-			TxOuts:          serializedTxoLists,
-			IsCoinbase:      selectedTxos[i].FromCoinBase,
-		}
-
-		abeTxInputDescs = append(abeTxInputDescs, abecryptox.NewAbeTxInputDescByRootSeeds(
-			txoRing,
-			selectedTxos[i].Index,
-			abecryptoxparam.CryptoSchemePQRingCTX,
-			w.Manager.GetPrivacyLevel(),
-			spKeyRootSeed,
-			snKeyRootSeed,
-			valueRootSeed,
-			detectorRootKey,
-			selectedTxos[i].Amount))
-	}
-	usedCntNum := ^uint64(0)
-	if needChangeFlag {
-		var addrBytes []byte
-		// fetch a free address if possible
-		usedCntNum, addrBytes, err = w.FetchChangeAddress(true)
-		if err != nil {
-			// fetch a change address for the change
-			_, usedCntNum, addrBytes, err = w.NewAddressKey(true)
-			if err != nil {
-				return nil, err
-			}
-		}
-		log.Infof("No.%d would be used as change address when generating a transaction", usedCntNum)
-
-		txOutDescs = append(txOutDescs, abecryptox.NewAbeTxOutDesc(addrBytes, uint64(currentTotal-txFee-targetValue)))
-		// random the outputs
-		r, err := rand.Int(rand.Reader, big.NewInt(int64(len(txOutDescs))))
-		if err != nil {
-			return nil, err
-		}
-		index := r.Int64()
-		txOutDescs[len(txOutDescs)-1], txOutDescs[index] = txOutDescs[index], txOutDescs[len(txOutDescs)-1]
-	}
-
-	//PrintNewUTXOs(txOutDescs, needChangeFlag, txFee)
-
-	//TODO(abe) 20210627: to sure the txmemo?
-	transferTxTemplate, err := createTransferTxAbeMsgTemplateMLP(txIns, len(txOutDescs), []byte{}, uint64(txFee))
-	if err != nil {
-		return nil, errors.New("error for creating a transfer transaction template ")
-	}
-
-	// adjust the order of output descs
-	sort.SliceStable(txOutDescs, func(i, j int) bool {
-		outputIAddressPrivacyLevel, _, _, _ := abecryptoxkey.CryptoAddressParse(txOutDescs[i].CryptoAddress())
-		outputJAddressPrivacyLevel, _, _, _ := abecryptoxkey.CryptoAddressParse(txOutDescs[j].CryptoAddress())
-		if outputIAddressPrivacyLevel != abecryptoxkey.PrivacyLevelPSEUDONYM && outputJAddressPrivacyLevel == abecryptoxkey.PrivacyLevelPSEUDONYM {
-			return true
-		}
-		return false
-	})
-
-	transferTx, err := abecryptox.TransferTxGenByRootSeeds(abeTxInputDescs, txOutDescs, transferTxTemplate)
-	if err != nil {
-		return nil, err
-	}
-	resTx := &txauthor.AuthoredTxAbe{
-		Tx:              transferTx,
-		ChangeAddressNo: usedCntNum,
-	}
-	return resTx, nil
-
+	return nil, errors.New("unsupported (crypto scheme, privacy level)")
 	// If a dry run was requested, we return now before adding the input
 	// scripts, and don't commit the database transaction. The DB will be
 	// rolled back when this method returns to ensure the dry run didn't
@@ -1367,10 +1128,171 @@ func (w *Wallet) txPqringCTToOutputsMLPAUT(autTransaction aut.Transaction, txOut
 	if err != nil {
 		return nil, errors.New("can not serialize the aut transaction")
 	}
-	return w.createTransactionMLP(selectedTxos, txOutDescs, memo, txFee, true, false)
+
+	return w.createTransactionMLPByRootSeeds(selectedTxos, txOutDescs, memo, txFee, true, false)
 }
 
-func (w *Wallet) createTransactionMLP(
+func (w *Wallet) createTransactionMLPByRootSeeds(
+	selectedUTXOs []*wtxmgr.UnspentUTXO, txOutDescs []*abecryptox.AbeTxOutputDesc,
+	memo []byte, txFee abeutil.Amount,
+	needChangeFlag bool, randomOutput bool) (unsignedTx *txauthor.AuthoredTxAbe, err error) {
+	selectedRings := make(map[chainhash.Hash]*wtxmgr.Ring)
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		for _, txo := range selectedUTXOs {
+			_, ok := selectedRings[txo.RingHash]
+			if !ok {
+				ring, err := wtxmgr.FetchRingDetails(txmgrNs, txo.RingHash[:])
+				if err != nil {
+					return err
+				}
+				selectedRings[txo.RingHash] = ring
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	PrintConsumedUTXOs(selectedUTXOs)
+
+	if w.Manager.IsLocked() {
+		return nil, errors.New("wallet is locked")
+	}
+	var coinSpendKeyRootSeed []byte
+	var coinSerialNumberKeyRootSeed []byte
+	var coinValueKeyRootSeed []byte
+	var coinDetectorRootKey []byte
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+		coinSpendKeyRootSeed, coinSerialNumberKeyRootSeed, coinValueKeyRootSeed, coinDetectorRootKey, err = w.Manager.FetchProtectedRootSeeds(addrmgrNs)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	currentTotal := abeutil.Amount(0)
+	abeTxInputDescs := make([]*abecryptox.AbeTxInputDescByRootSeeds, 0, len(selectedUTXOs))
+	txIns := make([]*wire.TxInAbe, len(selectedUTXOs))
+	for i := 0; i < len(selectedUTXOs); i++ {
+		currentTotal += abeutil.Amount(selectedUTXOs[i].Amount)
+
+		txIns[i] = &wire.TxInAbe{
+			SerialNumber: nil,
+			PreviousOutPointRing: wire.OutPointRing{
+				Version:    selectedRings[selectedUTXOs[i].RingHash].Version,
+				BlockHashs: make([]*chainhash.Hash, len(selectedRings[selectedUTXOs[i].RingHash].BlockHashes)),
+				OutPoints:  make([]*wire.OutPointAbe, len(selectedRings[selectedUTXOs[i].RingHash].TxHashes)),
+			},
+		}
+		for j := 0; j < len(selectedRings[selectedUTXOs[i].RingHash].BlockHashes); j++ {
+			txIns[i].PreviousOutPointRing.BlockHashs[j] = &selectedRings[selectedUTXOs[i].RingHash].BlockHashes[j]
+		}
+
+		for j := 0; j < len(selectedRings[selectedUTXOs[i].RingHash].TxHashes); j++ {
+			txIns[i].PreviousOutPointRing.OutPoints[j] = &wire.OutPointAbe{
+				TxHash: selectedRings[selectedUTXOs[i].RingHash].TxHashes[j],
+				Index:  selectedRings[selectedUTXOs[i].RingHash].Index[j],
+			}
+		}
+
+		serializedTxoLists := make([]*wire.TxOutAbe, 0, len(selectedRings[selectedUTXOs[i].RingHash].Index))
+		for j := 0; j < len(selectedRings[selectedUTXOs[i].RingHash].Index); j++ {
+			serializedTxoLists = append(serializedTxoLists, &wire.TxOutAbe{
+				Version:   selectedRings[selectedUTXOs[i].RingHash].Version,
+				TxoScript: selectedRings[selectedUTXOs[i].RingHash].TxoScripts[j],
+			})
+		}
+		txoRing := &wire.TxoRing{
+			Version:         selectedUTXOs[i].Version,
+			RingBlockHeight: selectedUTXOs[i].Height, // Ring Height
+			OutPointRing:    &txIns[i].PreviousOutPointRing,
+			TxOuts:          serializedTxoLists,
+			IsCoinbase:      selectedUTXOs[i].FromCoinBase,
+		}
+
+		abeTxInputDescs = append(abeTxInputDescs, abecryptox.NewAbeTxInputDescByRootSeeds(
+			txoRing,
+			selectedUTXOs[i].Index,
+			w.Manager.GetCryptoScheme(),
+			w.Manager.GetPrivacyLevel(),
+			coinSpendKeyRootSeed,
+			coinSerialNumberKeyRootSeed,
+			coinValueKeyRootSeed,
+			coinDetectorRootKey,
+			selectedUTXOs[i].Amount,
+		))
+	}
+
+	targetValue := abeutil.Amount(0)
+	for i := 0; i < len(txOutDescs); i++ {
+		output := txOutDescs[i]
+		targetValue += abeutil.Amount(output.Value())
+	}
+	if targetValue+txFee > currentTotal {
+		return nil, errors.New("please specify enough amount to transfer: input + fee < output ")
+	}
+
+	usedCntNum := ^uint64(0)
+	if needChangeFlag {
+		var addrBytes []byte
+		// fetch a free address if possible
+		usedCntNum, addrBytes, err = w.FetchChangeAddress(true)
+		if err != nil {
+			// fetch a change address for the change
+			_, usedCntNum, addrBytes, err = w.NewAddressKey(true)
+			if err != nil {
+				return nil, err
+			}
+			log.Infof("No.%d would be used as change address when generating a transaction", usedCntNum)
+		} else {
+			log.Infof("No.%d would be used as change address when generating a transaction", usedCntNum)
+		}
+
+		txOutDescs = append(txOutDescs, abecryptox.NewAbeTxOutDesc(addrBytes, uint64(currentTotal-txFee-targetValue)))
+		if randomOutput {
+			// random the outputs
+			r, err := rand.Int(rand.Reader, big.NewInt(int64(len(txOutDescs))))
+			if err != nil {
+				return nil, err
+			}
+			index := r.Int64()
+			txOutDescs[len(txOutDescs)-1], txOutDescs[index] = txOutDescs[index], txOutDescs[len(txOutDescs)-1]
+		}
+	}
+
+	//TODO(abe) 20210627: to sure the txmemo?
+	transferTxTemplate, err := createTransferTxAbeMsgTemplateMLP(txIns, len(txOutDescs), memo, uint64(txFee))
+	if err != nil {
+		return nil, errors.New("error for creating a transfer transaction template ")
+	}
+
+	// adjust the order of output descs
+	sort.SliceStable(txOutDescs, func(i, j int) bool {
+		outputIAddressPrivacyLevel, _, _, _ := abecryptoxkey.CryptoAddressParse(txOutDescs[i].CryptoAddress())
+		outputJAddressPrivacyLevel, _, _, _ := abecryptoxkey.CryptoAddressParse(txOutDescs[j].CryptoAddress())
+		if outputIAddressPrivacyLevel != abecryptoxkey.PrivacyLevelPSEUDONYM && outputJAddressPrivacyLevel == abecryptoxkey.PrivacyLevelPSEUDONYM {
+			return true
+		}
+		return false
+	})
+
+	transferTx, err := abecryptox.TransferTxGenByRootSeeds(abeTxInputDescs, txOutDescs, transferTxTemplate)
+	if err != nil {
+		return nil, err
+	}
+	resTx := &txauthor.AuthoredTxAbe{
+		Tx:              transferTx,
+		ChangeAddressNo: usedCntNum,
+	}
+	return resTx, nil
+}
+func (w *Wallet) createTransactionMLPByKeys(
 	selectedUTXOs []*wtxmgr.UnspentUTXO, txOutDescs []*abecryptox.AbeTxOutputDesc,
 	memo []byte, txFee abeutil.Amount,
 	needChangeFlag bool, randomOutput bool) (unsignedTx *txauthor.AuthoredTxAbe, err error) {

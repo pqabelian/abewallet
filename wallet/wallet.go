@@ -10,6 +10,7 @@ import (
 	"github.com/abesuite/abec/abecryptox/abecryptoxkey"
 	"github.com/abesuite/abec/abecryptox/abecryptoxparam"
 	"github.com/abesuite/abec/abejson"
+	"github.com/abesuite/abec/abelog"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/aut"
 	"github.com/abesuite/abec/chaincfg"
@@ -1078,13 +1079,13 @@ func (w *Wallet) FetchSpentAndConfirmedTXOSet() ([]wtxmgr.SpentConfirmedTXO, err
 	return utxos, err
 }
 
-func (w *Wallet) FetchAUTCoins(autName string, isRootCoin bool) ([]*wtxmgr.AUTCoin, []*wtxmgr.UnspentUTXO, error) {
+func (w *Wallet) FetchAUTCoins(autIdentifier string, isRootCoin bool) ([]*wtxmgr.AUTCoin, []*wtxmgr.UnspentUTXO, error) {
 	var coins []*wtxmgr.AUTCoin
 	var utxos []*wtxmgr.UnspentUTXO
 	var err error
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
-		coins, utxos, err = w.TxStore.UnspentOutputsAUT(txmgrNs, []byte(autName), isRootCoin)
+		coins, utxos, err = w.TxStore.UnspentOutputsAUT(txmgrNs, []byte(autIdentifier), isRootCoin)
 		return err
 	})
 	return coins, utxos, err
@@ -1751,7 +1752,17 @@ func (w *Wallet) SendOutputs(outputDescs []*abecryptox.AbeTxOutputDesc,
 	}
 
 	for i := 0; i < len(createdTx.Tx.TxOuts); i++ {
-		log.Debugf("tx output [%d] = %x\n", i, createdTx.Tx.TxOuts[i].TxoScript)
+		if log.Level() == abelog.LevelTrace {
+			log.Tracef("tx output [%d] = %x\n", i, createdTx.Tx.TxOuts[i].TxoScript)
+		} else if log.Level() == abelog.LevelDebug {
+			log.Debugf("tx output [%d] = %x\n", i, createdTx.Tx.TxOuts[i].TxoScript)
+		} else {
+			printedLength := len(createdTx.Tx.TxOuts[i].TxoScript)
+			if printedLength > 32 {
+				printedLength = 32
+			}
+			log.Infof("tx output [%d] = %x\n", i, createdTx.Tx.TxOuts[i].TxoScript[:printedLength])
+		}
 	}
 	// Sanity check on the returned tx hash.
 	// something error ?

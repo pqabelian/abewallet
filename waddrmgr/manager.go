@@ -438,6 +438,9 @@ func (m *Manager) DecryptAddressKey(addressEnc, addressSecretSpEnc, addressSecre
 func (m *Manager) FetchAddressKeyEnc(ns walletdb.ReadBucket, coinAddrBytes []byte) ([]byte, []byte, []byte, []byte, uint64, []byte, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
+	if m.cryptoScheme == abecryptoxparam.CryptoSchemePQRingCTX {
+		return nil, nil, nil, nil, 0, nil, nil
+	}
 	addrKey := chainhash.DoubleHashB(coinAddrBytes)
 	return fetchAddressKeyEnc(ns, addrKey)
 }
@@ -446,6 +449,9 @@ func (m *Manager) FetchAddressKeyEnc(ns walletdb.ReadBucket, coinAddrBytes []byt
 func (m *Manager) FetchAddressKeyEncByAddressKey(ns walletdb.ReadBucket, addrKey []byte) ([]byte, []byte, []byte, []byte, uint64, []byte, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
+	if m.cryptoScheme == abecryptoxparam.CryptoSchemePQRingCTX {
+		return nil, nil, nil, nil, 0, nil, nil
+	}
 	return fetchAddressKeyEnc(ns, addrKey)
 }
 
