@@ -137,10 +137,13 @@ func (c *RPCClient) IsCurrent() bool {
 	}
 	bestHeader, err := c.GetBlockHeader(bestHash)
 	if err != nil {
-		if bestHeader.Version > wire.BlockVersionEthashPow {
-			log.Warnf("Unknown version %#08 with block hash %s than highest known version %#08x, "+
-				"block data cannot be decoded normally, please check the status of backend node ",
-				bestHeader.Version, bestHash, wire.BlockVersionEthashPow)
+		if bestHeader == nil {
+			log.Warnf("Unknown behavoir from backend node, %s "+
+				"please check the status of backend node ", err)
+		} else if bestHeader.Version > wire.BlockVersionEthashPow {
+			log.Warnf("Unknown version %#08x with block hash %s than highest known version %#08x, "+
+				"block data cannot be decoded normally, please check the status of backend node: %s",
+				bestHeader.Version, bestHash, wire.BlockVersionEthashPow, err)
 		}
 		return false
 	}
