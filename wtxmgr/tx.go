@@ -1230,7 +1230,7 @@ func (s *Store) ReceiveTxo(txOut *wire.TxOutAbe, addrMgrNs walletdb.ReadWriteBuc
 	}
 
 	if s.manager.GetCryptoScheme() == abecryptoxparam.CryptoSchemePQRingCT {
-		addressEnc, _, _, valueSecretKeyEnc, _, _, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
+		addressEnc, _, _, valueSecretKeyEnc, addrIdx, _, err := s.manager.FetchAddressKeyEnc(addrMgrNs, coinAddr)
 		if err != nil {
 			return false, 0, nil, 0, err
 		}
