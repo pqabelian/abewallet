@@ -508,6 +508,7 @@ func (utxo *SpentConfirmedTXO) Serialize() ([]byte, error) {
 		return nil, err
 	}
 	res := make([]byte, len(serializeUnconfirmedUTXO)+8)
+	copy(res[:len(serializeUnconfirmedUTXO)], serializeUnconfirmedUTXO[:])
 	byteOrder.PutUint64(res[len(serializeUnconfirmedUTXO):], uint64(utxo.ConfirmTime.Unix()))
 	return res, nil
 }
