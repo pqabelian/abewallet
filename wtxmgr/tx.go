@@ -3,6 +3,7 @@ package wtxmgr
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abecrypto"
@@ -842,8 +843,8 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 		//move from the unspentUtxo bucket to spentUtxobucket if necessary
 		k := canonicalOutPointAbe(rec.MsgTx.TxIns[i].PreviousOutPointRing.OutPoints[index].TxHash, rec.MsgTx.TxIns[i].PreviousOutPointRing.OutPoints[index].Index)
 		//v := wtxmgrNs.NestedReadWriteBucket(bucketUnspentTXO).Get(k)
-		v := wtxmgrNs.NestedReadWriteBucket(bucketMaturedOutput).Get(k)
-		if v == nil {
+		serializedMatureOutput := wtxmgrNs.NestedReadWriteBucket(bucketMaturedOutput).Get(k)
+		if serializedMatureOutput == nil {
 			return fmt.Errorf("there is no such a utxo in bucket")
 		}
 		// update the spendable balance
@@ -855,7 +856,85 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 		if err != nil {
 			return err
 		}
-		amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
+
+		// statistic
+		ringDetails, err := fetchRingDetails(wtxmgrNs, ringHash[:])
+		if err != nil {
+			return err
+		}
+		coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[index], abecryptoparam.CryptoSchemePQRingCT)
+		if err != nil {
+			return err
+		}
+		addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddress))
+		if statisticsBucket := wtxmgrNs.NestedReadWriteBucket(bucketStatistics); statisticsBucket != nil {
+			var addrTxoCounter walletdb.ReadWriteBucket
+			if addrTxoCounter, err = statisticsBucket.CreateBucketIfNotExists(bucketAddrTXOCounter); err != nil {
+				str := "fail to create addrtxocnt bucket in namespace statistics"
+				return storeError(ErrDatabase, str, err)
+			}
+			addrKeyBytes, _ := hex.DecodeString(addrKey)
+			subBucket, err := addrTxoCounter.CreateBucketIfNotExists(addrKeyBytes)
+			if err != nil {
+				str := "fail to create sub bucket in namespace statistics/addrtxocnt for address"
+				return storeError(ErrDatabase, str, err)
+			}
+
+			previousAddressNumSpendableTXO, err := fetchAddrTXONum(subBucket, statisticNumSpendableTXO)
+			if err != nil {
+				return err
+			}
+			err = putAddrTXONum(subBucket, statisticNumSpendableTXO, previousAddressNumSpendableTXO-1)
+			if err != nil {
+				return err
+			}
+			previousAddressNumUnconfirmedTXO, err := fetchAddrTXONum(subBucket, statisticNumUnconfirmedTXO)
+			if err != nil {
+				return err
+			}
+			err = putAddrTXONum(subBucket, statisticNumUnconfirmedTXO, previousAddressNumUnconfirmedTXO+1)
+			if err != nil {
+				return err
+			}
+
+			amt := int64(byteOrder.Uint64(serializedMatureOutput[9:17]))
+			previousAddressSpendableBalance, err := fetchAddrTXOAmount(subBucket, statisticSpendableBalance)
+			if err != nil {
+				return err
+			}
+			err = putAddrTXOAmount(subBucket, statisticSpendableBalance, previousAddressSpendableBalance-amt)
+			if err != nil {
+				return err
+			}
+			previousAddressUnconfirmedTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticUnconfirmedBalance)
+			if err != nil {
+				return err
+			}
+			err = putAddrTXOAmount(subBucket, statisticUnconfirmedBalance, previousAddressUnconfirmedTXOBalance+amt)
+			if err != nil {
+				return err
+			}
+		}
+
+		// statistic
+		previousNumSpendableTXO, err := fetchAddrTXONum(wtxmgrNs, rootNumSpendableTXO)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXONum(wtxmgrNs, rootNumSpendableTXO, previousNumSpendableTXO-1)
+		if err != nil {
+			return err
+		}
+		previousNumUnconfirmedTXO, err := fetchAddrTXONum(wtxmgrNs, rootNumUnconfirmedTXO)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXONum(wtxmgrNs, rootNumUnconfirmedTXO, previousNumUnconfirmedTXO+1)
+		if err != nil {
+			return err
+		}
+
+		amt := abeutil.Amount(byteOrder.Uint64(serializedMatureOutput[9:17]))
 		spendableBal -= amt
 		unconfirmedBal += amt
 		err = putSpenableBalance(wtxmgrNs, spendableBal)
@@ -871,10 +950,10 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 			return err
 		}
 
-		newv := make([]byte, len(v)+40)
+		newv := make([]byte, len(serializedMatureOutput)+40)
 		offset := 0
-		copy(newv[offset:], v)
-		offset += len(v)
+		copy(newv[offset:], serializedMatureOutput)
+		offset += len(serializedMatureOutput)
 		copy(newv[offset:], rec.Hash[:])
 		offset += 32
 		byteOrder.PutUint64(newv[len(newv)-8:], uint64(time.Now().Unix()))
@@ -1093,6 +1172,26 @@ func (s *Store) InsertGenesisBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs w
 func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb.ReadWriteBucket, block *BlockRecord, extraBlock map[uint32]*BlockRecord, maturedBlockHashs []*chainhash.Hash) error {
 	log.Infof("Current sync height %d", block.Height)
 
+	numTXO := int64(0)
+	numImmatureCoinbaseTXO := int64(0)
+	numImmatureTransferTXO := int64(0)
+	numSpendableTXO := int64(0)
+	numUnconfirmedTXO := int64(0)
+
+	addrMapping := map[string]struct{}{}
+
+	addressNumTXOMapping := map[string]int64{}
+	addressNumImmatureCoinbaseTXOMapping := map[string]int64{}
+	addressNumImmatureTransferTXOMapping := map[string]int64{}
+	addressNumSpendableTXOMapping := map[string]int64{}
+	addressNumUnconfirmedTXOMapping := map[string]int64{}
+
+	addressTXOBalanceMapping := map[string]int64{}
+	addressImmatureCoinbaseTXOBalanceMapping := map[string]int64{}
+	addressImmatureTransferTXOBalanceMapping := map[string]int64{}
+	addressSpendableTXOBalanceMapping := map[string]int64{}
+	addressUnconfirmedTXOBalanceMapping := map[string]int64{}
+
 	balance, err := fetchMinedBalance(txMgrNs)
 	if err != nil {
 		return err
@@ -1171,10 +1270,24 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			if err = s.manager.MarkAddrUsed(addrMgrNs, addrIdx); err != nil {
 				log.Warnf("fail to mark No.%d address as used", addrIdx)
 			}
+			// statistic
+			numImmatureCoinbaseTXO++
+			numTXO++
+
+			addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
+			addrMapping[addrKey] = struct{}{}
+
+			addressNumImmatureCoinbaseTXOMapping[addrKey]++
+			addressNumTXOMapping[addrKey]++
+
+			addressImmatureCoinbaseTXOBalanceMapping[addrKey] += int64(v)
+			addressTXOBalanceMapping[addrKey] += int64(v)
+
 			amt := abeutil.Amount(v)
-			log.Infof("(Coinbase) Find my txo at block height %d (hash %s) with value %v", block.Height, block.Hash, amt.ToABE())
 			immatureCBBal += amt
 			balance += amt
+			log.Infof("(Coinbase) Find my txo at block height %d (hash %s) with value %v", block.Height, block.Hash, amt.ToABE())
+
 			// TODO: the transaction hash and index cannot be a unique key
 			k := wire.OutPointAbe{
 				TxHash: coinbaseTx.TxHash(),
@@ -1343,52 +1456,100 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			log.Infof("send confirmed transaction notification %v at height %d", txHash, block.Height)
 		}
 		// update the utxo ring bucket
-		for k, v := range relevantUTXORings {
+		for k, utxoRing := range relevantUTXORings {
 			//  move relevant utxo from unspentTXO or SpentButUnmined bucket to SpentConfirmTXO
-			for t := 0; t < len(v.IsMy); t++ {
+			for t := 0; t < len(utxoRing.IsMy); t++ {
 				// the outpoint owned by wallet is spent
 				// it should be move to spent and confirmed bucket
-				if v.IsMy[t] && v.Spent[t] {
+				if utxoRing.IsMy[t] && utxoRing.Spent[t] {
 					// it means that the transaction related to wallet
-					k := canonicalOutPointAbe(v.TxHashes[t], v.OutputIndexes[t])
+					outPointAbe := canonicalOutPointAbe(utxoRing.TxHashes[t], utxoRing.OutputIndexes[t])
 					// if this transaction is create by the wallet, the outpoint should be stored
 					// in spentButUnmined bucket.
 					// But if the wallet is restored, the outpoint should be in the matured bucket
-					v := existsRawMaturedOutput(txMgrNs, k)
-					if v != nil {
+					serializedMatureOutput := existsRawMaturedOutput(txMgrNs, outPointAbe)
+					if serializedMatureOutput != nil {
 						//otherwise it has been moved to spentButUnmined bucket
+
+						// statistic
+						ringDetails, err := fetchRingDetails(txMgrNs, utxoRing.RingHash[:])
+						if err != nil {
+							return err
+						}
+						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[utxoRing.OutputIndexes[t]], abecryptoparam.CryptoSchemePQRingCT)
+						if err != nil {
+							return err
+						}
+
+						numSpendableTXO--
+						numTXO--
+
+						addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddress))
+						addrMapping[addrKey] = struct{}{}
+						addressNumSpendableTXOMapping[addrKey]--
+						addressNumTXOMapping[addrKey]--
+
+						v := byteOrder.Uint64(serializedMatureOutput[9:17])
+
+						addressSpendableTXOBalanceMapping[addrKey] -= int64(v)
+						addressTXOBalanceMapping[addrKey] -= int64(v)
+
 						// update the balances
-						amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
-						balance -= amt
+						amt := abeutil.Amount(v)
 						spendableBal -= amt
-						v = append(v, txhash[:]...)
+						balance -= amt
+
+						serializedMatureOutput = append(serializedMatureOutput, txhash[:]...)
 						var confirmTime [8]byte
 						byteOrder.PutUint64(confirmTime[:], uint64(block.RecvTime.Unix()))
-						v = append(v, confirmTime[:]...) //spentTime
-						v = append(v, confirmTime[:]...) // confirm time
-						err = deleteMaturedOutput(txMgrNs, k)
+						serializedMatureOutput = append(serializedMatureOutput, confirmTime[:]...) //spentTime
+						serializedMatureOutput = append(serializedMatureOutput, confirmTime[:]...) // confirm time
+						err = deleteMaturedOutput(txMgrNs, outPointAbe)
 						if err != nil {
 							return err
 						}
 					} else {
-						v = existsRawSpentButUnminedTXO(txMgrNs, k)
-						if v != nil { //otherwise it has been moved to spentButUnmined bucket
-							amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
-							balance -= amt
+						serializedMatureOutput = existsRawSpentButUnminedTXO(txMgrNs, outPointAbe)
+						if serializedMatureOutput != nil { //otherwise it has been moved to spentButUnmined bucket
+							// statistic
+							ringDetails, err := fetchRingDetails(txMgrNs, utxoRing.RingHash[:])
+							if err != nil {
+								return err
+							}
+							coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[utxoRing.OutputIndexes[t]], abecryptoparam.CryptoSchemePQRingCT)
+							if err != nil {
+								return err
+							}
+
+							numUnconfirmedTXO--
+							numTXO--
+
+							addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddress))
+							addrMapping[addrKey] = struct{}{}
+							addressNumUnconfirmedTXOMapping[addrKey]--
+							addressNumTXOMapping[addrKey]--
+
+							v := byteOrder.Uint64(serializedMatureOutput[9:17])
+
+							addressUnconfirmedTXOBalanceMapping[addrKey] -= int64(v)
+							addressTXOBalanceMapping[addrKey] -= int64(v)
+
+							amt := abeutil.Amount(v)
 							unconfirmedBal -= amt
+							balance -= amt
 
 							var confirmTime [8]byte
 							byteOrder.PutUint64(confirmTime[:], uint64(block.RecvTime.Unix()))
-							v = append(v, confirmTime[:]...)
-							err = deleteSpentButUnminedTXO(txMgrNs, k)
+							serializedMatureOutput = append(serializedMatureOutput, confirmTime[:]...)
+							err = deleteSpentButUnminedTXO(txMgrNs, outPointAbe)
 							if err != nil {
 								return err
 							}
 						}
 					}
 					// move to spent and confirm bucket
-					if v != nil {
-						err := putRawSpentConfirmedTXO(txMgrNs, k, v)
+					if serializedMatureOutput != nil {
+						err := putRawSpentConfirmedTXO(txMgrNs, outPointAbe, serializedMatureOutput)
 						if err != nil {
 							return err
 						}
@@ -1396,10 +1557,10 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 				}
 			}
 
-			if v.AllSpent {
+			if utxoRing.AllSpent {
 				// if all outpoints have been spent, so this utxo ring will be deleted,
 				// and mark deleted flag in ring bucket
-				err := deleteUTXORing(txMgrNs, k[:])
+				err = deleteUTXORing(txMgrNs, k[:])
 				if err != nil {
 					return err
 				}
@@ -1410,7 +1571,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 				continue
 			}
 			// if not, update the entry
-			err := putRawUTXORing(txMgrNs, k[:], v.Serialize()[:])
+			err = putRawUTXORing(txMgrNs, k[:], utxoRing.Serialize()[:])
 			if err != nil {
 				return err
 			}
@@ -1443,10 +1604,24 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 				if err = s.manager.MarkAddrUsed(addrMgrNs, addrIdx); err != nil {
 					log.Warnf("fail to mark No.%d address as used", addrIdx)
 				}
+
+				// statistic
+				numImmatureTransferTXO++
+				numTXO++
+				addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
+				addrMapping[addrKey] = struct{}{}
+				addressNumImmatureTransferTXOMapping[addrKey]++
+				addressNumTXOMapping[addrKey]++
+
+				addressImmatureTransferTXOBalanceMapping[addrKey] += int64(v)
+				addressTXOBalanceMapping[addrKey] += int64(v)
+
 				amt := abeutil.Amount(v)
-				log.Infof("(Transfer) Find my txo at block height %d (hash %s) with value %v", block.Height, block.Hash, amt.ToABE())
 				immatureTRBal += amt
 				balance += amt
+
+				log.Infof("(Transfer) Find my txo at block height %d (hash %s) with value %v", block.Height, block.Hash, amt.ToABE())
+
 				k := wire.OutPointAbe{
 					TxHash: txi.TxHash(),
 					Index:  uint8(j),
@@ -1502,10 +1677,31 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 				return err
 			}
 			for op, utxo := range utxos {
+				// statistic
+				ringDetails, err := fetchRingDetails(txMgrNs, utxo.RingHash[:])
+				if err != nil {
+					return err
+				}
+				coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[utxo.Index], abecryptoparam.CryptoSchemePQRingCT)
+				if err != nil {
+					return err
+				}
+				numImmatureCoinbaseTXO--
+				numSpendableTXO++
+
+				addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddress))
+				addrMapping[addrKey] = struct{}{}
+				addressNumImmatureCoinbaseTXOMapping[addrKey]--
+				addressNumSpendableTXOMapping[addrKey]++
+
+				addressImmatureCoinbaseTXOBalanceMapping[addrKey] -= int64(utxo.Amount)
+				addressSpendableTXOBalanceMapping[addrKey] += int64(utxo.Amount)
+
 				v := valueUnspentTXO(true, utxo.Version, utxoHeight, utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 				amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
-				spendableBal += amt
 				immatureCBBal -= amt
+				spendableBal += amt
+
 				err = putRawMaturedOutput(txMgrNs, canonicalOutPointAbe(op.TxHash, op.Index), v)
 				if err != nil {
 					return err
@@ -1581,6 +1777,149 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 		if len(coinbaseOutput) == 0 && len(transferOutputs) == 0 &&
 			len(block1CoinbaseUTXO) == 0 && len(block1TransferUTXO) == 0 &&
 			len(block0CoinbaseUTXO) == 0 && len(block0TransferUTXO) == 0 {
+
+			statisticsBucket, err := txMgrNs.CreateBucketIfNotExists(bucketStatistics)
+			if err != nil {
+				return err
+			}
+			var addrTxoCounter walletdb.ReadWriteBucket
+			if addrTxoCounter, err = statisticsBucket.CreateBucketIfNotExists(bucketAddrTXOCounter); err != nil {
+				str := "fail to create addrtxocnt bucket in namespace statistics"
+				return storeError(ErrDatabase, str, err)
+			}
+			for addrKey := range addrMapping {
+				addrKeyBytes, _ := hex.DecodeString(addrKey)
+				subBucket, err := addrTxoCounter.CreateBucketIfNotExists(addrKeyBytes)
+				if err != nil {
+					str := "fail to create sub bucket in namespace statistics/addrtxocnt for address"
+					return storeError(ErrDatabase, str, err)
+				}
+
+				preivousAddressTotal, err := fetchAddrTXONum(subBucket, statisticNumTXO)
+				if err != nil {
+					return err
+				}
+				err = putAddrTXONum(subBucket, statisticNumTXO, preivousAddressTotal+addressNumTXOMapping[addrKey])
+				if err != nil {
+					return err
+				}
+				preivousAddressTotalImmatureCoinbaseTXO, err := fetchAddrTXONum(subBucket, statisticNumImmatureCoinbaseTXO)
+				if err != nil {
+					return err
+				}
+				err = putAddrTXONum(subBucket, statisticNumImmatureCoinbaseTXO, preivousAddressTotalImmatureCoinbaseTXO+addressNumImmatureCoinbaseTXOMapping[addrKey])
+				if err != nil {
+					return err
+				}
+				preivousAddressTotalImmatureTransferTXO, err := fetchAddrTXONum(subBucket, statisticNumImmatureTransferTXO)
+				if err != nil {
+					return err
+				}
+				err = putAddrTXONum(subBucket, statisticNumImmatureTransferTXO, preivousAddressTotalImmatureTransferTXO+addressNumImmatureTransferTXOMapping[addrKey])
+				if err != nil {
+					return err
+				}
+				preivousAddressTotalSpendableTXO, err := fetchAddrTXONum(subBucket, statisticNumSpendableTXO)
+				if err != nil {
+					return err
+				}
+				err = putAddrTXONum(subBucket, statisticNumSpendableTXO, preivousAddressTotalSpendableTXO+addressNumSpendableTXOMapping[addrKey])
+				if err != nil {
+					return err
+				}
+				preivousAddressTotalUnconfirmedTXO, err := fetchAddrTXONum(subBucket, statisticNumUnconfirmedTXO)
+				if err != nil {
+					return err
+				}
+				err = putAddrTXONum(subBucket, statisticNumUnconfirmedTXO, preivousAddressTotalUnconfirmedTXO+addressNumUnconfirmedTXOMapping[addrKey])
+				if err != nil {
+					return err
+				}
+
+				previousAddrTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticTotalBalance)
+				if err != nil {
+					return err
+				}
+				err = putAddrTXOAmount(subBucket, statisticTotalBalance, previousAddrTXOBalance+addressTXOBalanceMapping[addrKey])
+				if err != nil {
+					return err
+				}
+				previousImmatureCoinbaseTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticImmatureCoinbaseBalance)
+				if err != nil {
+					return err
+				}
+				err = putAddrTXOAmount(subBucket, statisticImmatureCoinbaseBalance, previousImmatureCoinbaseTXOBalance+addressImmatureCoinbaseTXOBalanceMapping[addrKey])
+				if err != nil {
+					return err
+				}
+				previousImmatureTransferTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticImmatureTransferBalance)
+				if err != nil {
+					return err
+				}
+				err = putAddrTXOAmount(subBucket, statisticImmatureTransferBalance, previousImmatureTransferTXOBalance+addressImmatureTransferTXOBalanceMapping[addrKey])
+				if err != nil {
+					return err
+				}
+				previousSpendableTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticSpendableBalance)
+				if err != nil {
+					return err
+				}
+				err = putAddrTXOAmount(subBucket, statisticSpendableBalance, previousSpendableTXOBalance+addressSpendableTXOBalanceMapping[addrKey])
+				if err != nil {
+					return err
+				}
+				previousUnconfirmedTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticUnconfirmedBalance)
+				if err != nil {
+					return err
+				}
+				err = putAddrTXOAmount(subBucket, statisticUnconfirmedBalance, previousUnconfirmedTXOBalance+addressUnconfirmedTXOBalanceMapping[addrKey])
+				if err != nil {
+					return err
+				}
+			}
+
+			// statistic
+			previousNumTXO, err := fetchAddrTXONum(txMgrNs, rootNumTXO)
+			if err != nil {
+				return err
+			}
+			err = putAddrTXONum(txMgrNs, rootNumTXO, previousNumTXO+numTXO)
+			if err != nil {
+				return err
+			}
+			previousNumImmatureCoinbaseTXO, err := fetchAddrTXONum(txMgrNs, rootNumImmatureCoinbaseTXO)
+			if err != nil {
+				return err
+			}
+			err = putAddrTXONum(txMgrNs, rootNumImmatureCoinbaseTXO, previousNumImmatureCoinbaseTXO+numImmatureCoinbaseTXO)
+			if err != nil {
+				return err
+			}
+			previousNumImmatureTransferTXO, err := fetchAddrTXONum(txMgrNs, rootNumImmatureTransferTXO)
+			if err != nil {
+				return err
+			}
+			err = putAddrTXONum(txMgrNs, rootNumImmatureTransferTXO, previousNumImmatureTransferTXO+numImmatureTransferTXO)
+			if err != nil {
+				return err
+			}
+			previousNumSpendableTXO, err := fetchAddrTXONum(txMgrNs, rootNumSpendableTXO)
+			if err != nil {
+				return err
+			}
+			err = putAddrTXONum(txMgrNs, rootNumSpendableTXO, previousNumSpendableTXO+numSpendableTXO)
+			if err != nil {
+				return err
+			}
+			previousNumUnconfirmedTXO, err := fetchAddrTXONum(txMgrNs, rootNumUnconfirmedTXO)
+			if err != nil {
+				return err
+			}
+			err = putAddrTXONum(txMgrNs, rootNumUnconfirmedTXO, previousNumUnconfirmedTXO+numUnconfirmedTXO)
+			if err != nil {
+				return err
+			}
+
 			// return handle
 			err = putSpenableBalance(txMgrNs, spendableBal)
 			if err != nil {
@@ -1811,7 +2150,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 		}
 		// put the utxo ring into database
 		for ringHash, utxoRing := range willAddUTXORing {
-			err := putRawUTXORing(txMgrNs, ringHash[:], utxoRing.Serialize()[:])
+			err = putRawUTXORing(txMgrNs, ringHash[:], utxoRing.Serialize()[:])
 			if err != nil {
 				return err
 			}
@@ -1824,23 +2163,45 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 
 		// coinbase output -> immature
 		if len(block1CoinbaseUTXO) != 0 {
-			err := putRawImmaturedCoinbaseOutput(txMgrNs, canonicalBlock(block1.Height(), *block1.Hash()), valueImmaturedCoinbaseOutput(block1CoinbaseUTXO))
+			err = putRawImmaturedCoinbaseOutput(txMgrNs, canonicalBlock(block1.Height(), *block1.Hash()), valueImmaturedCoinbaseOutput(block1CoinbaseUTXO))
 			if err != nil {
 				return err
 			}
 		}
 		if len(block0CoinbaseUTXO) != 0 {
-			err := putRawImmaturedCoinbaseOutput(txMgrNs, canonicalBlock(block0.Height(), *block0.Hash()), valueImmaturedCoinbaseOutput(block0CoinbaseUTXO))
+			err = putRawImmaturedCoinbaseOutput(txMgrNs, canonicalBlock(block0.Height(), *block0.Hash()), valueImmaturedCoinbaseOutput(block0CoinbaseUTXO))
 			if err != nil {
 				return err
 			}
 		}
 		// transfer output -> mature
 		for op, utxo := range block1TransferUTXO {
+			// statistic
+			ringDetails, err := fetchRingDetails(txMgrNs, utxo.RingHash[:])
+			if err != nil {
+				return err
+			}
+			coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[utxo.Index], abecryptoparam.CryptoSchemePQRingCT)
+			if err != nil {
+				return err
+			}
+
+			numImmatureTransferTXO--
+			numSpendableTXO++
+			addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddress))
+			addrMapping[addrKey] = struct{}{}
+
+			addressNumImmatureTransferTXOMapping[addrKey]--
+			addressNumSpendableTXOMapping[addrKey]++
+
+			addressImmatureTransferTXOBalanceMapping[addrKey] -= int64(utxo.Amount)
+			addressSpendableTXOBalanceMapping[addrKey] += int64(utxo.Amount)
+
 			v := valueUnspentTXO(false, utxo.Version, utxo.Height, utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 			amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
-			spendableBal += amt
 			immatureTRBal -= amt
+			spendableBal += amt
+
 			log.Infof("Transfer txo at Height %d (Hash %s) , Value %v is matured!", utxo.Height, msgBlock1.BlockHash(), float64(utxo.Amount)/math.Pow10(7))
 			err = putRawMaturedOutput(txMgrNs, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
@@ -1853,10 +2214,31 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 		}
 
 		for op, utxo := range block0TransferUTXO {
+			// statistic
+			ringDetails, err := fetchRingDetails(txMgrNs, utxo.RingHash[:])
+			if err != nil {
+				return err
+			}
+			coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[utxo.Index], abecryptoparam.CryptoSchemePQRingCT)
+			if err != nil {
+				return err
+			}
+			numImmatureTransferTXO--
+			numSpendableTXO++
+			addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddress))
+			addrMapping[addrKey] = struct{}{}
+
+			addressNumImmatureTransferTXOMapping[addrKey]--
+			addressNumSpendableTXOMapping[addrKey]++
+
+			addressImmatureTransferTXOBalanceMapping[addrKey] -= int64(utxo.Amount)
+			addressSpendableTXOBalanceMapping[addrKey] += int64(utxo.Amount)
+
 			v := valueUnspentTXO(false, utxo.Version, utxo.Height, utxo.Amount, utxo.Index, utxo.GenerationTime, utxo.RingHash, utxo.RingSize)
 			amt := abeutil.Amount(byteOrder.Uint64(v[9:17]))
-			spendableBal += amt
 			immatureTRBal -= amt
+			spendableBal += amt
+
 			log.Infof("Transfer txo at Height %d (Hash %s) , Value %v is matured!", utxo.Height, msgBlock0.BlockHash(), float64(utxo.Amount)/math.Pow10(7))
 			err = putRawMaturedOutput(txMgrNs, canonicalOutPointAbe(op.TxHash, op.Index), v)
 			if err != nil {
@@ -1890,11 +2272,33 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			if err != nil {
 				return err
 			}
+
+			// statistic
+			ringDetails, err := fetchRingDetails(txMgrNs, utxo.RingHash[:])
+			if err != nil {
+				return err
+			}
+			coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[utxo.Index], abecryptoparam.CryptoSchemePQRingCT)
+			if err != nil {
+				return err
+			}
+			numImmatureTransferTXO--
+			numSpendableTXO++
+
+			addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddress))
+			addrMapping[addrKey] = struct{}{}
+			addressNumImmatureTransferTXOMapping[addrKey]--
+			addressNumSpendableTXOMapping[addrKey]++
+
+			addressImmatureTransferTXOBalanceMapping[addrKey] -= int64(utxo.Amount)
+			addressSpendableTXOBalanceMapping[addrKey] += int64(utxo.Amount)
+
 			newBal += utxo.Amount
 		}
+
 		amt := abeutil.Amount(newBal)
-		spendableBal += amt
 		immatureTRBal -= amt
+		spendableBal += amt
 	} else { // immatured
 		if len(transferOutputs) != 0 {
 			err := putRawImmaturedOutput(txMgrNs, canonicalBlock(block.Height, block.Hash), valueImmaturedOutput(transferOutputs))
@@ -1902,6 +2306,148 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 				return err
 			}
 		}
+	}
+
+	statisticsBucket, err := txMgrNs.CreateBucketIfNotExists(bucketStatistics)
+	if err != nil {
+		return err
+	}
+	var addrTxoCounter walletdb.ReadWriteBucket
+	if addrTxoCounter, err = statisticsBucket.CreateBucketIfNotExists(bucketAddrTXOCounter); err != nil {
+		str := "fialed to create addrtxocnt bucket in namespace statistics"
+		return storeError(ErrDatabase, str, err)
+	}
+	for addrKey := range addrMapping {
+		addrKeyBytes, _ := hex.DecodeString(addrKey)
+		subBucket, err := addrTxoCounter.CreateBucketIfNotExists(addrKeyBytes)
+		if err != nil {
+			str := "fialed to create sub bucket in namespace statistics/addrtxocnt for address"
+			return storeError(ErrDatabase, str, err)
+		}
+
+		preivousAddressTotal, err := fetchAddrTXONum(subBucket, statisticNumTXO)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXONum(subBucket, statisticNumTXO, preivousAddressTotal+addressNumTXOMapping[addrKey])
+		if err != nil {
+			return err
+		}
+		preivousAddressTotalImmatureCoinbaseTXO, err := fetchAddrTXONum(subBucket, statisticNumImmatureCoinbaseTXO)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXONum(subBucket, statisticNumImmatureCoinbaseTXO, preivousAddressTotalImmatureCoinbaseTXO+addressNumImmatureCoinbaseTXOMapping[addrKey])
+		if err != nil {
+			return err
+		}
+		preivousAddressTotalImmatureTransferTXO, err := fetchAddrTXONum(subBucket, statisticNumImmatureTransferTXO)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXONum(subBucket, statisticNumImmatureTransferTXO, preivousAddressTotalImmatureTransferTXO+addressNumImmatureTransferTXOMapping[addrKey])
+		if err != nil {
+			return err
+		}
+		preivousAddressTotalSpendableTXO, err := fetchAddrTXONum(subBucket, statisticNumSpendableTXO)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXONum(subBucket, statisticNumSpendableTXO, preivousAddressTotalSpendableTXO+addressNumSpendableTXOMapping[addrKey])
+		if err != nil {
+			return err
+		}
+		preivousAddressTotalUnconfirmedTXO, err := fetchAddrTXONum(subBucket, statisticNumUnconfirmedTXO)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXONum(subBucket, statisticNumUnconfirmedTXO, preivousAddressTotalUnconfirmedTXO+addressNumUnconfirmedTXOMapping[addrKey])
+		if err != nil {
+			return err
+		}
+
+		previousAddrTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticTotalBalance)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXOAmount(subBucket, statisticTotalBalance, previousAddrTXOBalance+addressTXOBalanceMapping[addrKey])
+		if err != nil {
+			return err
+		}
+		previousImmatureCoinbaseTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticImmatureCoinbaseBalance)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXOAmount(subBucket, statisticImmatureCoinbaseBalance, previousImmatureCoinbaseTXOBalance+addressImmatureCoinbaseTXOBalanceMapping[addrKey])
+		if err != nil {
+			return err
+		}
+		previousImmatureTransferTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticImmatureTransferBalance)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXOAmount(subBucket, statisticImmatureTransferBalance, previousImmatureTransferTXOBalance+addressImmatureTransferTXOBalanceMapping[addrKey])
+		if err != nil {
+			return err
+		}
+		previousSpendableTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticSpendableBalance)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXOAmount(subBucket, statisticSpendableBalance, previousSpendableTXOBalance+addressSpendableTXOBalanceMapping[addrKey])
+		if err != nil {
+			return err
+		}
+		previousUnconfirmedTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticUnconfirmedBalance)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXOAmount(subBucket, statisticUnconfirmedBalance, previousUnconfirmedTXOBalance+addressUnconfirmedTXOBalanceMapping[addrKey])
+		if err != nil {
+			return err
+		}
+	}
+
+	// statistic
+	previousNumTXO, err := fetchAddrTXONum(txMgrNs, rootNumTXO)
+	if err != nil {
+		return err
+	}
+	err = putAddrTXONum(txMgrNs, rootNumTXO, previousNumTXO+numTXO)
+	if err != nil {
+		return err
+	}
+	previousNumImmatureCoinbaseTXO, err := fetchAddrTXONum(txMgrNs, rootNumImmatureCoinbaseTXO)
+	if err != nil {
+		return err
+	}
+	err = putAddrTXONum(txMgrNs, rootNumImmatureCoinbaseTXO, previousNumImmatureCoinbaseTXO+numImmatureCoinbaseTXO)
+	if err != nil {
+		return err
+	}
+	previousNumImmatureTransferTXO, err := fetchAddrTXONum(txMgrNs, rootNumImmatureTransferTXO)
+	if err != nil {
+		return err
+	}
+	err = putAddrTXONum(txMgrNs, rootNumImmatureTransferTXO, previousNumImmatureTransferTXO+numImmatureTransferTXO)
+	if err != nil {
+		return err
+	}
+	previousNumSpendableTXO, err := fetchAddrTXONum(txMgrNs, rootNumSpendableTXO)
+	if err != nil {
+		return err
+	}
+	err = putAddrTXONum(txMgrNs, rootNumSpendableTXO, previousNumSpendableTXO+numSpendableTXO)
+	if err != nil {
+		return err
+	}
+	previousNumUnconfirmedTXO, err := fetchAddrTXONum(txMgrNs, rootNumUnconfirmedTXO)
+	if err != nil {
+		return err
+	}
+	err = putAddrTXONum(txMgrNs, rootNumUnconfirmedTXO, previousNumUnconfirmedTXO+numUnconfirmedTXO)
+	if err != nil {
+		return err
 	}
 
 	// update the balances
@@ -1962,6 +2508,26 @@ func (s *Store) Rollback(managerAbe *waddrmgr.Manager, waddrmgr walletdb.ReadWri
 // TODO(abe):this function need to be test
 // we will delete the block after given height in database
 func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWriteBucket, wtxmgrNs walletdb.ReadWriteBucket, height int32) error {
+	numTXO := int64(0)
+	numImmatureCoinbaseTXO := int64(0)
+	numImmatureTransferTXO := int64(0)
+	numSpendableTXO := int64(0)
+	numUnconfirmedTXO := int64(0)
+
+	addrMapping := map[string]struct{}{}
+
+	addressNumTXOMapping := map[string]int64{}
+	addressNumImmatureCoinbaseTXOMapping := map[string]int64{}
+	addressNumImmatureTransferTXOMapping := map[string]int64{}
+	addressNumSpendableTXOMapping := map[string]int64{}
+	addressNumUnconfirmedTXOMapping := map[string]int64{}
+
+	addressTXOBalanceMapping := map[string]int64{}
+	addressImmatureCoinbaseTXOBalanceMapping := map[string]int64{}
+	addressImmatureTransferTXOBalanceMapping := map[string]int64{}
+	addressSpendableTXOBalanceMapping := map[string]int64{}
+	addressUnconfirmedTXOBalanceMapping := map[string]int64{}
+
 	balance, err := fetchMinedBalance(wtxmgrNs)
 	if err != nil {
 		return err
@@ -2060,9 +2626,30 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 					// mature/spendbutunmined/spentandconfirmed output -> immature output
 					// check in mature output
 					if output, err := fetchMaturedOutput(wtxmgrNs, outpoint.TxHash, outpoint.Index); err == nil {
+						// statistic
+						ringDetails, err := fetchRingDetails(wtxmgrNs, output.RingHash[:])
+						if err != nil {
+							return err
+						}
+						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[outpoint.Index], abecryptoparam.CryptoSchemePQRingCT)
+						if err != nil {
+							return err
+						}
+
+						numSpendableTXO--
+						numImmatureTransferTXO++
+						addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddress))
+						addrMapping[addrKey] = struct{}{}
+						addressNumSpendableTXOMapping[addrKey]--
+						addressNumImmatureTransferTXOMapping[addrKey]++
+
+						addressSpendableTXOBalanceMapping[addrKey] -= int64(output.Amount)
+						addressImmatureTransferTXOBalanceMapping[addrKey] += int64(output.Amount)
+
 						amt := abeutil.Amount(output.Amount)
 						spendableBal -= amt
 						immatureTRBal += amt
+
 						log.Infof("(Rollback) Transfer txo in %d (hash %s) with value %v: spendable -> immature", i-j, blockHash, amt.ToABE())
 
 						tmp, err := chainhash.NewHash(output.RingHash[:])
@@ -2112,9 +2699,30 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 					}
 					// check in spend but unmined output
 					if output, err := fetchSpentButUnminedTXO(wtxmgrNs, outpoint.TxHash, outpoint.Index); err == nil {
+						// statistic
+						ringDetails, err := fetchRingDetails(wtxmgrNs, output.RingHash[:])
+						if err != nil {
+							return err
+						}
+						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[outpoint.Index], abecryptoparam.CryptoSchemePQRingCT)
+						if err != nil {
+							return err
+						}
+
+						numUnconfirmedTXO--
+						numImmatureTransferTXO++
+						addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddress))
+						addrMapping[addrKey] = struct{}{}
+						addressNumUnconfirmedTXOMapping[addrKey]--
+						addressNumImmatureTransferTXOMapping[addrKey]++
+
+						addressUnconfirmedTXOBalanceMapping[addrKey] -= int64(output.Amount)
+						addressImmatureTransferTXOBalanceMapping[addrKey] += int64(output.Amount)
+
 						amt := abeutil.Amount(output.Amount)
 						unconfirmedBal -= amt
 						immatureTRBal += amt
+
 						log.Infof("(Rollback) Transfer txo in %d (hash %s) with value %v: spent but unmined -> immature", i-j, blockHash, amt.ToABE())
 
 						tmp, err := chainhash.NewHash(output.RingHash[:])
@@ -2175,9 +2783,30 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 					}
 					// check in spent and mined output
 					if output, err := fetchSpentConfirmedTXO(wtxmgrNs, outpoint.TxHash, outpoint.Index); err == nil {
+						// statistic
+						ringDetails, err := fetchRingDetails(wtxmgrNs, output.RingHash[:])
+						if err != nil {
+							return err
+						}
+						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[outpoint.Index], abecryptoparam.CryptoSchemePQRingCT)
+						if err != nil {
+							return err
+						}
+
+						numImmatureTransferTXO++
+						numTXO++
+						addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddress))
+						addrMapping[addrKey] = struct{}{}
+						addressNumImmatureTransferTXOMapping[addrKey]++
+						addressNumTXOMapping[addrKey]++
+
+						addressImmatureTransferTXOBalanceMapping[addrKey] += int64(output.Amount)
+						addressTXOBalanceMapping[addrKey] += int64(output.Amount)
+
 						amt := abeutil.Amount(output.Amount)
 						immatureTRBal += amt
 						balance += amt
+
 						log.Infof("(Rollback) Transfer txo in %d (hash %s) with value %v: spent and minded -> immature", i-j, blockHash, amt.ToABE())
 
 						tmp, err := chainhash.NewHash(output.RingHash[:])
@@ -2302,9 +2931,54 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 		coinbaseOutputs, err := fetchImmaturedCoinbaseOutput(wtxmgrNs, i, *blockHash)
 		if err == nil && coinbaseOutputs != nil {
 			for _, unspentUTXO := range coinbaseOutputs {
+				// statistic
+				var addrKey string
+				var block *BlockRecord
+				err = wtxmgrNs.NestedReadBucket(bucketBlocks).ForEach(func(k []byte, v []byte) error {
+					heightK := int32(byteOrder.Uint32(k[0:4]))
+					if heightK == unspentUTXO.Height {
+						block, err = readBlockBlockRecord(k, v)
+						if err != nil {
+							return err
+						}
+					}
+					return nil
+				})
+				if err != nil {
+					return err
+				}
+				if block != nil && !block.Hash.IsEqual(&chainhash.ZeroHash) {
+					for index := 0; index < len(block.MsgBlock.Transactions); index++ {
+						hash := block.MsgBlock.Transactions[index].TxHash()
+						if !unspentUTXO.TxOutput.TxHash.IsEqual(&hash) {
+							continue
+						}
+						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(block.MsgBlock.Transactions[index].TxOuts[unspentUTXO.TxOutput.Index].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
+						if err != nil {
+							return err
+						}
+						addrKey = hex.EncodeToString(chainhash.DoubleHashB(coinAddress))
+					}
+				}
+
+				numImmatureCoinbaseTXO--
+				numTXO--
+
+				if addrKey != "" {
+					addrMapping[addrKey] = struct{}{}
+					addressNumImmatureCoinbaseTXOMapping[addrKey]--
+					addressNumTXOMapping[addrKey]--
+
+					addressImmatureCoinbaseTXOBalanceMapping[addrKey] -= int64(unspentUTXO.Amount)
+					addressTXOBalanceMapping[addrKey] -= int64(unspentUTXO.Amount)
+				} else {
+					log.Errorf("the statistic data may go wrong during rollback, this is unexpected, please recovery your wallet if possible.")
+				}
+
 				amt := abeutil.Amount(unspentUTXO.Amount)
 				immatureCBBal -= amt
 				balance -= amt
+
 				log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: immature -> null", i, blockHash, amt.ToABE())
 			}
 			err = deleteImmaturedCoinbaseOutput(wtxmgrNs, keysWithHeight[i])
@@ -2315,9 +2989,31 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 		transferOutputs, err := fetchImmaturedOutput(wtxmgrNs, i, *blockHash)
 		if err == nil && transferOutputs != nil {
 			for _, unspentUTXO := range transferOutputs {
+				// statistic
+				confirmedTx, err := fetchRawConfirmedTx(wtxmgrNs, unspentUTXO.TxOutput.TxHash[:])
+				if err != nil {
+					return err
+				}
+				abeTxo := confirmedTx.MsgTx.TxOuts[unspentUTXO.TxOutput.Index]
+				coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(abeTxo.TxoScript, abecryptoparam.CryptoSchemePQRingCT)
+				if err != nil {
+					return nil
+				}
+
+				numImmatureTransferTXO--
+				numTXO--
+				addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddress))
+				addrMapping[addrKey] = struct{}{}
+				addressNumImmatureTransferTXOMapping[addrKey]--
+				addressNumTXOMapping[addrKey]--
+
+				addressNumImmatureTransferTXOMapping[addrKey] -= int64(unspentUTXO.Amount)
+				addressNumTXOMapping[addrKey] -= int64(unspentUTXO.Amount)
+
 				amt := abeutil.Amount(unspentUTXO.Amount)
 				immatureTRBal -= amt
 				balance -= amt
+
 				log.Infof("(Rollback) Transfer txo in %d (hash %s) with value %v: immature -> null", i, blockHash, amt.ToABE())
 				// TODO(abe) 20220728 whether remove all transaction whose inputs contains this output or not?
 				// when the output is removed from wallet.
@@ -2343,9 +3039,31 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						if err != nil {
 							return err
 						}
+
+						// statistic
+						ringDetails, err := fetchRingDetails(wtxmgrNs, utxoRings[j].RingHash[:])
+						if err != nil {
+							return err
+						}
+						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[utxoRings[j].OutputIndexes[k]], abecryptoparam.CryptoSchemePQRingCT)
+						if err != nil {
+							return err
+						}
+
+						numSpendableTXO++
+						numTXO++
+						addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddress))
+						addrMapping[addrKey] = struct{}{}
+						addressNumSpendableTXOMapping[addrKey]++
+						addressNumTXOMapping[addrKey]++
+
+						addressSpendableTXOBalanceMapping[addrKey] += int64(scoutput.Amount)
+						addressTXOBalanceMapping[addrKey] += int64(scoutput.Amount)
+
 						amt := abeutil.Amount(scoutput.Amount)
 						spendableBal += amt
 						balance += amt
+
 						if scoutput.FromCoinBase {
 							log.Infof("(Rollback) Spent coinbase txo in %d (hash %s) with value %v: -> spendable", i, blockHash, amt.ToABE())
 						} else {
@@ -2413,9 +3131,31 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 							if err != nil {
 								return err
 							}
+
+							// statistic
+							ringDetails, err := fetchRingDetails(wtxmgrNs, utxoRings[j].RingHash[:])
+							if err != nil {
+								return err
+							}
+							coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[utxoRings[j].OutputIndexes[m]], abecryptoparam.CryptoSchemePQRingCT)
+							if err != nil {
+								return err
+							}
+
+							numSpendableTXO++
+							numTXO++
+							addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddress))
+							addrMapping[addrKey] = struct{}{}
+							addressNumSpendableTXOMapping[addrKey]++
+							addressNumTXOMapping[addrKey]++
+
+							addressSpendableTXOBalanceMapping[addrKey] += int64(scoutput.Amount)
+							addressTXOBalanceMapping[addrKey] += int64(scoutput.Amount)
+
 							amt := abeutil.Amount(scoutput.Amount)
 							spendableBal += amt
 							balance += amt
+
 							if scoutput.FromCoinBase {
 								log.Infof("(Rollback) Coinbase txo spent in %d (hash %s) with value %v: -> spendable", i, blockHash, amt.ToABE())
 							} else {
@@ -2505,9 +3245,30 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 				for _, outpoint := range outpoints {
 					// check in mature output
 					if output, err := fetchMaturedOutput(wtxmgrNs, outpoint.TxHash, outpoint.Index); err == nil && output.FromCoinBase {
+						// statistic
+						ringDetails, err := fetchRingDetails(wtxmgrNs, output.RingHash[:])
+						if err != nil {
+							return err
+						}
+						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[output.Index], abecryptoparam.CryptoSchemePQRingCT)
+						if err != nil {
+							return err
+						}
+
+						numSpendableTXO--
+						numImmatureCoinbaseTXO++
+						addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddress))
+						addrMapping[addrKey] = struct{}{}
+						addressNumSpendableTXOMapping[addrKey]--
+						addressNumImmatureCoinbaseTXOMapping[addrKey]++
+
+						addressSpendableTXOBalanceMapping[addrKey] -= int64(output.Amount)
+						addressImmatureCoinbaseTXOBalanceMapping[addrKey] += int64(output.Amount)
+
 						amt := abeutil.Amount(output.Amount)
 						spendableBal -= amt
 						immatureCBBal += amt
+
 						log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: spendable -> immature", i-maturity-ii, currentBlockHash, amt.ToABE())
 						outpint := canonicalOutPointAbe(output.TxOutput.TxHash, output.TxOutput.Index)
 						// mark the all relevant transaction invalid
@@ -2563,9 +3324,30 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 					}
 					// check in spend but unmined output
 					if output, err := fetchSpentButUnminedTXO(wtxmgrNs, outpoint.TxHash, outpoint.Index); err == nil && output.FromCoinBase {
+						// statistic
+						ringDetails, err := fetchRingDetails(wtxmgrNs, output.RingHash[:])
+						if err != nil {
+							return err
+						}
+						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[output.Index], abecryptoparam.CryptoSchemePQRingCT)
+						if err != nil {
+							return err
+						}
+
+						numUnconfirmedTXO--
+						numImmatureCoinbaseTXO++
+						addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddress))
+						addrMapping[addrKey] = struct{}{}
+						addressNumUnconfirmedTXOMapping[addrKey]--
+						addressNumImmatureCoinbaseTXOMapping[addrKey]++
+
+						addressUnconfirmedTXOBalanceMapping[addrKey] -= int64(output.Amount)
+						addressImmatureCoinbaseTXOBalanceMapping[addrKey] += int64(output.Amount)
+
 						amt := abeutil.Amount(output.Amount)
 						unconfirmedBal -= amt
 						immatureCBBal += amt
+
 						log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: spent but unmined -> immature", i-maturity-ii, currentBlockHash, amt.ToABE())
 
 						outpint := canonicalOutPointAbe(output.TxOutput.TxHash, output.TxOutput.Index)
@@ -2632,9 +3414,30 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 					}
 					// check in spent and mined output
 					if output, err := fetchSpentConfirmedTXO(wtxmgrNs, outpoint.TxHash, outpoint.Index); err == nil && output.FromCoinBase {
+						// statistic
+						ringDetails, err := fetchRingDetails(wtxmgrNs, output.RingHash[:])
+						if err != nil {
+							return err
+						}
+						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[output.Index], abecryptoparam.CryptoSchemePQRingCT)
+						if err != nil {
+							return err
+						}
+
+						numUnconfirmedTXO++
+						numTXO++
+						addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddress))
+						addrMapping[addrKey] = struct{}{}
+						addressNumUnconfirmedTXOMapping[addrKey]++
+						addressNumTXOMapping[addrKey]++
+
+						addressUnconfirmedTXOBalanceMapping[addrKey] += int64(output.Amount)
+						addressTXOBalanceMapping[addrKey] += int64(output.Amount)
+
 						amt := abeutil.Amount(output.Amount)
 						unconfirmedBal += amt
 						balance += amt
+
 						log.Infof("(Rollback) Coinbase txo in %d (hash %s) with value %v: spent -> unconfirmed", i-maturity-ii, currentBlockHash, amt.ToABE())
 						outpint := canonicalOutPointAbe(output.TxOutput.TxHash, output.TxOutput.Index)
 						// mark the all relevant transaction invalid
@@ -2705,6 +3508,148 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 				}
 			}
 		}
+	}
+
+	statisticsBucket, err := wtxmgrNs.CreateBucketIfNotExists(bucketStatistics)
+	if err != nil {
+		return storeError(ErrDatabase, "", err)
+	}
+	var addrTxoCounter walletdb.ReadWriteBucket
+	if addrTxoCounter, err = statisticsBucket.CreateBucketIfNotExists(bucketAddrTXOCounter); err != nil {
+		str := "fail to create addrtxocnt bucket in namespace statistics"
+		return storeError(ErrDatabase, str, err)
+	}
+	for addrKey := range addrMapping {
+		addrKeyBytes, _ := hex.DecodeString(addrKey)
+		subBucket, err := addrTxoCounter.CreateBucketIfNotExists(addrKeyBytes)
+		if err != nil {
+			str := "fail to create sub bucket in namespace statistics/addrtxocnt for address"
+			return storeError(ErrDatabase, str, err)
+		}
+
+		preivousAddressTotal, err := fetchAddrTXONum(subBucket, statisticNumTXO)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXONum(subBucket, statisticNumTXO, preivousAddressTotal+addressNumTXOMapping[addrKey])
+		if err != nil {
+			return err
+		}
+		preivousAddressTotalImmatureCoinbaseTXO, err := fetchAddrTXONum(subBucket, statisticNumImmatureCoinbaseTXO)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXONum(subBucket, statisticNumImmatureCoinbaseTXO, preivousAddressTotalImmatureCoinbaseTXO+addressNumImmatureCoinbaseTXOMapping[addrKey])
+		if err != nil {
+			return err
+		}
+		preivousAddressTotalImmatureTransferTXO, err := fetchAddrTXONum(subBucket, statisticNumImmatureTransferTXO)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXONum(subBucket, statisticNumImmatureTransferTXO, preivousAddressTotalImmatureTransferTXO+addressNumImmatureTransferTXOMapping[addrKey])
+		if err != nil {
+			return err
+		}
+		preivousAddressTotalSpendableTXO, err := fetchAddrTXONum(subBucket, statisticNumSpendableTXO)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXONum(subBucket, statisticNumSpendableTXO, preivousAddressTotalSpendableTXO+addressNumSpendableTXOMapping[addrKey])
+		if err != nil {
+			return err
+		}
+		preivousAddressTotalUnconfirmedTXO, err := fetchAddrTXONum(subBucket, statisticNumUnconfirmedTXO)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXONum(subBucket, statisticNumUnconfirmedTXO, preivousAddressTotalUnconfirmedTXO+addressNumUnconfirmedTXOMapping[addrKey])
+		if err != nil {
+			return err
+		}
+
+		previousAddrTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticTotalBalance)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXOAmount(subBucket, statisticTotalBalance, previousAddrTXOBalance+addressTXOBalanceMapping[addrKey])
+		if err != nil {
+			return err
+		}
+		previousImmatureCoinbaseTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticImmatureCoinbaseBalance)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXOAmount(subBucket, statisticImmatureCoinbaseBalance, previousImmatureCoinbaseTXOBalance+addressImmatureCoinbaseTXOBalanceMapping[addrKey])
+		if err != nil {
+			return err
+		}
+		previousImmatureTransferTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticImmatureTransferBalance)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXOAmount(subBucket, statisticImmatureTransferBalance, previousImmatureTransferTXOBalance+addressImmatureTransferTXOBalanceMapping[addrKey])
+		if err != nil {
+			return err
+		}
+		previousSpendableTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticSpendableBalance)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXOAmount(subBucket, statisticSpendableBalance, previousSpendableTXOBalance+addressSpendableTXOBalanceMapping[addrKey])
+		if err != nil {
+			return err
+		}
+		previousUnconfirmedTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticUnconfirmedBalance)
+		if err != nil {
+			return err
+		}
+		err = putAddrTXOAmount(subBucket, statisticUnconfirmedBalance, previousUnconfirmedTXOBalance+addressUnconfirmedTXOBalanceMapping[addrKey])
+		if err != nil {
+			return err
+		}
+	}
+
+	// statistic
+	previousNumTXO, err := fetchAddrTXONum(wtxmgrNs, rootNumTXO)
+	if err != nil {
+		return err
+	}
+	err = putAddrTXONum(wtxmgrNs, rootNumTXO, previousNumTXO+numTXO)
+	if err != nil {
+		return err
+	}
+	previousNumImmatureCoinbaseTXO, err := fetchAddrTXONum(wtxmgrNs, rootNumImmatureCoinbaseTXO)
+	if err != nil {
+		return err
+	}
+	err = putAddrTXONum(wtxmgrNs, rootNumImmatureCoinbaseTXO, previousNumImmatureCoinbaseTXO+numImmatureCoinbaseTXO)
+	if err != nil {
+		return err
+	}
+	previousNumImmatureTransferTXO, err := fetchAddrTXONum(wtxmgrNs, rootNumImmatureTransferTXO)
+	if err != nil {
+		return err
+	}
+	err = putAddrTXONum(wtxmgrNs, rootNumImmatureTransferTXO, previousNumImmatureTransferTXO+numImmatureTransferTXO)
+	if err != nil {
+		return err
+	}
+	previousNumSpendableTXO, err := fetchAddrTXONum(wtxmgrNs, rootNumSpendableTXO)
+	if err != nil {
+		return err
+	}
+	err = putAddrTXONum(wtxmgrNs, rootNumSpendableTXO, previousNumSpendableTXO+numSpendableTXO)
+	if err != nil {
+		return err
+	}
+	previousNumUnconfirmedTXO, err := fetchAddrTXONum(wtxmgrNs, rootNumUnconfirmedTXO)
+	if err != nil {
+		return err
+	}
+	err = putAddrTXONum(wtxmgrNs, rootNumUnconfirmedTXO, previousNumUnconfirmedTXO+numUnconfirmedTXO)
+	if err != nil {
+		return err
 	}
 
 	// update the balances
@@ -3048,6 +3993,119 @@ func (s *Store) Balance(ns walletdb.ReadBucket, minConf int32, syncHeight int32)
 		return []abeutil.Amount{}, err
 	}
 	return []abeutil.Amount{allBal, spendableBal, immatureCBBal, immatureTRBal, unconfirmdBal}, nil
+}
+
+func (s *Store) GetTxoCountOverview(wtxmgrNs walletdb.ReadBucket) (res map[string]interface{}, err error) {
+	res = map[string]interface{}{}
+
+	totalNumTXO, err := fetchAddrTXONum(wtxmgrNs, rootNumTXO)
+	if err != nil {
+		return nil, err
+	}
+	res["total"] = totalNumTXO
+
+	totalNumImmatureCoinbaseTXO, err := fetchAddrTXONum(wtxmgrNs, rootNumImmatureCoinbaseTXO)
+	if err != nil {
+		return nil, err
+	}
+	res["immature_coinbase"] = totalNumImmatureCoinbaseTXO
+
+	totalNumImmatureTransferTXO, err := fetchAddrTXONum(wtxmgrNs, rootNumImmatureTransferTXO)
+	if err != nil {
+		return nil, err
+	}
+	res["immature_transfer"] = totalNumImmatureTransferTXO
+
+	totalNumSpendableTXO, err := fetchAddrTXONum(wtxmgrNs, rootNumSpendableTXO)
+	if err != nil {
+		return nil, err
+	}
+	res["spendable"] = totalNumSpendableTXO
+
+	totalNumUnconfirmedTXO, err := fetchAddrTXONum(wtxmgrNs, rootNumUnconfirmedTXO)
+	if err != nil {
+		return nil, err
+	}
+	res["unconfirmed"] = totalNumUnconfirmedTXO
+
+	return res, nil
+}
+func (s *Store) GetAddrTxoStatistic(wtxmgrNs walletdb.ReadBucket, addrKeys map[uint64][]byte) ([]map[string]interface{}, error) {
+	res := make([]map[string]interface{}, len(addrKeys))
+	statisticsBucket := wtxmgrNs.NestedReadBucket(bucketStatistics)
+	addrTxoCounter := statisticsBucket.NestedReadBucket(bucketAddrTXOCounter)
+	if addrTxoCounter == nil {
+		return res, nil
+	}
+	for idx, addrKey := range addrKeys {
+		res[idx] = make(map[string]interface{})
+		subBucket := addrTxoCounter.NestedReadBucket(addrKey)
+		if subBucket == nil {
+			continue
+		}
+
+		numTXO, err := fetchAddrTXONum(subBucket, statisticNumTXO)
+		if err != nil {
+			return nil, err
+		}
+		res[idx]["num_total_txo"] = numTXO
+
+		numImmatureCoinbaseTXO, err := fetchAddrTXONum(subBucket, statisticNumImmatureCoinbaseTXO)
+		if err != nil {
+			return nil, err
+		}
+		res[idx]["num_immature_coinbase_txo"] = numImmatureCoinbaseTXO
+
+		numImmatureTransferTXO, err := fetchAddrTXONum(subBucket, statisticNumImmatureTransferTXO)
+		if err != nil {
+			return nil, err
+		}
+		res[idx]["num_immature_transfer_txo"] = numImmatureTransferTXO
+
+		numSpendableTXO, err := fetchAddrTXONum(subBucket, statisticNumSpendableTXO)
+		if err != nil {
+			return nil, err
+		}
+		res[idx]["num_spendable_txo"] = numSpendableTXO
+
+		numUnconfirmedTXO, err := fetchAddrTXONum(subBucket, statisticNumUnconfirmedTXO)
+		if err != nil {
+			return nil, err
+		}
+		res[idx]["num_unconfirmed_txo"] = numUnconfirmedTXO
+
+		balance, err := fetchAddrTXOAmount(subBucket, statisticTotalBalance)
+		if err != nil {
+			return nil, err
+		}
+		res[idx]["balance_total_txo"] = abeutil.Amount(balance).ToABE()
+
+		immatureCoinbaseTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticImmatureCoinbaseBalance)
+		if err != nil {
+			return nil, err
+		}
+		res[idx]["balance_immature_coinbase_txo"] = abeutil.Amount(immatureCoinbaseTXOBalance).ToABE()
+
+		immatureTransferTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticImmatureTransferBalance)
+		if err != nil {
+			return nil, err
+		}
+		res[idx]["balance_immature_transfer_txo"] = abeutil.Amount(immatureTransferTXOBalance).ToABE()
+
+		spendableTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticSpendableBalance)
+		if err != nil {
+			return nil, err
+		}
+		res[idx]["balance_spendable_txo"] = abeutil.Amount(spendableTXOBalance).ToABE()
+
+		unconfirmedTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticUnconfirmedBalance)
+		if err != nil {
+			return nil, err
+		}
+		res[idx]["balance_unconfirmed_txo"] = abeutil.Amount(unconfirmedTXOBalance).ToABE()
+	}
+
+	return res, nil
 }
 
 // PutTxLabel validates transaction labels and writes them to disk if they
