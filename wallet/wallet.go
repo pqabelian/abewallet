@@ -1563,7 +1563,6 @@ func (w *Wallet) ExportAddressKeyRandSeed(start uint64, end uint64) (interface{}
 	defer heldUnlock.release()
 
 	randSeeds := make(map[uint64][]byte, end-start)
-	var addressMaxNum uint64
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
 		randSeeds, err = w.Manager.ExportRandSeeds(addrmgrNs, start, end)
@@ -1575,8 +1574,8 @@ func (w *Wallet) ExportAddressKeyRandSeed(start uint64, end uint64) (interface{}
 	res := make(map[uint64]map[string]string, end-start)
 	for i := start; i < end; i++ {
 		res[i] = map[string]string{}
-		if i <= addressMaxNum {
-			res[i]["randseed"] = hex.EncodeToString(append([]byte{0, 0, 0, 0}, randSeeds[i]...))
+		if len(randSeeds) != 0 {
+			res[i]["randseed"] = hex.EncodeToString(append(abecryptoxparam.SerializeCryptoScheme(w.Manager.GetCryptoScheme()), randSeeds[i]...))
 			res[i]["No"] = strconv.Itoa(int(i))
 		} else {
 			res[i]["randseed"] = ""

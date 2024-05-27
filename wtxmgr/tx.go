@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abecryptox"
-	"github.com/abesuite/abec/abecryptox/abecryptoxkey"
 	"github.com/abesuite/abec/abecryptox/abecryptoxparam"
 	"github.com/abesuite/abec/aut"
 	"github.com/abesuite/abec/blockchain"
@@ -1244,10 +1243,6 @@ func (s *Store) ReceiveTxo(txOut *wire.TxOutAbe, addrMgrNs walletdb.ReadWriteBuc
 			return false, 0, nil, 0, err
 		}
 
-		if s.manager.GetPrivacyLevel() != abecryptoxkey.PrivacyLevelPSEUDONYM && vskBytes == nil {
-			return false, 0, nil, 0, nil
-		}
-
 		copyedVskBytes := make([]byte, len(vskBytes))
 		copy(copyedVskBytes, vskBytes)
 		valid, v, err = abecryptox.TxoCoinReceiveByKeys(txOut, addressBytes, copyedVskBytes)
@@ -1262,7 +1257,7 @@ func (s *Store) ReceiveTxo(txOut *wire.TxOutAbe, addrMgrNs walletdb.ReadWriteBuc
 	if err != nil {
 		return false, 0, nil, 0, err
 	}
-	if privacyLevel <= abecryptoxkey.PrivacyLevelRINGCTPre {
+	if s.manager.GetPrivacyLevel() != privacyLevel {
 		return false, 0, nil, 0, nil
 	}
 
