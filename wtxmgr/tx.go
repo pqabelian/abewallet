@@ -1476,7 +1476,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 						if err != nil {
 							return err
 						}
-						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[utxoRing.OutputIndexes[t]], abecryptoparam.CryptoSchemePQRingCT)
+						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[t], abecryptoparam.CryptoSchemePQRingCT)
 						if err != nil {
 							return err
 						}
@@ -1516,7 +1516,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 							if err != nil {
 								return err
 							}
-							coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[utxoRing.OutputIndexes[t]], abecryptoparam.CryptoSchemePQRingCT)
+							coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[t], abecryptoparam.CryptoSchemePQRingCT)
 							if err != nil {
 								return err
 							}
@@ -2631,7 +2631,7 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						if err != nil {
 							return err
 						}
-						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[outpoint.Index], abecryptoparam.CryptoSchemePQRingCT)
+						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[output.Index], abecryptoparam.CryptoSchemePQRingCT)
 						if err != nil {
 							return err
 						}
@@ -2704,7 +2704,7 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						if err != nil {
 							return err
 						}
-						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[outpoint.Index], abecryptoparam.CryptoSchemePQRingCT)
+						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[output.Index], abecryptoparam.CryptoSchemePQRingCT)
 						if err != nil {
 							return err
 						}
@@ -2788,7 +2788,7 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						if err != nil {
 							return err
 						}
-						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[outpoint.Index], abecryptoparam.CryptoSchemePQRingCT)
+						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[output.Index], abecryptoparam.CryptoSchemePQRingCT)
 						if err != nil {
 							return err
 						}
@@ -3045,7 +3045,7 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						if err != nil {
 							return err
 						}
-						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[utxoRings[j].OutputIndexes[k]], abecryptoparam.CryptoSchemePQRingCT)
+						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[k], abecryptoparam.CryptoSchemePQRingCT)
 						if err != nil {
 							return err
 						}
@@ -3137,7 +3137,7 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 							if err != nil {
 								return err
 							}
-							coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[utxoRings[j].OutputIndexes[m]], abecryptoparam.CryptoSchemePQRingCT)
+							coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[m], abecryptoparam.CryptoSchemePQRingCT)
 							if err != nil {
 								return err
 							}

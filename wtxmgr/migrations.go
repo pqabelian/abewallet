@@ -155,7 +155,7 @@ func populateStatistics(txMgrNs walletdb.ReadWriteBucket) error {
 	addressSpendableTXOBalanceMapping := map[string]int64{}
 	addressUnconfirmedTXOBalanceMapping := map[string]int64{}
 
-	findTxoAddrFromTxOrRing := func(txHash chainhash.Hash, index uint8, ringHash chainhash.Hash) (string, error) {
+	findTxoAddrFromTxOrRing := func(txHash chainhash.Hash, ringIndex uint8, ringHash chainhash.Hash) (string, error) {
 		var ok bool
 		if !ringHash.IsEqual(&chainhash.ZeroHash) {
 			var ringDetail *Ring
@@ -166,7 +166,7 @@ func populateStatistics(txMgrNs walletdb.ReadWriteBucket) error {
 				}
 				ringDetails[ringHash] = ringDetail
 			}
-			coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetail.TxoScripts[index], abecryptoparam.CryptoSchemePQRingCT)
+			coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetail.TxoScripts[ringIndex], abecryptoparam.CryptoSchemePQRingCT)
 			if err != nil {
 				return "", err
 			}
@@ -195,7 +195,7 @@ func populateStatistics(txMgrNs walletdb.ReadWriteBucket) error {
 			return "", nil
 		}
 
-		abeTxo := tx.MsgTx.TxOuts[index]
+		abeTxo := tx.MsgTx.TxOuts[ringIndex]
 		coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(abeTxo.TxoScript, abecryptoparam.CryptoSchemePQRingCT)
 		if err != nil {
 			return "", err
@@ -248,7 +248,7 @@ func populateStatistics(txMgrNs walletdb.ReadWriteBucket) error {
 			numTXO++
 			numImmatureCoinbaseTXO++
 
-			if addrKey, err := findTxoAddrFromTxOrRing(utxo.TxOutput.TxHash, utxo.TxOutput.Index, utxo.RingHash); err == nil && addrKey != "" {
+			if addrKey, err := findTxoAddrFromTxOrRing(utxo.TxOutput.TxHash, utxo.Index, utxo.RingHash); err == nil && addrKey != "" {
 				addrMapping[addrKey] = struct{}{}
 				addressNumTXOMapping[addrKey]++
 				addressNumImmatureCoinbaseTXOMapping[addrKey]++
@@ -287,7 +287,7 @@ func populateStatistics(txMgrNs walletdb.ReadWriteBucket) error {
 			numTXO++
 			numImmatureTransferTXO++
 
-			if addrKey, err := findTxoAddrFromTxOrRing(utxo.TxOutput.TxHash, utxo.TxOutput.Index, utxo.RingHash); err == nil && addrKey != "" {
+			if addrKey, err := findTxoAddrFromTxOrRing(utxo.TxOutput.TxHash, utxo.Index, utxo.RingHash); err == nil && addrKey != "" {
 				addrMapping[addrKey] = struct{}{}
 				addressNumTXOMapping[addrKey]++
 				addressNumImmatureTransferTXOMapping[addrKey]++
@@ -331,7 +331,7 @@ func populateStatistics(txMgrNs walletdb.ReadWriteBucket) error {
 		numTXO++
 		numSpendableTXO++
 
-		if addrKey, err := findTxoAddrFromTxOrRing(utxo.TxOutput.TxHash, utxo.TxOutput.Index, utxo.RingHash); err == nil && addrKey != "" {
+		if addrKey, err := findTxoAddrFromTxOrRing(utxo.TxOutput.TxHash, utxo.Index, utxo.RingHash); err == nil && addrKey != "" {
 			addrMapping[addrKey] = struct{}{}
 			addressNumTXOMapping[addrKey]++
 			addressNumSpendableTXOMapping[addrKey]++
@@ -368,7 +368,7 @@ func populateStatistics(txMgrNs walletdb.ReadWriteBucket) error {
 		numTXO++
 		numUnconfirmedTXO++
 
-		if addrKey, err := findTxoAddrFromTxOrRing(utxo.TxOutput.TxHash, utxo.TxOutput.Index, utxo.RingHash); err == nil && addrKey != "" {
+		if addrKey, err := findTxoAddrFromTxOrRing(utxo.TxOutput.TxHash, utxo.Index, utxo.RingHash); err == nil && addrKey != "" {
 			addrMapping[addrKey] = struct{}{}
 			addressNumTXOMapping[addrKey]++
 			addressNumUnconfirmedTXOMapping[addrKey]++
