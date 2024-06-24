@@ -1237,6 +1237,22 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 		log.Warnf("Block %s with height %d has %d transaction, please check the connected node and status of blockchain", block.Hash, block.Height, len(block.TxRecords))
 		return nil
 	}
+
+	abnormalStatus, err := fetchAbnormalStatus(txMgrNs)
+	if err != nil {
+		log.Errorf("can not fetch status from database ")
+	}
+	unknownVersion := abnormalStatus == 1
+	defer func() {
+		if unknownVersion {
+			abnormalStatus |= 0x01
+		}
+		err = putAbnormalStatus(txMgrNs, abnormalStatus)
+		if err != nil {
+			log.Errorf("fail to put abnormal status into database")
+		}
+	}()
+
 	coinbaseTx := block.TxRecords[0].MsgTx
 
 	coinbaseOutput := make(map[wire.OutPointAbe]*UnspentUTXO)
@@ -1244,6 +1260,12 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 
 	// store all outputs of coinbaseTx which belong to us into a map : coinbaseOutput
 	for i := 0; i < len(coinbaseTx.TxOuts); i++ {
+		if coinbaseTx.TxOuts[i].Version > wire.TxVersion_Height_0 {
+			unknownVersion = true
+			log.Warnf("found higher version of coinbase transactin (hash %s), please checkout status of blockchain, "+
+				"and affected by this, all txos from now would be immature, and the balance may no longer be correct, and upgrade wallet if possible!!!", coinbaseTx.TxHash())
+			continue
+		}
 		coinAddr, err := abecrypto.ExtractCoinAddressFromTxoScript(coinbaseTx.TxOuts[i].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
 		if err != nil {
 			return err
@@ -1307,6 +1329,13 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 	for i := 1; i < len(block.TxRecords); i++ { // trace every tx in this block
 		txi := block.TxRecords[i].MsgTx
 		txhash := txi.TxHash()
+		if txi.Version > wire.TxVersion_Height_0 {
+			unknownVersion = true
+			log.Warnf("found higher version of transfer transactin (hash %s), please checkout status of blockchain, "+
+				"and from now, all txos would be immatureso, and the balance may no longer be correct, and upgrade wallet if possible!!!", coinbaseTx.TxHash())
+			continue
+		}
+
 		// traverse all the inputs of a transaction
 		// 1. add serial number to corresponding ring if needed
 		// 2. move consumed txo to spentconfirmed bucket
@@ -1669,7 +1698,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 	// move matured coinbase outputs to maturedOutput bucket
 	blockNum := int32(wire.GetBlockNumPerRingGroupByBlockHeight(block.Height))
 	maturity := int32(s.chainParams.CoinbaseMaturity)
-	if block.Height >= maturity && (block.Height-maturity+1)%blockNum == 0 {
+	if !unknownVersion && block.Height >= maturity && (block.Height-maturity+1)%blockNum == 0 {
 		for i := 0; i < len(maturedBlockHashs); i++ {
 			utxoHeight := block.Height - maturity - int32(i)
 			utxos, err := fetchImmaturedCoinbaseOutput(txMgrNs, utxoHeight, *maturedBlockHashs[i])
@@ -1774,10 +1803,18 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 		}
 
 		// if there is zero output in three block belongs to the wallet, we return
-		if len(coinbaseOutput) == 0 && len(transferOutputs) == 0 &&
+		noOutputs := len(coinbaseOutput) == 0 && len(transferOutputs) == 0 &&
 			len(block1CoinbaseUTXO) == 0 && len(block1TransferUTXO) == 0 &&
-			len(block0CoinbaseUTXO) == 0 && len(block0TransferUTXO) == 0 {
-
+			len(block0CoinbaseUTXO) == 0 && len(block0TransferUTXO) == 0
+		if noOutputs || unknownVersion {
+			if unknownVersion {
+				log.Warnf("found unknown version of transactin, all new transaction output from now would be marked as immature, please checkout status of blockchain, " +
+					"and from now, all txo would be immature, and the balance may no longer be correct, and upgrade if possible!!!")
+				log.Warnf("found unknown version of transactin, all new transaction output from now would be marked as immature, please checkout status of blockchain, " +
+					"and from now, all txo would be immature, and the balance may no longer be correct, and upgrade if possible!!!")
+				log.Warnf("found unknown version of transactin, all new transaction output from now would be marked as immature, please checkout status of blockchain, " +
+					"and from now, all txo would be immature, and the balance may no longer be correct, and upgrade if possible!!!")
+			}
 			statisticsBucket, err := txMgrNs.CreateBucketIfNotExists(bucketStatistics)
 			if err != nil {
 				return err

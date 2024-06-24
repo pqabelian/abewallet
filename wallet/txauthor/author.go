@@ -135,7 +135,7 @@ func NewUnsignedTransaction(outputs []*wire.TxOut, relayFeePerKb abeutil.Amount,
 		}
 
 		unsignedTransaction := &wire.MsgTx{
-			Version:  int32(wire.TxVersion),
+			Version:  int32(wire.TxVersion_Height_0),
 			TxIn:     inputs,
 			TxOut:    outputs,
 			LockTime: 0,

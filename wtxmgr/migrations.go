@@ -24,6 +24,10 @@ var versions = []migration.Version{
 		Number:    3,
 		Migration: populateStatistics,
 	},
+	{
+		Number:    4,
+		Migration: populateStatus,
+	},
 }
 
 // getLatestVersion returns the version number of the latest database version.
@@ -465,5 +469,13 @@ func populateStatistics(txMgrNs walletdb.ReadWriteBucket) error {
 		}
 	}
 
+	return nil
+}
+func populateStatus(txMgrNs walletdb.ReadWriteBucket) error {
+	err := putAbnormalStatus(txMgrNs, 0)
+	if err != nil {
+		log.Errorf("can not insert status of store: %v", err)
+		return err
+	}
 	return nil
 }

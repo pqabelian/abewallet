@@ -87,8 +87,11 @@ var (
 
 // Root (namespace) bucket keys
 var (
-	rootCreateDate              = []byte("date")
-	rootVersion                 = []byte("vers")
+	rootCreateDate = []byte("date")
+	rootVersion    = []byte("vers")
+
+	// uint32, the first bit used for unknown transaction version
+	rootAbnormalStatus          = []byte("abnormalstatus")
 	rootMinedBalance            = []byte("bal")            // total balance
 	rootImmatureCoinbaseBalance = []byte("immaturecbbal")  // immature coinbase balance
 	rootImmatureTransferBalance = []byte("immaturetrbal")  // immature transfer balance
@@ -2054,6 +2057,10 @@ func createStore(ns walletdb.ReadWriteBucket) error {
 	if err := putVersion(ns, getLatestVersion()); err != nil {
 		return err
 	}
+	// Write the abnormal status
+	if err := putAbnormalStatus(ns, 0); err != nil {
+		return err
+	}
 
 	// Save the creation date of the store.
 	var v [8]byte
@@ -2276,6 +2283,30 @@ func putVersion(ns walletdb.ReadWriteBucket, version uint32) error {
 // fetchVersion fetches the current version of the store.
 func fetchVersion(ns walletdb.ReadBucket) (uint32, error) {
 	v := ns.Get(rootVersion)
+	if len(v) != 4 {
+		str := "no transaction store exists in namespace"
+		return 0, storeError(ErrNoExists, str, nil)
+	}
+
+	return byteOrder.Uint32(v), nil
+}
+
+// putVersion modifies the version of the store to reflect the given version
+// number.
+func putAbnormalStatus(ns walletdb.ReadWriteBucket, status uint32) error {
+	var v [4]byte
+	byteOrder.PutUint32(v[:], status)
+	if err := ns.Put(rootAbnormalStatus, v[:]); err != nil {
+		str := "failed to store database version"
+		return storeError(ErrDatabase, str, err)
+	}
+
+	return nil
+}
+
+// fetchVersion fetches the current version of the store.
+func fetchAbnormalStatus(ns walletdb.ReadBucket) (uint32, error) {
+	v := ns.Get(rootAbnormalStatus)
 	if len(v) != 4 {
 		str := "no transaction store exists in namespace"
 		return 0, storeError(ErrNoExists, str, nil)
