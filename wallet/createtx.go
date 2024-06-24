@@ -645,7 +645,7 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 		inputRingVersionsForRing []uint32, inRingSizeForRing []uint8, // ring inputs
 		inForRing uint8, inForSingleDistinct uint8,
 		vPublic int64) (abeutil.Amount, error) {
-		txConSize, err := wire.PrecomputeTrTxConSizeMLP(txVersion, inputRingVersionForAll, inRingSizesForAll, outputCoinAddresses, abecryptoparam.MaxAllowedTxMemoSize)
+		txConSize, err := wire.PrecomputeTrTxConSizeMLP(txVersion, inputRingVersionForAll, inRingSizesForAll, outputCoinAddresses, abecryptoxparam.MaxAllowedTxMemoSize)
 		if err != nil {
 			return 0, err
 		}
@@ -1107,7 +1107,7 @@ func (w *Wallet) txPqringCTToOutputsMLPAUT(autTransaction aut.Transaction, txOut
 		}
 
 		txVersion := wire.TxVersion
-		txConSize, err := wire.PrecomputeTrTxConSizeMLP(txVersion, inputRingVersionsForAll, inRingSizesForAll, outputCoinAddresses, abecryptoparam.MaxAllowedTxMemoSize)
+		txConSize, err := wire.PrecomputeTrTxConSizeMLP(txVersion, inputRingVersionsForAll, inRingSizesForAll, outputCoinAddresses, abecryptoxparam.MaxAllowedTxMemoSize)
 		if err != nil {
 			return nil, err
 		}
@@ -1469,6 +1469,7 @@ func (w *Wallet) createTransactionMLPByKeys(
 	return resTx, nil
 }
 
+// txPqringCTToOutputs would be removed
 func (w *Wallet) txPqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc, minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, dryRun bool) (
 	unsignedTx *txauthor.AuthoredTxAbe, err error) {
 
