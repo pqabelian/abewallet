@@ -3,7 +3,6 @@ package prompt
 import (
 	"bufio"
 	"bytes"
-	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -11,7 +10,6 @@ import (
 	"github.com/abesuite/abec/abecryptox/abecryptoxkey"
 	"github.com/abesuite/abec/abecryptox/abecryptoxparam"
 	"github.com/abesuite/abec/abeutil/hdkeychain"
-	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abewallet/wordlists"
 	"golang.org/x/crypto/ssh/terminal"
 	"os"
@@ -262,20 +260,37 @@ func Seed(reader *bufio.Reader) (abecryptoxparam.CryptoScheme, abecryptoxkey.Pri
 	if !useUserSeed {
 		//seed, err := hdkeychain.GenerateSeed(hdkeychain.RecommendedSeedLen)
 		//seed, err := abesalrs.GenerateSeed(2*abesalrs.RecommendedSeedLen)
-		seed := make([]byte, SeedLength)
-		_, err := rand.Read(seed)
-		if err != nil {
-			return 0, 0, nil, 0, errors.New("rand.Read() error in Seed()")
-		}
+
+		// crypto scheme =  abecryptoxparam.CryptoSchemePQRingCT
+		//seed := make([]byte, SeedLength)
+		//_, err := rand.Read(seed)
+		//if err != nil {
+		//	return 0, 0, nil, 0, errors.New("rand.Read() error in Seed()")
+		//}
+		// crypto scheme =  abecryptoxparam.CryptoSchemePQRingCTX
 		// In current version, we use a fixed crypto scheme for all new wallet
 		cryptoScheme := abecryptoxparam.CryptoSchemePQRingCTX
+		entropy, err := NewEntropy(SeedLength)
+		if err != nil {
+			return 0, 0, nil, 0, errors.New("fail to generate entropy")
+		}
+
+		mnemonics, err := EntropyToWords(cryptoScheme, entropy, nil)
+		if err != nil {
+			return 0, 0, nil, 0, errors.New("fail to convert entropy to mnemonic")
+		}
+
+		seed, err := WordsToSeed(cryptoScheme, mnemonics, nil)
+		if err != nil {
+			return 0, 0, nil, 0, errors.New("fail to generate seed")
+		}
+
 		// Ascertain the wallet privacy level.
 		privacyLevel, err := PrivacyLevel(reader, cryptoScheme)
 		if err != nil {
 			return 0, 0, nil, 0, errors.New("rand.Read() error in Seed()")
 		}
 
-		mnemonics := seedToWords(seed, wordlists.English)
 		fmt.Println("Your wallet's generation seed is: ")
 		fmt.Printf("%x\n", seed)
 		fmt.Println("Your wallet's crypto version is: ", cryptoScheme)
@@ -335,17 +350,11 @@ func Seed(reader *bufio.Reader) (abecryptoxparam.CryptoScheme, abecryptoxkey.Pri
 		}
 		mnemonicWords = strings.TrimSpace(strings.ToLower(mnemonicWords))
 		mnemonics := strings.Split(mnemonicWords, ",")
-		seed = wordsToSeed(mnemonics, wordlists.EnglishMap)
-		if len(seed) != SeedLength+1 {
-			fmt.Printf("Invalid mnemonic word list specified\n")
-			continue
+		seed, err = WordsToSeed(cryptoScheme, mnemonics, wordlists.EnglishMap)
+		if err != nil {
+			return 0, 0, nil, 0, err
 		}
-		seedH := chainhash.DoubleHashH(seed[:SeedLength])
-		if !bytes.Equal(seedH[:1], seed[SeedLength:]) {
-			fmt.Printf("Invalid mnemonic word list specified\n")
-			continue
-		}
-		seed = seed[:SeedLength]
+		fmt.Printf("%x\n", seed)
 
 		// add the cryptoScheme before seed
 		// TODO Maybe we can remove this logic
@@ -372,76 +381,4 @@ func Seed(reader *bufio.Reader) (abecryptoxparam.CryptoScheme, abecryptoxkey.Pri
 			return cryptoScheme, privacyLevel, seed, 0, nil
 		}
 	}
-}
-
-func SeedToWords(seed []byte, wordlist []string) []string {
-	return seedToWords(seed, wordlist)
-}
-
-func seedToWords(seed []byte, wordlist []string) []string {
-	res := make([]string, 0, 24)
-	hash := chainhash.DoubleHashH(seed)
-	tmp := make([]byte, len(seed)+1)
-	copy(tmp, seed)
-	copy(tmp[len(seed):], hash[:1])
-	// 11-bit
-	pos := 0
-	index := -1
-	for pos < len(tmp) {
-		// 8 + 3
-		index = int(tmp[pos]<<0)<<3 | int(tmp[pos+1]>>5)
-		res = append(res, wordlist[index])
-		// 5 + 6
-		index = int(tmp[pos+1]&0x1F)<<6 | int(tmp[pos+2]>>2)
-		res = append(res, wordlist[index])
-		// 2 + 8 + 1
-		index = int(tmp[pos+2]&0x3)<<9 | int(tmp[pos+3])<<1 | int(tmp[pos+4]>>7)
-		res = append(res, wordlist[index])
-		// 7 + 4
-		index = int(tmp[pos+4]&0x7F)<<4 | int(tmp[pos+5]>>4)
-		res = append(res, wordlist[index])
-		// 4 + 7
-		index = int(tmp[pos+5]&0xF)<<7 | int(tmp[pos+6]>>1)
-		res = append(res, wordlist[index])
-		// 1 + 8 + 2
-		index = int(tmp[pos+6]&0x1)<<10 | int(tmp[pos+7])<<2 | int(tmp[pos+8]>>6)
-		res = append(res, wordlist[index])
-		// 6 + 5
-		index = int(tmp[pos+8]&0x3F)<<5 | int(tmp[pos+9]>>3)
-		res = append(res, wordlist[index])
-		// 3 + 8
-		index = int(tmp[pos+9]&0x7)<<8 | +int(tmp[pos+10]>>0)
-		res = append(res, wordlist[index])
-		pos += 11
-	}
-	return res
-}
-
-func WordsToSeed(words []string, wordMap map[string]int) []byte {
-	return wordsToSeed(words, wordMap)
-}
-
-func wordsToSeed(words []string, wordMap map[string]int) []byte {
-	res := make([]byte, 0, 33)
-	indexs := make([]int, len(words))
-	for i := 0; i < len(words); i++ {
-		trim_word := strings.TrimSpace(words[i])
-		indexs[i] = wordMap[trim_word]
-	}
-	pos := 0
-	for pos < len(indexs) {
-		res = append(res, byte((indexs[pos+0]&0x7F8)>>3))                                // high 8
-		res = append(res, byte((indexs[pos+0]&0x7)<<5)|byte((indexs[pos+1]&0x7C0)>>6))   // low 3 <<5 || high 5 >> 6
-		res = append(res, byte((indexs[pos+1]&0x3F)<<2)|byte((indexs[pos+2]&0x600)>>9))  // low 6 << 2 || high 2 >>9
-		res = append(res, byte((indexs[pos+2]&0x1FE)>>1))                                // mid 8 >> 1
-		res = append(res, byte((indexs[pos+2]&0x1)<<7)|byte((indexs[pos+3]&0x7F0)>>4))   // low 1 << 7 || high 7 >> 4
-		res = append(res, byte((indexs[pos+3]&0xF)<<4)|byte((indexs[pos+4]&0x780)>>7))   // low 4 << 4 || high 4 >> 7
-		res = append(res, byte((indexs[pos+4]&0x7F)<<1)|byte((indexs[pos+5]&0x400)>>10)) // low 7  << 1 || high 1 >> 10
-		res = append(res, byte((indexs[pos+5]&0x3FC)>>2))                                // mid 8 >> 2
-		res = append(res, byte((indexs[pos+5]&0x3)<<6)|byte((indexs[pos+6]&0x7E0)>>5))   // low 2  << 6 || high 6 >> 5
-		res = append(res, byte((indexs[pos+6]&0x1F)<<3)|byte((indexs[pos+7]&0x700)>>8))  // low 5  << 3 || high 3 >> 8
-		res = append(res, byte((indexs[pos+7]&0xFF)>>0))                                 // low 8
-		pos += 8
-	}
-	return res
 }

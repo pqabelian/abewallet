@@ -2,14 +2,11 @@ package main
 
 import (
 	"bufio"
-	"bytes"
-	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abecryptox/abecryptoxkey"
 	"github.com/abesuite/abec/abecryptox/abecryptoxparam"
-	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abewallet/wordlists"
 	"os"
 	"path/filepath"
@@ -142,37 +139,28 @@ func createWallet(cfg *config) error {
 		var seed []byte
 		var mnemonics []string
 		if !cfg.WithMnemonic {
-			seed = make([]byte, prompt.SeedLength)
-			_, err = rand.Read(seed)
+			entropy, err := prompt.NewEntropy(prompt.SeedLength)
+			mnemonics, err = prompt.EntropyToWords(cryptoScheme, entropy, wordlists.English)
 			if err != nil {
 				return err
 			}
-			mnemonics = prompt.SeedToWords(seed, wordlists.English)
-
-			// TODO Maybe we can remove this logic
-			tmp := make([]byte, 4, 4+prompt.SeedLength)
-			binary.BigEndian.PutUint32(tmp[0:4], uint32(cryptoScheme))
-			seed = append(tmp, seed[:]...)
+			seed, err = prompt.WordsToSeed(cryptoScheme, mnemonics, wordlists.EnglishMap)
+			if err != nil {
+				return err
+			}
 
 			cfg.MyRestoreNumber = prompt.MAXCOUNTERADDRESS
 		} else {
 			mnemonics = strings.Split(cfg.MyMnemonic, ",")
-			seed = prompt.WordsToSeed(mnemonics, wordlists.EnglishMap)
-			if len(seed) != prompt.SeedLength+1 {
-				return errors.New("Invalid mnemonic word list specified\n")
+			seed, err = prompt.WordsToSeed(cryptoScheme, mnemonics, wordlists.EnglishMap)
+			if err != nil {
+				return err
 			}
-			seedH := chainhash.DoubleHashH(seed[:prompt.SeedLength])
-			if !bytes.Equal(seedH[:1], seed[prompt.SeedLength:]) {
-				return errors.New("Invalid mnemonic word list specified\n")
-			}
-			seed = seed[:prompt.SeedLength]
-
-			// add the cryptoScheme before seed
-			// TODO Maybe we can remove this logic
-			tmp := make([]byte, 4, 4+prompt.SeedLength)
-			binary.BigEndian.PutUint32(tmp[0:4], uint32(cryptoScheme))
-			seed = append(tmp, seed[:]...)
 		}
+		tmp := make([]byte, 4, 4+prompt.SeedLength)
+		binary.BigEndian.PutUint32(tmp[0:4], uint32(cryptoScheme))
+		seed = append(tmp, seed[:]...)
+
 		fmt.Println(binary.BigEndian.Uint32(seed[:4]))
 		fmt.Printf("%x\n", seed[4:])
 		fmt.Printf("%v\n", strings.Join(mnemonics, ","))
