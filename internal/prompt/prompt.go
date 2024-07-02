@@ -354,7 +354,6 @@ func Seed(reader *bufio.Reader) (abecryptoxparam.CryptoScheme, abecryptoxkey.Pri
 		if err != nil {
 			return 0, 0, nil, 0, err
 		}
-		fmt.Printf("%x\n", seed)
 
 		// add the cryptoScheme before seed
 		// TODO Maybe we can remove this logic
