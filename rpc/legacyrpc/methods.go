@@ -960,7 +960,7 @@ func listAUTCoins(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	}
 
 	type tt struct {
-		TxOutput      wire.OutPointAbe
+		TxOutput      string `json:"TxOutput"`
 		AUTIdentifier string
 		IsAUTRootCoin bool
 		AUTCoinValue  uint64
@@ -971,7 +971,7 @@ func listAUTCoins(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	res := make([]*tt, len(autCoins))
 	for i := 0; i < len(autCoins); i++ {
 		res[i] = &tt{
-			TxOutput:      autCoins[i].TxOutput,
+			TxOutput:      autCoins[i].TxOutput.String(),
 			AUTIdentifier: string(autCoins[i].AUTIdentifier),
 			IsAUTRootCoin: autCoins[i].IsAUTRootCoin,
 			AUTCoinValue:  autCoins[i].AUTCoinValue,

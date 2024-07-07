@@ -516,6 +516,7 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 		return nil, err
 	}
 
+	txVersion := wire.TxVersion
 	//	todo: Amount seems useless
 	targetValue := abeutil.Amount(0)
 	outForRing := 0
@@ -540,6 +541,30 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 	if targetValue < 0 || targetValue > abeutil.Amount(abeutil.MaxNeutrino) {
 		return nil, fmt.Errorf("target output value %v exceeds the maximum allowd value %v", targetValue, abeutil.MaxNeutrino)
 	}
+	maxOutputNum, err := abecryptoxparam.GetTxOutputMaxNum(txVersion)
+	if err != nil {
+		return nil, err
+	}
+	if len(txOutDescs) >= maxOutputNum {
+		return nil, errors.New("transfer too many utxo")
+	}
+
+	maxNumOutputForRing, err := abecryptoxparam.GetTxOutputMaxNumForRing(txVersion)
+	if err != nil {
+		return nil, err
+	}
+	if outForRing > maxNumOutputForRing {
+		return nil, fmt.Errorf("transfer too many utxo for ring, max allow %d but get %d", maxNumOutputForRing, outForRing)
+	}
+
+	maxNumOutputForSingle, err := abecryptoxparam.GetTxOutputMaxNumForSingle(txVersion)
+	if err != nil {
+		return nil, err
+	}
+	if len(txOutDescs)-outForRing > maxNumOutputForSingle {
+		return nil, fmt.Errorf("transfer too many utxo for single, max allow %d but get %d", maxNumOutputForSingle, len(txOutDescs)-outForRing)
+	}
+
 	//var addrBytes, vskBytes, aSkSpBytes []byte
 	//var addrBytes, aSkSpBytes []byte
 	needChangeFlag := false //whether need to make a change
@@ -649,7 +674,16 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 		if err != nil {
 			return 0, err
 		}
-		witnessSize, err := abecryptox.GetTrTxWitnessSerializeSizeApprox(txVersion, inForRing, inForSingleDistinct, inRingSizeForRing, uint8(outForRing), 0)
+		// force v Public to 0
+		if privacyLevel == abecryptoxkey.PrivacyLevelPSEUDONYM {
+			// all input would be pseudonym
+			// when outputs may contain full-privacy, vPublic must less than 0
+			// otherwise must be 0 to meet the requirement of underlying crypto scheme
+			if outForRing == 0 {
+				vPublic = 0
+			}
+		}
+		witnessSize, err := abecryptox.GetTrTxWitnessSerializeSizeApprox(txVersion, inForRing, inForSingleDistinct, inRingSizeForRing, uint8(outForRing), vPublic)
 		if err != nil {
 			return 0, err
 		}
@@ -681,7 +715,7 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 			if currentTotal < targetValue {
 				continue
 			}
-			fee, err := computeFee(wire.TxVersion,
+			fee, err := computeFee(txVersion,
 				inputRingVersionsForAll, inRingSizesForAll,
 				inputRingVersionsForRing, inRingSizesForRing, inForRing,
 				inForSingleDistinct,
@@ -725,6 +759,29 @@ func (w *Wallet) txPqringCTToOutputsMLP(txOutDescs []*abecryptox.AbeTxOutputDesc
 		}
 		if currentTotal < targetValue {
 			return nil, errors.New("please specify enough amount to transfer: input < output")
+		}
+		maxInputNum, err := abecryptoxparam.GetTxInputMaxNum(txVersion)
+		if err != nil {
+			return nil, err
+		}
+		if len(selectedTxos) >= maxInputNum {
+			return nil, errors.New("select too many utxo to transfer, basically it means: input + fee < output ")
+		}
+
+		maxNumInputForRing, err := abecryptoxparam.GetTxInputMaxNumForRing(txVersion)
+		if err != nil {
+			return nil, err
+		}
+		if int(inForRing) > maxNumInputForRing {
+			return nil, errors.New("select too many utxo for ring, basically it means: input + fee < output ")
+		}
+
+		maxNumInputForSingle, err := abecryptoxparam.GetTxInputMaxNumForSingle(txVersion)
+		if err != nil {
+			return nil, err
+		}
+		if len(selectedTxos)-int(inForRing) > maxNumInputForSingle {
+			return nil, errors.New("select too many utxo for single, basically it means: input + fee < output ")
 		}
 
 		fee, err := computeFee(wire.TxVersion,
@@ -816,8 +873,10 @@ func (w *Wallet) txPqringCTToOutputsMLPAUT(autTransaction aut.Transaction, txOut
 	// AUT Layer
 	targetAUTValue := uint64(0)
 	// Abelian layer
+	txVersion := wire.TxVersion
 	targetValue := abeutil.Amount(0)
 	outputPublic := int64(0)
+	outForRing := 0
 	var autChangeAddress []byte
 	if autTransaction.Type() == aut.Transfer {
 		autChangeAddress = txOutDescs[len(txOutDescs)-1].CryptoAddress()
@@ -844,6 +903,29 @@ func (w *Wallet) txPqringCTToOutputsMLPAUT(autTransaction aut.Transaction, txOut
 
 	if targetValue < 0 || targetValue > abeutil.Amount(abeutil.MaxNeutrino) {
 		return nil, fmt.Errorf("target output value %v exceeds the maximum allowd value %v", targetValue, abeutil.MaxNeutrino)
+	}
+	maxOutputNum, err := abecryptoxparam.GetTxOutputMaxNum(txVersion)
+	if err != nil {
+		return nil, err
+	}
+	if len(txOutDescs) >= maxOutputNum {
+		return nil, errors.New("transfer too many utxo")
+	}
+
+	maxNumOutputForRing, err := abecryptoxparam.GetTxOutputMaxNumForRing(txVersion)
+	if err != nil {
+		return nil, err
+	}
+	if outForRing > maxNumOutputForRing {
+		return nil, fmt.Errorf("transfer too many utxo for ring, max allow %d but get %d", maxNumOutputForRing, outForRing)
+	}
+
+	maxNumOutputForSingle, err := abecryptoxparam.GetTxOutputMaxNumForSingle(txVersion)
+	if err != nil {
+		return nil, err
+	}
+	if len(txOutDescs)-outForRing > maxNumOutputForSingle {
+		return nil, fmt.Errorf("transfer too many utxo for single, max allow %d but get %d", maxNumOutputForSingle, len(txOutDescs)-outForRing)
 	}
 
 	var eligibleAUT []*wtxmgr.AUTCoin
@@ -1106,7 +1188,6 @@ func (w *Wallet) txPqringCTToOutputsMLPAUT(autTransaction aut.Transaction, txOut
 			continue
 		}
 
-		txVersion := wire.TxVersion
 		txConSize, err := wire.PrecomputeTrTxConSizeMLP(txVersion, inputRingVersionsForAll, inRingSizesForAll, outputCoinAddresses, abecryptoxparam.MaxAllowedTxMemoSize)
 		if err != nil {
 			return nil, err
