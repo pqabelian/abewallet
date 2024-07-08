@@ -1126,7 +1126,7 @@ func (w *Wallet) txPqringCTToOutputsMLPAUT(autTransaction aut.Transaction, txOut
 			}
 		}
 		if len(existIssuerToken) < int(autIssueUpdateThreshold) {
-			return nil, errors.New("exist AUT coins can not reach the update threshold")
+			return nil, errors.New("exist AUT root coins can not reach the update threshold")
 		}
 	case *aut.BurnTx:
 		utxoSpecifiedMapping := map[string]struct{}{}

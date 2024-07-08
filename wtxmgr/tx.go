@@ -1278,7 +1278,7 @@ func (s *Store) ReceiveTxo(txOut *wire.TxOutAbe, addrMgrNs walletdb.ReadWriteBuc
 	if err != nil {
 		return false, 0, nil, 0, err
 	}
-	return valid, v, nil, 0, nil
+	return valid, v, chainhash.DoubleHashB(coinAddr), 0, nil
 }
 func (s *Store) GenSNForTxo(txOut *wire.TxOutAbe, addrMgrNs walletdb.ReadWriteBucket, ringHash chainhash.Hash, index uint8) ([]byte, error) {
 	coinAddr, err := abecryptox.ExtractCoinAddressFromTxo(txOut)
