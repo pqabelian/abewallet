@@ -85,6 +85,9 @@ var rpcHandlers = map[string]struct {
 	"getbestblockhash": {handler: getBestBlockHash},
 	"getblockcount":    {handler: getBlockCount},
 	"getinfo":          {handlerWithChain: getInfo},
+
+	"getaddrbalance": {handler: getAddrBalance},
+
 	//"getnewaddress":        {handler: getNewAddress},
 	//"getrawchangeaddress":  {handler: getRawChangeAddress},
 	//"getreceivedbyaccount": {handler: getReceivedByAccount},
@@ -1631,6 +1634,7 @@ func listFreeAddress(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	}
 	return res, nil
 }
+
 func sendToAddressesAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.SendToAddressAbeCmd)
 
@@ -2401,4 +2405,14 @@ func segmentationTXOSet(txo []utxo, min float64, max float64) [][]utxo {
 		sort.Sort(&t)
 	}
 	return segmentations
+}
+
+// TODO(abe): this function can be reused for abelian
+func getAddrBalance(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.GetAddrBalanceCmd)
+	if cmd.Start < 0 || cmd.End < 0 {
+		return nil, nil
+	}
+	res, err := w.GetAddrBalance(cmd.Start, cmd.End)
+	return res, err
 }

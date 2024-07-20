@@ -154,8 +154,8 @@ func (w *Wallet) handleChainNotifications() {
 				// So there should be check it and sync to the best chain
 				err = w.syncWithChain(birthdayBlock)
 				if err != nil && !w.ShuttingDown() {
-					panic(fmt.Errorf("unable to synchronize "+
-						"wallet to chain: %v", err))
+					log.Errorf("unable to synchronize "+
+						"wallet to chain,please check the backend node : %v", err)
 				}
 
 			case chain.BlockAbeConnected:

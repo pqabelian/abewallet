@@ -2,6 +2,7 @@ package chain
 
 import (
 	"errors"
+	"github.com/abesuite/abec/wire"
 	"sync"
 	"time"
 
@@ -136,6 +137,14 @@ func (c *RPCClient) IsCurrent() bool {
 	}
 	bestHeader, err := c.GetBlockHeader(bestHash)
 	if err != nil {
+		if bestHeader == nil {
+			log.Warnf("Unknown behavoir from backend node, %s "+
+				"please check the status of backend node ", err)
+		} else if bestHeader.Version > wire.BlockVersionEthashPow {
+			log.Warnf("Unknown version %#08x with block hash %s than highest known version %#08x, "+
+				"block data cannot be decoded normally, please check the status of backend node: %s",
+				bestHeader.Version, bestHash, wire.BlockVersionEthashPow, err)
+		}
 		return false
 	}
 	return bestHeader.Timestamp.After(time.Now().Add(-isCurrentDelta))
@@ -190,7 +199,7 @@ func (c *RPCClient) BlockStamp() (*waddrmgr.BlockStamp, error) {
 // block containing a matching address. If no matches are found in the range of
 // blocks requested, the returned response will be nil.
 
-//	todo(ABE):
+// todo(ABE):
 func (c *RPCClient) onClientConnect() {
 	select {
 	case c.enqueueNotification <- ClientConnected{}:
@@ -227,6 +236,7 @@ func (c *RPCClient) onBlockDisconnected(hash *chainhash.Hash, height int32, time
 }
 
 //	todo(ABE): the notification handlers such as OnBlockConnected send messages to c.enqueueNotification and trigger this handler
+//
 // handler maintains a queue of notifications and the current state (best
 // block) of the chain.
 func (c *RPCClient) handler() {

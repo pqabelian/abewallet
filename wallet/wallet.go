@@ -1674,6 +1674,31 @@ func (w *Wallet) NewAddressKey(markUsed bool) ([]byte, uint64, []byte, error) {
 	return netID, numberOrder, cryptoAddress, nil
 }
 
+func (w *Wallet) GetAddrBalance(start uint64, end uint64) (interface{}, error) {
+	var res interface{}
+	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		var err error
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		if start == end {
+			res, err = w.TxStore.GetTxoCountOverview(txmgrNs)
+		} else {
+			addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+			var addrKeys map[uint64][]byte
+			addrKeys, err = waddrmgr.FetchAddressKeys(addrmgrNs, start, end)
+			if err != nil {
+				return err
+			}
+
+			res, err = w.TxStore.GetAddrTxoStatistic(txmgrNs, addrKeys)
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
 // newChangeAddress returns a new change address for the wallet.
 //
 // NOTE: This method requires the caller to use the backend's NotifyReceived

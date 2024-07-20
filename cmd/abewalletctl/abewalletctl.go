@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -293,6 +294,9 @@ func aggregateBalances(params []interface{}, cfg *config) (string, error) {
 		}
 	}
 	utxoList = filteredUTXOList
+	sort.Slice(filteredUTXOList, func(i, j int) bool {
+		return filteredUTXOList[i].Amount > filteredUTXOList[j].Amount
+	})
 
 	type Address struct {
 		No_  uint64 `json:"No,omitempty"`
@@ -307,7 +311,7 @@ func aggregateBalances(params []interface{}, cfg *config) (string, error) {
 	zero := 0
 	fone := float64(1)
 	feeSpecified := float64(fee)
-	transactionHashStrs := make([]string, (total+group-1)/group)
+	transactionHashStrs := make([]string, 0, (total+group-1)/group)
 	for ; round < totalRound; round++ {
 		// acquire new addresses
 		newAddressNum := 1
@@ -356,6 +360,12 @@ func aggregateBalances(params []interface{}, cfg *config) (string, error) {
 			totalAmount += utxoList[start+offset].Amount
 			utxoStrs = append(utxoStrs, utxoList[start+offset].UTXOHashStr)
 		}
+		if totalAmount < fee {
+			fmt.Printf("the remaining TXO cannot be aggregated "+
+				"because the maximum cumulative sum %d is less than the specified transaction fee %d\n",
+				totalAmount, fee)
+			break
+		}
 
 		if err := unlockWallet(60); err != nil {
 			return "", fmt.Errorf("wrong format wallet passphrase: %v", err)
@@ -380,14 +390,14 @@ func aggregateBalances(params []interface{}, cfg *config) (string, error) {
 			return "", fmt.Errorf("can not create transaction command: %v", err)
 		}
 
-		// Send the JSON-RPC request to the server using the user-specified
+		// Send the JSON-RPC request to the server using the user-specified1
 		// connection configuration.
 		result, err := sendPostRequest(marshalledJSON, cfg)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		transactionHashStrs[round] = string(result[1 : 1+chainhash.MaxHashStringSize])
+		transactionHashStrs = append(transactionHashStrs, string(result[1:1+chainhash.MaxHashStringSize]))
 		if err = lockWallet(); err != nil {
 			return "", fmt.Errorf("wrong format wallet passphrase: %v", err)
 		}

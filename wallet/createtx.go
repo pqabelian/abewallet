@@ -377,7 +377,7 @@ func (s byAUTCoinValue) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 func createTransferTxAbeMsgTemplateMLP(txIn []*wire.TxInAbe, txOutNum int, txMemo []byte, fee uint64) (*wire.MsgTxAbe, error) {
 	// TODO(MLP) Abewallet would be generate transaction with latest version
 	msgTx := &wire.MsgTxAbe{
-		Version:   wire.TxVersion,
+		Version:   wire.TxVersion_Height_0,
 		TxIns:     nil,
 		TxOuts:    make([]*wire.TxOutAbe, txOutNum),
 		TxFee:     fee,
@@ -1701,7 +1701,7 @@ func (w *Wallet) txPqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc, mi
 					selectedRingSizes = append(selectedRingSizes, int(txo.RingSize))
 				}
 
-				txVersion := wire.TxVersion
+				txVersion := wire.TxVersion_Height_0
 				txConSize, err := wire.PrecomputeTrTxConSize(uint32(txVersion), inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)+1), abecryptoparam.MaxAllowedTxMemoSize)
 				if err != nil {
 					return err
@@ -1769,7 +1769,7 @@ func (w *Wallet) txPqringCTToOutputs(txOutDescs []*abecrypto.AbeTxOutputDesc, mi
 					// todo: compute tx size and witness, computes the fee, check amount, compare with changeThreshold
 
 					if currentTotal > targetValue {
-						txVersion := wire.TxVersion
+						txVersion := wire.TxVersion_Height_0
 						// compute the tx size with witness
 						txConSize, err := wire.PrecomputeTrTxConSize(uint32(txVersion), inputRingVersions, selectedRingSizes, uint8(len(txOutDescs)), abecryptoparam.MaxAllowedTxMemoSize)
 						if err != nil {
