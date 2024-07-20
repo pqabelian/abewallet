@@ -3,6 +3,7 @@ package prompt
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -262,25 +263,26 @@ func Seed(reader *bufio.Reader) (abecryptoxparam.CryptoScheme, abecryptoxkey.Pri
 		//seed, err := abesalrs.GenerateSeed(2*abesalrs.RecommendedSeedLen)
 
 		// crypto scheme =  abecryptoxparam.CryptoSchemePQRingCT
-		//seed := make([]byte, SeedLength)
-		//_, err := rand.Read(seed)
-		//if err != nil {
-		//	return 0, 0, nil, 0, errors.New("rand.Read() error in Seed()")
-		//}
-		// crypto scheme =  abecryptoxparam.CryptoSchemePQRingCTX
-		// In current version, we use a fixed crypto scheme for all new wallet
-		cryptoScheme := abecryptoxparam.CryptoSchemePQRingCTX
-		entropy, err := NewEntropy(SeedLength)
+		entropy := make([]byte, SeedLength)
+		_, err := rand.Read(entropy)
 		if err != nil {
-			return 0, 0, nil, 0, errors.New("fail to generate entropy")
+			return 0, 0, nil, 0, errors.New("rand.Read() error in Seed()")
 		}
+		cryptoScheme := abecryptoxparam.CryptoSchemePQRingCT
+		//crypto scheme =  abecryptoxparam.CryptoSchemePQRingCTX
+		// In current version, we use a fixed crypto scheme for all new wallet
+		//cryptoScheme := abecryptoxparam.CryptoSchemePQRingCTX
+		//entropy, err := NewEntropy(SeedLength)
+		//if err != nil {
+		//	return 0, 0, nil, 0, errors.New("fail to generate entropy")
+		//}
 
-		mnemonics, err := EntropyToWords(cryptoScheme, entropy, nil)
+		mnemonics, err := EntropyToWords(cryptoScheme, entropy, wordlists.English)
 		if err != nil {
 			return 0, 0, nil, 0, errors.New("fail to convert entropy to mnemonic")
 		}
 
-		seed, err := WordsToSeed(cryptoScheme, mnemonics, nil)
+		seed, err := WordsToSeed(cryptoScheme, mnemonics, wordlists.EnglishMap)
 		if err != nil {
 			return 0, 0, nil, 0, errors.New("fail to generate seed")
 		}
@@ -294,7 +296,7 @@ func Seed(reader *bufio.Reader) (abecryptoxparam.CryptoScheme, abecryptoxkey.Pri
 		fmt.Println("Your wallet's generation seed is: ")
 		fmt.Printf("%x\n", seed)
 		fmt.Println("Your wallet's crypto version is: ", cryptoScheme)
-		fmt.Println("Your wallet's privacy level is: ", privacyLevel)
+		//fmt.Println("Your wallet's privacy level is: ", privacyLevel)
 		fmt.Println("Your wallet's mnemonic list is: ")
 		fmt.Printf("%v\n", strings.Join(mnemonics, ","))
 		fmt.Println("IMPORTANT: Keep the version and seed in a safe place as you\n" +
@@ -339,7 +341,10 @@ func Seed(reader *bufio.Reader) (abecryptoxparam.CryptoScheme, abecryptoxkey.Pri
 			continue
 		}
 		cryptoScheme = abecryptoxparam.CryptoScheme(cryptoSchemeInt)
-		if cryptoScheme != abecryptoxparam.CryptoSchemePQRingCT && cryptoScheme != abecryptoxparam.CryptoSchemePQRingCTX {
+		if cryptoScheme != abecryptoxparam.CryptoSchemePQRingCT {
+			if cryptoScheme == abecryptoxparam.CryptoSchemePQRingCTX {
+				return 0, 0, nil, 0, errors.New("crypto version is supported by another wallet named abewalletmlp")
+			}
 			return 0, 0, nil, 0, errors.New("unsupported crypto scheme in current wallet version")
 		}
 
