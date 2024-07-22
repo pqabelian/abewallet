@@ -432,6 +432,9 @@ func putMasterKeyParams(ns walletdb.ReadWriteBucket, pubParams, privParams []byt
 // bucket. These are required in order to create any new manager scopes, as
 // those are created via hardened derivation of the children of this key.
 
+func FetchAddressKeys(ns walletdb.ReadBucket, start uint64, end uint64) (addrKeys map[uint64][]byte, err error) {
+	return fetchAddressKeys(ns, start, end)
+}
 func fetchAddressKeys(ns walletdb.ReadBucket, start uint64, end uint64) (addrKeys map[uint64][]byte, err error) {
 	addrKeys = make(map[uint64][]byte, end-start)
 	mainBucket := ns.NestedReadBucket(mainBucketName)

@@ -1058,7 +1058,7 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 		if err != nil {
 			return err
 		}
-		coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(ringDetails.T[index])
+		coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{Version: ringDetails.Version, TxoScript: ringDetails.TxoScripts[index]})
 		if err != nil {
 			return err
 		}
@@ -1415,7 +1415,6 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 	addressSpendableTXOBalanceMapping := map[string]int64{}
 	addressUnconfirmedTXOBalanceMapping := map[string]int64{}
 
-
 	balance, err := fetchMinedBalance(txMgrNs)
 	if err != nil {
 		return err
@@ -1524,7 +1523,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 				"and affected by this, all txos from now would be immature, and the balance may no longer be correct, and upgrade wallet if possible!!!", coinbaseTx.TxHash())
 			continue
 		}
-		valid, v, _, addrIdx, err := s.ReceiveTxo(coinbaseTx.TxOuts[i], addrMgrNs)
+		valid, v, addrKeyBytes, addrIdx, err := s.ReceiveTxo(coinbaseTx.TxOuts[i], addrMgrNs)
 		if err != nil {
 			return err
 		}
@@ -1538,7 +1537,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			numImmatureCoinbaseTXO++
 			numTXO++
 
-			addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
+			addrKey := hex.EncodeToString(addrKeyBytes)
 			addrMapping[addrKey] = struct{}{}
 
 			addressNumImmatureCoinbaseTXOMapping[addrKey]++
@@ -1546,7 +1545,6 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 
 			addressImmatureCoinbaseTXOBalanceMapping[addrKey] += int64(v)
 			addressTXOBalanceMapping[addrKey] += int64(v)
-
 
 			amt := abeutil.Amount(v)
 			immatureCBBal += amt
@@ -1766,13 +1764,12 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 							return err
 						}
 
-
 						// statistic
 						ringDetails, err := fetchRingDetails(txMgrNs, utxoRing.RingHash[:])
 						if err != nil {
 							return err
 						}
-						coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(ringDetails.TxoScripts[t], abecryptoparam.CryptoSchemePQRingCT)
+						coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{Version: ringDetails.Version, TxoScript: ringDetails.TxoScripts[t]})
 						if err != nil {
 							return err
 						}
@@ -1789,7 +1786,6 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 
 						addressSpendableTXOBalanceMapping[addrKey] -= int64(v)
 						addressTXOBalanceMapping[addrKey] -= int64(v)
-
 
 						//otherwise it has been moved to spentButUnmined bucket
 						// update the balances
@@ -1856,7 +1852,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 							if err != nil {
 								return err
 							}
-							coinAddress, err := abecryptox.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[t], abecryptoparam.CryptoSchemePQRingCT)
+							coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{Version: ringDetails.Version, TxoScript: ringDetails.TxoScripts[t]})
 							if err != nil {
 								return err
 							}
@@ -1873,7 +1869,6 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 
 							addressUnconfirmedTXOBalanceMapping[addrKey] -= int64(v)
 							addressTXOBalanceMapping[addrKey] -= int64(v)
-
 
 							amt := abeutil.Amount(txo.Amount)
 							balance -= amt
@@ -1954,7 +1949,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 
 		// traverse all outputs of a transaction and check if it is ours
 		for j := 0; j < len(txi.TxOuts); j++ {
-			valid, v, addrKey, addrIdx, err := s.ReceiveTxo(txi.TxOuts[j], addrMgrNs)
+			valid, v, addrKeyBytes, addrIdx, err := s.ReceiveTxo(txi.TxOuts[j], addrMgrNs)
 			if err != nil {
 				return err
 			}
@@ -1966,7 +1961,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 				// statistic
 				numImmatureTransferTXO++
 				numTXO++
-				addrKey := hex.EncodeToString(chainhash.DoubleHashB(coinAddr))
+				addrKey := hex.EncodeToString(addrKeyBytes)
 				addrMapping[addrKey] = struct{}{}
 				addressNumImmatureTransferTXOMapping[addrKey]++
 				addressNumTXOMapping[addrKey]++
@@ -1993,7 +1988,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 
 					isAUTRootCoin := autTx.Type() == aut.Registration || autTx.Type() == aut.ReRegistration
 
-					autCoin := NewAUTCoin(k, autTx.AUTIdentifier(), isAUTRootCoin, autTx.ValueAt(uint8(j)), addrKey)
+					autCoin := NewAUTCoin(k, autTx.AUTIdentifier(), isAUTRootCoin, autTx.ValueAt(uint8(j)), addrKeyBytes)
 					err = putRawAUTCoin(txMgrNs, canonicalOutPointAbe(k.TxHash, k.Index), valueAUTCoin(autCoin))
 					if err != nil {
 						return err
@@ -2097,7 +2092,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 				if err != nil {
 					return err
 				}
-				coinAddress, err := abecryptox.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[utxo.Index], abecryptoparam.CryptoSchemePQRingCT)
+				coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{Version: ringDetails.Version, TxoScript: ringDetails.TxoScripts[utxo.Index]})
 				if err != nil {
 					return err
 				}
@@ -2111,7 +2106,6 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 
 				addressImmatureCoinbaseTXOBalanceMapping[addrKey] -= int64(utxo.Amount)
 				addressSpendableTXOBalanceMapping[addrKey] += int64(utxo.Amount)
-
 
 				utxo.FromCoinBase = true
 				utxo.IsAUTCoin = false
@@ -2600,7 +2594,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			if err != nil {
 				return err
 			}
-			coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(ringDetails.TxoScripts[utxo.Index])
+			coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{Version: ringDetails.Version, TxoScript: ringDetails.TxoScripts[utxo.Index]})
 			if err != nil {
 				return err
 			}
@@ -2615,8 +2609,6 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 
 			addressImmatureTransferTXOBalanceMapping[addrKey] -= int64(utxo.Amount)
 			addressSpendableTXOBalanceMapping[addrKey] += int64(utxo.Amount)
-
-
 
 			k := canonicalOutPointAbe(op.TxHash, op.Index)
 			serializedTxo, err := utxo.Serialize()
@@ -2663,7 +2655,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			if err != nil {
 				return err
 			}
-			coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(ringDetails.TxoScripts[utxo.Index], abecryptoparam.CryptoSchemePQRingCT)
+			coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{Version: ringDetails.Version, TxoScript: ringDetails.TxoScripts[utxo.Index]})
 			if err != nil {
 				return err
 			}
@@ -2677,7 +2669,6 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 
 			addressImmatureTransferTXOBalanceMapping[addrKey] -= int64(utxo.Amount)
 			addressSpendableTXOBalanceMapping[addrKey] += int64(utxo.Amount)
-
 
 			k := canonicalOutPointAbe(op.TxHash, op.Index)
 			serializedTxo, err := utxo.Serialize()
@@ -2746,7 +2737,7 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 			if err != nil {
 				return err
 			}
-			coinAddress, err := abecryptox.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[utxo.Index], abecryptoparam.CryptoSchemePQRingCT)
+			coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{Version: ringDetails.Version, TxoScript: ringDetails.TxoScripts[utxo.Index]})
 			if err != nil {
 				return err
 			}
@@ -2760,7 +2751,6 @@ func (s *Store) InsertBlock(txMgrNs walletdb.ReadWriteBucket, addrMgrNs walletdb
 
 			addressImmatureTransferTXOBalanceMapping[addrKey] -= int64(utxo.Amount)
 			addressSpendableTXOBalanceMapping[addrKey] += int64(utxo.Amount)
-
 
 			amt := abeutil.Amount(utxo.Amount)
 			spendableBal += amt
@@ -3314,7 +3304,7 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						if err != nil {
 							return err
 						}
-						coinAddress, err := abecryptox.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[output.Index], abecryptoparam.CryptoSchemePQRingCT)
+						coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{Version: ringDetails.Version, TxoScript: ringDetails.TxoScripts[output.Index]})
 						if err != nil {
 							return err
 						}
@@ -3328,7 +3318,6 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 
 						addressSpendableTXOBalanceMapping[addrKey] -= int64(output.Amount)
 						addressImmatureTransferTXOBalanceMapping[addrKey] += int64(output.Amount)
-
 
 						amt := abeutil.Amount(output.Amount)
 						spendableBal -= amt
@@ -3409,7 +3398,7 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						if err != nil {
 							return err
 						}
-						coinAddress, err := abecryptox.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[output.Index], abecryptoparam.CryptoSchemePQRingCT)
+						coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{Version: ringDetails.Version, TxoScript: ringDetails.TxoScripts[output.Index]})
 						if err != nil {
 							return err
 						}
@@ -3423,7 +3412,6 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 
 						addressUnconfirmedTXOBalanceMapping[addrKey] -= int64(output.Amount)
 						addressImmatureTransferTXOBalanceMapping[addrKey] += int64(output.Amount)
-
 
 						amt := abeutil.Amount(output.Amount)
 						unconfirmedBal -= amt
@@ -3523,10 +3511,10 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						if err != nil {
 							return err
 						}
-						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[output.Index], abecryptoparam.CryptoSchemePQRingCT)
-						if err != nil {
-							return err
-						}
+						coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{
+							Version:   ringDetails.Version,
+							TxoScript: ringDetails.TxoScripts[output.Index],
+						})
 
 						numImmatureTransferTXO++
 						numTXO++
@@ -3718,7 +3706,7 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						if !unspentUTXO.TxOutput.TxHash.IsEqual(&hash) {
 							continue
 						}
-						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(block.MsgBlock.Transactions[index].TxOuts[unspentUTXO.TxOutput.Index].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
+						coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(block.MsgBlock.Transactions[index].TxOuts[unspentUTXO.TxOutput.Index])
 						if err != nil {
 							return err
 						}
@@ -3762,7 +3750,7 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 					return err
 				}
 				abeTxo := confirmedTx.MsgTx.TxOuts[unspentUTXO.TxOutput.Index]
-				coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(abeTxo.TxoScript, abecryptoparam.CryptoSchemePQRingCT)
+				coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(abeTxo)
 				if err != nil {
 					return nil
 				}
@@ -3776,7 +3764,6 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 
 				addressNumImmatureTransferTXOMapping[addrKey] -= int64(unspentUTXO.Amount)
 				addressNumTXOMapping[addrKey] -= int64(unspentUTXO.Amount)
-
 
 				amt := abeutil.Amount(unspentUTXO.Amount)
 				immatureTRBal -= amt
@@ -3841,7 +3828,10 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						if err != nil {
 							return err
 						}
-						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[k], abecryptoparam.CryptoSchemePQRingCT)
+						coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{
+							Version:   ringDetails.Version,
+							TxoScript: ringDetails.TxoScripts[k],
+						})
 						if err != nil {
 							return err
 						}
@@ -3855,7 +3845,6 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 
 						addressSpendableTXOBalanceMapping[addrKey] += int64(scoutput.Amount)
 						addressTXOBalanceMapping[addrKey] += int64(scoutput.Amount)
-
 
 						amt := abeutil.Amount(scoutput.Amount)
 						spendableBal += amt
@@ -3962,7 +3951,10 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 							if err != nil {
 								return err
 							}
-							coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[m], abecryptoparam.CryptoSchemePQRingCT)
+							coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{
+								Version:   ringDetails.Version,
+								TxoScript: ringDetails.TxoScripts[m],
+							})
 							if err != nil {
 								return err
 							}
@@ -3976,7 +3968,6 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 
 							addressSpendableTXOBalanceMapping[addrKey] += int64(scoutput.Amount)
 							addressTXOBalanceMapping[addrKey] += int64(scoutput.Amount)
-
 
 							amt := abeutil.Amount(scoutput.Amount)
 							spendableBal += amt
@@ -4125,7 +4116,10 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						if err != nil {
 							return err
 						}
-						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[output.Index], abecryptoparam.CryptoSchemePQRingCT)
+						coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{
+							Version:   ringDetails.Version,
+							TxoScript: ringDetails.TxoScripts[output.Index],
+						})
 						if err != nil {
 							return err
 						}
@@ -4139,7 +4133,6 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 
 						addressSpendableTXOBalanceMapping[addrKey] -= int64(output.Amount)
 						addressImmatureCoinbaseTXOBalanceMapping[addrKey] += int64(output.Amount)
-
 
 						amt := abeutil.Amount(output.Amount)
 						spendableBal -= amt
@@ -4205,7 +4198,10 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						if err != nil {
 							return err
 						}
-						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[output.Index], abecryptoparam.CryptoSchemePQRingCT)
+						coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{
+							Version:   ringDetails.Version,
+							TxoScript: ringDetails.TxoScripts[output.Index],
+						})
 						if err != nil {
 							return err
 						}
@@ -4219,7 +4215,6 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 
 						addressUnconfirmedTXOBalanceMapping[addrKey] -= int64(output.Amount)
 						addressImmatureCoinbaseTXOBalanceMapping[addrKey] += int64(output.Amount)
-
 
 						amt := abeutil.Amount(output.Amount)
 						unconfirmedBal -= amt
@@ -4297,7 +4292,10 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 						if err != nil {
 							return err
 						}
-						coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetails.TxoScripts[output.Index], abecryptoparam.CryptoSchemePQRingCT)
+						coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{
+							Version:   ringDetails.Version,
+							TxoScript: ringDetails.TxoScripts[output.Index],
+						})
 						if err != nil {
 							return err
 						}
@@ -4311,7 +4309,6 @@ func (s *Store) rollback(manager *waddrmgr.Manager, waddrmgrNs walletdb.ReadWrit
 
 						addressUnconfirmedTXOBalanceMapping[addrKey] += int64(output.Amount)
 						addressTXOBalanceMapping[addrKey] += int64(output.Amount)
-
 
 						amt := abeutil.Amount(output.Amount)
 						unconfirmedBal += amt

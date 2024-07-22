@@ -2,8 +2,7 @@ package wtxmgr
 
 import (
 	"encoding/hex"
-	"github.com/abesuite/abec/abecrypto"
-	"github.com/abesuite/abec/abecrypto/abecryptoparam"
+	"github.com/abesuite/abec/abecryptox"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/wire"
 	"github.com/abesuite/abewallet/walletdb"
@@ -170,7 +169,10 @@ func populateStatistics(txMgrNs walletdb.ReadWriteBucket) error {
 				}
 				ringDetails[ringHash] = ringDetail
 			}
-			coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(ringDetail.TxoScripts[ringIndex], abecryptoparam.CryptoSchemePQRingCT)
+			coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(&wire.TxOutAbe{
+				Version:   ringDetail.Version,
+				TxoScript: ringDetail.TxoScripts[ringIndex],
+			})
 			if err != nil {
 				return "", err
 			}
@@ -200,7 +202,7 @@ func populateStatistics(txMgrNs walletdb.ReadWriteBucket) error {
 		}
 
 		abeTxo := tx.MsgTx.TxOuts[ringIndex]
-		coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(abeTxo.TxoScript, abecryptoparam.CryptoSchemePQRingCT)
+		coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(abeTxo)
 		if err != nil {
 			return "", err
 		}
@@ -228,7 +230,7 @@ func populateStatistics(txMgrNs walletdb.ReadWriteBucket) error {
 				if !txHash.IsEqual(&hash) {
 					continue
 				}
-				coinAddress, err := abecrypto.ExtractCoinAddressFromTxoScript(block.MsgBlock.Transactions[i].TxOuts[index].TxoScript, abecryptoparam.CryptoSchemePQRingCT)
+				coinAddress, err := abecryptox.ExtractCoinAddressFromTxo(block.MsgBlock.Transactions[i].TxOuts[index])
 				if err != nil {
 					return "", err
 				}
@@ -244,7 +246,7 @@ func populateStatistics(txMgrNs walletdb.ReadWriteBucket) error {
 		if len(v) == 0 {
 			return nil
 		}
-		immatureCBTXOMapping, err := deserializeImmaturedCoinbaseOutput(v)
+		immatureCBTXOMapping, err := deserializedImmaturedCoinbaseOutput(v)
 		if err != nil {
 			return err
 		}
@@ -283,7 +285,7 @@ func populateStatistics(txMgrNs walletdb.ReadWriteBucket) error {
 		if len(v) == 0 {
 			return nil
 		}
-		immatureTrTXOMapping, err := deserializeImmaturedOutput(v)
+		immatureTrTXOMapping, err := deserializedImmatureOutput(v)
 		if err != nil {
 			return err
 		}

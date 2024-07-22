@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto/abecryptoparam"
 	"github.com/abesuite/abec/abecryptox/abecryptoutils"
 	"github.com/abesuite/abec/abecryptox/abecryptoxkey"
 	"github.com/abesuite/abec/abecryptox/abecryptoxparam"
@@ -1893,7 +1892,10 @@ func generateSeedWithSequenceNumber(seed []byte, length int, cnt uint64) ([]byte
 		return nil, errors.New("the length of given seed is not matched")
 	}
 	seedHalfLength := length >> 1
-	halfLength := abecryptoparam.PQRingCTPP.ParamSeedBytesLen()
+	halfLength, err := abecryptoxparam.GetCryptoSchemeParamSeedBytesLen(abecryptoxparam.CryptoSchemePQRingCT)
+	if err != nil {
+		return nil, err
+	}
 	usedSeed := make([]byte, 2*halfLength)
 
 	var tmp []byte
