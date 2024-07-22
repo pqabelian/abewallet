@@ -343,7 +343,7 @@ func Seed(reader *bufio.Reader) (abecryptoxparam.CryptoScheme, abecryptoxkey.Pri
 		cryptoScheme = abecryptoxparam.CryptoScheme(cryptoSchemeInt)
 		if cryptoScheme != abecryptoxparam.CryptoSchemePQRingCT {
 			if cryptoScheme == abecryptoxparam.CryptoSchemePQRingCTX {
-				return 0, 0, nil, 0, errors.New("crypto version is supported by another wallet named abewalletmlp")
+				return 0, 0, nil, 0, fmt.Errorf("crypto version %d is supported by another wallet named abewalletmlp", cryptoScheme)
 			}
 			return 0, 0, nil, 0, errors.New("unsupported crypto scheme in current wallet version")
 		}
