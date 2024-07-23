@@ -1689,7 +1689,7 @@ func (w *Wallet) GetAddrBalance(start uint64, end uint64) (interface{}, error) {
 				return err
 			}
 
-			res, err = w.TxStore.GetAddrTxoStatistic(txmgrNs, addrKeys)
+			res, err = w.TxStore.GetAddrTxoStatistic(txmgrNs, addrKeys, start, end)
 		}
 		return err
 	})

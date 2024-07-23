@@ -1133,7 +1133,7 @@ func (s *Store) InsertTx(wtxmgrNs walletdb.ReadWriteBucket, rec *TxRecord, block
 		err = utxo.Deserialize(&wire.OutPointAbe{
 			TxHash: rec.MsgTx.TxIns[i].PreviousOutPointRing.OutPoints[index].TxHash,
 			Index:  rec.MsgTx.TxIns[i].PreviousOutPointRing.OutPoints[index].Index,
-		}, v)
+		}, serializedMatureOutput)
 		if err != nil {
 			return err
 		}
@@ -4897,7 +4897,7 @@ func (s *Store) GetTxoCountOverview(wtxmgrNs walletdb.ReadBucket) (res map[strin
 
 	return res, nil
 }
-func (s *Store) GetAddrTxoStatistic(wtxmgrNs walletdb.ReadBucket, addrKeys map[uint64][]byte) ([]map[string]interface{}, error) {
+func (s *Store) GetAddrTxoStatistic(wtxmgrNs walletdb.ReadBucket, addrKeys map[uint64][]byte, start uint64, end uint64) ([]map[string]interface{}, error) {
 	res := make([]map[string]interface{}, len(addrKeys))
 	statisticsBucket := wtxmgrNs.NestedReadBucket(bucketStatistics)
 	addrTxoCounter := statisticsBucket.NestedReadBucket(bucketAddrTXOCounter)
@@ -4905,7 +4905,7 @@ func (s *Store) GetAddrTxoStatistic(wtxmgrNs walletdb.ReadBucket, addrKeys map[u
 		return res, nil
 	}
 	for idx, addrKey := range addrKeys {
-		res[idx] = make(map[string]interface{})
+		res[idx-start] = make(map[string]interface{})
 		subBucket := addrTxoCounter.NestedReadBucket(addrKey)
 		if subBucket == nil {
 			continue
@@ -4915,61 +4915,61 @@ func (s *Store) GetAddrTxoStatistic(wtxmgrNs walletdb.ReadBucket, addrKeys map[u
 		if err != nil {
 			return nil, err
 		}
-		res[idx]["num_total_txo"] = numTXO
+		res[idx-start]["num_total_txo"] = numTXO
 
 		numImmatureCoinbaseTXO, err := fetchAddrTXONum(subBucket, statisticNumImmatureCoinbaseTXO)
 		if err != nil {
 			return nil, err
 		}
-		res[idx]["num_immature_coinbase_txo"] = numImmatureCoinbaseTXO
+		res[idx-start]["num_immature_coinbase_txo"] = numImmatureCoinbaseTXO
 
 		numImmatureTransferTXO, err := fetchAddrTXONum(subBucket, statisticNumImmatureTransferTXO)
 		if err != nil {
 			return nil, err
 		}
-		res[idx]["num_immature_transfer_txo"] = numImmatureTransferTXO
+		res[idx-start]["num_immature_transfer_txo"] = numImmatureTransferTXO
 
 		numSpendableTXO, err := fetchAddrTXONum(subBucket, statisticNumSpendableTXO)
 		if err != nil {
 			return nil, err
 		}
-		res[idx]["num_spendable_txo"] = numSpendableTXO
+		res[idx-start]["num_spendable_txo"] = numSpendableTXO
 
 		numUnconfirmedTXO, err := fetchAddrTXONum(subBucket, statisticNumUnconfirmedTXO)
 		if err != nil {
 			return nil, err
 		}
-		res[idx]["num_unconfirmed_txo"] = numUnconfirmedTXO
+		res[idx-start]["num_unconfirmed_txo"] = numUnconfirmedTXO
 
 		balance, err := fetchAddrTXOAmount(subBucket, statisticTotalBalance)
 		if err != nil {
 			return nil, err
 		}
-		res[idx]["balance_total_txo"] = abeutil.Amount(balance).ToABE()
+		res[idx-start]["balance_total_txo"] = abeutil.Amount(balance).ToABE()
 
 		immatureCoinbaseTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticImmatureCoinbaseBalance)
 		if err != nil {
 			return nil, err
 		}
-		res[idx]["balance_immature_coinbase_txo"] = abeutil.Amount(immatureCoinbaseTXOBalance).ToABE()
+		res[idx-start]["balance_immature_coinbase_txo"] = abeutil.Amount(immatureCoinbaseTXOBalance).ToABE()
 
 		immatureTransferTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticImmatureTransferBalance)
 		if err != nil {
 			return nil, err
 		}
-		res[idx]["balance_immature_transfer_txo"] = abeutil.Amount(immatureTransferTXOBalance).ToABE()
+		res[idx-start]["balance_immature_transfer_txo"] = abeutil.Amount(immatureTransferTXOBalance).ToABE()
 
 		spendableTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticSpendableBalance)
 		if err != nil {
 			return nil, err
 		}
-		res[idx]["balance_spendable_txo"] = abeutil.Amount(spendableTXOBalance).ToABE()
+		res[idx-start]["balance_spendable_txo"] = abeutil.Amount(spendableTXOBalance).ToABE()
 
 		unconfirmedTXOBalance, err := fetchAddrTXOAmount(subBucket, statisticUnconfirmedBalance)
 		if err != nil {
 			return nil, err
 		}
-		res[idx]["balance_unconfirmed_txo"] = abeutil.Amount(unconfirmedTXOBalance).ToABE()
+		res[idx-start]["balance_unconfirmed_txo"] = abeutil.Amount(unconfirmedTXOBalance).ToABE()
 	}
 
 	return res, nil

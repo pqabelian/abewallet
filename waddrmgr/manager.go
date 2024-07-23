@@ -859,7 +859,7 @@ func (m *Manager) ChangePassphrase(ns walletdb.ReadWriteBucket, oldPassphrase,
 			return managerError(ErrCrypto, str, err)
 		}
 		encSeed, err := newMasterKey.Encrypt(decSeed)
-		zero.Bytes(encSeed)
+		zero.Bytes(decSeed)
 		if err != nil {
 			str := "failed to encrypt crypto seed key"
 			return managerError(ErrCrypto, str, err)
@@ -896,7 +896,7 @@ func (m *Manager) ChangePassphrase(ns walletdb.ReadWriteBucket, oldPassphrase,
 		// Save the new keys and params to the db in a single
 		// transaction.
 		// TODO 20220610 the public encrypt and the crypto key
-		err = putCryptoKeys(ns, nil, encPriv, encScript, nil)
+		err = putCryptoKeys(ns, nil, encPriv, encScript, encSeed)
 		if err != nil {
 			return maybeConvertDbError(err)
 		}

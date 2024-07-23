@@ -377,7 +377,7 @@ func (s byAUTCoinValue) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 func createTransferTxAbeMsgTemplateMLP(txIn []*wire.TxInAbe, txOutNum int, txMemo []byte, fee uint64) (*wire.MsgTxAbe, error) {
 	// TODO(MLP) Abewallet would be generate transaction with latest version
 	msgTx := &wire.MsgTxAbe{
-		Version:   wire.TxVersion_Height_0,
+		Version:   wire.TxVersion_Height_MLPAUT_300000,
 		TxIns:     nil,
 		TxOuts:    make([]*wire.TxOutAbe, txOutNum),
 		TxFee:     fee,

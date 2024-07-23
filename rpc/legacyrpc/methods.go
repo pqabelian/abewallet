@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/abesuite/abec/abecryptox"
+	"github.com/abesuite/abec/abecryptox/abecryptoxparam"
 	"github.com/abesuite/abec/abejson"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/aut"
@@ -951,6 +952,9 @@ func listSpentAndMinedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, erro
 
 func listAUTCoins(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.ListAUTCoinsCmd)
+	if w.Manager.GetCryptoScheme() != abecryptoxparam.CryptoSchemePQRingCTX {
+		return nil, fmt.Errorf("currently ONLY pseudonym-address abewalletmlp support AUT")
+	}
 
 	rootCoinOnly := cmd.RootCoinOnly != nil && *cmd.RootCoinOnly
 	autIdentifier := ""
@@ -1407,7 +1411,11 @@ func sendAddressAbe(w *wallet.Wallet, amounts []abejson.Pair,
 	}
 	txHashStr := tx.Tx.TxHash().String()
 	log.Infof("Successfully sent transaction %v", txHashStr)
-	return txHashStr + fmt.Sprintf("\nCurrent max No. of address is %d", tx.ChangeAddressNo), nil
+	res := txHashStr
+	if w.Manager.GetCryptoScheme() == abecryptoxparam.CryptoSchemePQRingCT {
+		res = txHashStr + fmt.Sprintf("\nCurrent max No. of address is %d", tx.ChangeAddressNo)
+	}
+	return res, nil
 }
 
 func sendAddressAbeAUT(w *wallet.Wallet, autTransaction aut.Transaction, amounts []abejson.Pair,
@@ -1582,6 +1590,10 @@ func generateAddressAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 	cmd := icmd.(*abejson.GenerateAddressCmd)
 	number := *cmd.Num
 
+	if w.Manager.IsLocked() {
+		return nil, errors.New("wallet is locked")
+	}
+
 	var err error
 	numberOrder := make([]uint64, number)
 	addresses := make([][]byte, number)
@@ -1693,6 +1705,9 @@ func sendToAddressesAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 func registerAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.RegisterAUTTransactionCmd)
 	// according command to  build the output
+	if w.Manager.GetCryptoScheme() != abecryptoxparam.CryptoSchemePQRingCTX {
+		return nil, fmt.Errorf("currently ONLY pseudonym-address abewalletmlp support AUT")
+	}
 
 	if len(cmd.AUTIdentifier) != aut.IdentifierLength {
 		return nil, fmt.Errorf("the length of identifier is expected %d, but got %d", aut.IdentifierLength, len(cmd.AUTIdentifier))
@@ -1764,6 +1779,10 @@ func registerAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, er
 
 func mintAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.MintAUTTransactionCmd)
+	if w.Manager.GetCryptoScheme() != abecryptoxparam.CryptoSchemePQRingCTX {
+		return nil, fmt.Errorf("currently ONLY pseudonym-address abewalletmlp support AUT")
+	}
+
 	// according command to  build the output
 	if len(cmd.AUTIdentifier) != aut.IdentifierLength {
 		return nil, fmt.Errorf("the length of identifier is expected %d, but got %d", aut.IdentifierLength, len(cmd.AUTIdentifier))
@@ -1792,6 +1811,10 @@ func mintAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 func transferAUT(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.TransferAUTTransactionCmd)
 	// according command to  build the output
+	if w.Manager.GetCryptoScheme() != abecryptoxparam.CryptoSchemePQRingCTX {
+		return nil, fmt.Errorf("currently ONLY pseudonym-address abewalletmlp support AUT")
+	}
+
 	if len(cmd.AUTIdentifier) != aut.IdentifierLength {
 		return nil, fmt.Errorf("the length of identifier is expected %d, but got %d", aut.IdentifierLength, len(cmd.AUTIdentifier))
 	}
@@ -1822,6 +1845,10 @@ func transferAUT(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 func reRegisterAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.ReRegisterAUTTransactionCmd)
 	// according command to  build the output
+	if w.Manager.GetCryptoScheme() != abecryptoxparam.CryptoSchemePQRingCTX {
+		return nil, fmt.Errorf("currently ONLY pseudonym-address abewalletmlp support AUT")
+	}
+
 	if len(cmd.AUTIdentifier) != aut.IdentifierLength {
 		return nil, fmt.Errorf("the length of identifier is expected %d, but got %d", aut.IdentifierLength, len(cmd.AUTIdentifier))
 	}
@@ -1883,6 +1910,9 @@ func reRegisterAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, 
 
 func burnAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.BurnAUTTransactionCmd)
+	if w.Manager.GetCryptoScheme() != abecryptoxparam.CryptoSchemePQRingCTX {
+		return nil, fmt.Errorf("currently ONLY pseudonym-address abewalletmlp support AUT")
+	}
 
 	utxosSpecified := strings.Split(cmd.UTXOSpescified, ",")
 	if len(utxosSpecified) == 0 {
