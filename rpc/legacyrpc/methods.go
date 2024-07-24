@@ -1413,7 +1413,12 @@ func sendAddressAbe(w *wallet.Wallet, amounts []abejson.Pair,
 	log.Infof("Successfully sent transaction %v", txHashStr)
 	res := txHashStr
 	if w.Manager.GetCryptoScheme() == abecryptoxparam.CryptoSchemePQRingCT {
-		res = txHashStr + fmt.Sprintf("\nCurrent max No. of address is %d", tx.ChangeAddressNo)
+		addressNum, err := w.AddressMaxSequenceNumber()
+		if err != nil {
+			res = txHashStr
+		} else {
+			res = txHashStr + fmt.Sprintf("\nCurrent max No. of address is %d", addressNum)
+		}
 	}
 	return res, nil
 }
