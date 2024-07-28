@@ -106,40 +106,17 @@ func createWallet(cfg *config) error {
 		fmt.Println("The wallet has been created successfully.")
 	} else if cfg.NonInteractiveCreate {
 		// default crypto scheme and privacy level
-		cryptoScheme := abecryptoxparam.CryptoSchemePQRingCTX
-		privacyLevel := abecryptoxkey.PrivacyLevelRINGCT
+		cryptoScheme := abecryptoxparam.CryptoSchemePQRingCT
+		privacyLevel := abecryptoxkey.PrivacyLevelRINGCTPre
 
-		// try to read from config
-		cryptoSchemeStr := strings.TrimSpace(strings.ToLower(cfg.MyVersion))
-		cryptoSchemeInt, err := strconv.Atoi(cryptoSchemeStr)
-		if err != nil {
-			return err
-		}
-		cryptoScheme = abecryptoxparam.CryptoScheme(cryptoSchemeInt)
-		if cryptoScheme != abecryptoxparam.CryptoSchemePQRingCT &&
-			cryptoScheme != abecryptoxparam.CryptoSchemePQRingCTX {
-			return errors.New("Invalid crypto version specified\n")
-		}
-
-		if cryptoScheme == abecryptoxparam.CryptoSchemePQRingCT {
-			privacyLevel = abecryptoxkey.PrivacyLevelRINGCTPre
-		}
-		if cryptoScheme == abecryptoxparam.CryptoSchemePQRingCTX {
-			if !cfg.WithPrivacyLevel {
-				return errors.New("No privacy level specified\n")
-			}
-			privacyLevel = abecryptoxkey.PrivacyLevel(cfg.MyPrivacyLevel)
-			if /*privacyLevel != abecryptoxkey.PrivacyLevelRINGCTPre &&*/
-			privacyLevel != abecryptoxkey.PrivacyLevelRINGCT &&
-				privacyLevel != abecryptoxkey.PrivacyLevelPSEUDONYM {
-				return errors.New("Invalid privacy level specified\n")
-			}
-		}
-
+		var err error
 		var seed []byte
 		var mnemonics []string
 		if !cfg.WithMnemonic {
 			entropy, err := prompt.NewEntropy(prompt.SeedLength)
+			if err != nil {
+				return err
+			}
 			mnemonics, err = prompt.EntropyToWords(cryptoScheme, entropy, wordlists.English)
 			if err != nil {
 				return err
@@ -151,6 +128,15 @@ func createWallet(cfg *config) error {
 
 			cfg.MyRestoreNumber = prompt.MAXCOUNTERADDRESS
 		} else {
+			versionStr := strings.TrimSpace(strings.ToLower(cfg.MyVersion))
+			cryptoVersion, err := strconv.Atoi(versionStr)
+			if err != nil {
+				return err
+			}
+			if abecryptoxparam.CryptoScheme(cryptoVersion) != abecryptoxparam.CryptoSchemePQRingCT {
+				return errors.New("unsupported crypto version")
+			}
+
 			mnemonics = strings.Split(cfg.MyMnemonic, ",")
 			seed, err = prompt.WordsToSeed(cryptoScheme, mnemonics, wordlists.EnglishMap)
 			if err != nil {
