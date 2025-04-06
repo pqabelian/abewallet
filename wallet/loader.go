@@ -2,6 +2,8 @@ package wallet
 
 import (
 	"errors"
+	"github.com/abesuite/abec/abecryptox/abecryptoxkey"
+	"github.com/abesuite/abec/abecryptox/abecryptoxparam"
 	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abewallet/internal/prompt"
 	"github.com/abesuite/abewallet/waddrmgr"
@@ -94,29 +96,10 @@ func (l *Loader) RunAfterLoad(fn func(*Wallet)) {
 // passphrases.  The seed is optional.  If non-nil, addresses are derived from
 // this seed.  If nil, a secure random seed is generated.
 
-func (l *Loader) CreateNewWallet(pubPassphrase, privPassphrase, seed []byte, end uint64,
-	bday time.Time) (*Wallet, error) {
-	return l.createNewWallet(
-		pubPassphrase, privPassphrase, seed, end, bday, false,
-	)
-}
-
-// CreateNewWatchingOnlyWallet creates a new wallet using the provided
-// public passphrase.  No seed or private passphrase may be provided
-// since the wallet is watching-only.
-// TODO 20220614 would be support
-func (l *Loader) CreateNewWatchingOnlyWallet(pubPassphrase, privPassphrase,
-	seed []byte, end uint64, bday time.Time, isWatchingOnly bool) (*Wallet, error) {
-	return l.createNewWallet(
-		pubPassphrase, privPassphrase, seed, end, bday, true,
-	)
-}
-
-func (l *Loader) createNewWallet(pubPassphrase, privPassphrase,
-	seed []byte, end uint64, bday time.Time, isWatchingOnly bool) (*Wallet, error) {
-
-	defer l.mu.Unlock()
+func (l *Loader) CreateNewWallet(cryptoScheme abecryptoxparam.CryptoScheme, privacyLevel abecryptoxkey.PrivacyLevel,
+	pubPassphrase, privPassphrase, seed []byte, end uint64, bday time.Time, isWatchingOnly bool) (*Wallet, error) {
 	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	if l.wallet != nil {
 		return nil, ErrLoaded
@@ -142,18 +125,9 @@ func (l *Loader) createNewWallet(pubPassphrase, privPassphrase,
 	}
 
 	// Initialize the newly created database for the wallet before opening.
-	if isWatchingOnly {
-		err = CreateWatchingOnly(db, pubPassphrase, l.chainParams, bday)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		err = Create(
-			db, pubPassphrase, privPassphrase, seed, end, l.chainParams, bday,
-		)
-		if err != nil {
-			return nil, err
-		}
+	err = Create(db, cryptoScheme, privacyLevel, pubPassphrase, privPassphrase, seed, end, l.chainParams, bday, isWatchingOnly)
+	if err != nil {
+		return nil, err
 	}
 
 	// Open the newly-created wallet.

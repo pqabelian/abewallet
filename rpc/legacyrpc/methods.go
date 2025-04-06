@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto"
+	"github.com/abesuite/abec/abecryptox"
+	"github.com/abesuite/abec/abecryptox/abecryptoxparam"
 	"github.com/abesuite/abec/abejson"
 	"github.com/abesuite/abec/abeutil"
+	"github.com/abesuite/abec/aut"
 	"github.com/abesuite/abewallet/wallet/txrules"
 	"sort"
 	"strings"
@@ -84,6 +86,9 @@ var rpcHandlers = map[string]struct {
 	"getbestblockhash": {handler: getBestBlockHash},
 	"getblockcount":    {handler: getBlockCount},
 	"getinfo":          {handlerWithChain: getInfo},
+
+	"getaddrbalance": {handler: getAddrBalance},
+
 	//"getnewaddress":        {handler: getNewAddress},
 	//"getrawchangeaddress":  {handler: getRawChangeAddress},
 	//"getreceivedbyaccount": {handler: getReceivedByAccount},
@@ -106,6 +111,8 @@ var rpcHandlers = map[string]struct {
 	"listunconfirmedtxoabe":    {handler: listSpentButUnminedAbe},
 	"listconfirmedtxoabe":      {handler: listSpentAndMinedAbe},
 
+	"listautcoins": {handler: listAUTCoins},
+
 	"rangespendableutxo": {handler: rangeSpendableUTXOAbe},
 
 	"listunconfirmedtxs": {handler: listUnconfirmedTxs},
@@ -118,11 +125,17 @@ var rpcHandlers = map[string]struct {
 	//"sendmany":               {handler: sendMany},
 	"gettxhashfromreqeust": {handler: getTxHashFromRequest},
 
-	"sendtoaddressesabe":       {handler: sendToAddressesAbe},
+	"sendtoaddressesabe": {handler: sendToAddressesAbe},
+
+	"registeraut":   {handler: registerAUTTransaction},
+	"mintaut":       {handler: mintAUTTransaction},
+	"transferaut":   {handler: transferAUT},
+	"reregisteraut": {handler: reRegisterAUTTransaction},
+	"burnaut":       {handler: burnAUTTransaction},
+
 	"generateaddressabe":       {handler: generateAddressAbe},
 	"addressmaxsequencenumber": {handler: addressMaxSequenceNumber},
 	"addressrange":             {handler: addressRange},
-	//"exportrange":              {handler: exportRange},
 	"exportaddresskeyrandseed": {handler: exportAddressKeyRandSeed},
 	"listfreeaddresses":        {handler: listFreeAddress},
 	//"sendtoaddress":          {handler: sendToAddress},
@@ -341,9 +354,10 @@ func getBalances(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	currentTime := time.Now().String()
 	bs := w.Manager.SyncedTo()
 	var balances []abeutil.Amount
+	var autRootCoinNums, autBalances []map[string]uint64
 	//var needUpdateNum int
 	var err error
-	balances, err = w.CalculateBalance(int32(*cmd.Minconf))
+	balances, autRootCoinNums, autBalances, err = w.CalculateBalance(int32(*cmd.Minconf))
 	if err != nil {
 		return nil, err
 	}
@@ -356,22 +370,36 @@ func getBalances(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 		ImmatureCBBalance  float64 `json:"immature_cb_balance"`
 		ImmatureTRBalance  float64 `json:"immature_tr_balance"`
 		UnconfirmedBalance float64 `json:"unconfirmed_balance"`
+
+		AUTRootCoinNums          map[string]uint64 `json:"aut_root_coin_numes"`
+		AUTImmatureRootCoinNums  map[string]uint64 `json:"aut_immature_root_coin_numes"`
+		AUTSpendableRootCoinNums map[string]uint64 `json:"aut_spendable_root_coin_numes"`
+		UnconfirmedRootCoinNums  map[string]uint64 `json:"aut_unconfirmed_root_coin_numes"`
+
+		AUTBalances            map[string]uint64 `json:"aut_balances"`
+		AUTImmatureBalances    map[string]uint64 `json:"aut_immature_balances"`
+		AUTSpendableBalances   map[string]uint64 `json:"aut_spendable_balances"`
+		AUTUnconfirmedBalances map[string]uint64 `json:"aut_unconfirmed_balances"`
 	}
 	res := &tt{
-		CurrentTime:        currentTime,
-		CurrentHeight:      bs.Height,
-		CurrentBlockHash:   bs.Hash.String(),
-		TotalBalance:       balances[0].ToABE(),
-		SpendableBalance:   balances[1].ToABE(),
-		ImmatureCBBalance:  balances[2].ToABE(),
-		ImmatureTRBalance:  balances[3].ToABE(),
-		UnconfirmedBalance: balances[4].ToABE(),
+		CurrentTime:              currentTime,
+		CurrentHeight:            bs.Height,
+		CurrentBlockHash:         bs.Hash.String(),
+		TotalBalance:             balances[0].ToABE(),
+		SpendableBalance:         balances[1].ToABE(),
+		ImmatureCBBalance:        balances[2].ToABE(),
+		ImmatureTRBalance:        balances[3].ToABE(),
+		UnconfirmedBalance:       balances[4].ToABE(),
+		AUTRootCoinNums:          autRootCoinNums[0],
+		AUTImmatureRootCoinNums:  autRootCoinNums[1],
+		AUTSpendableRootCoinNums: autRootCoinNums[2],
+		UnconfirmedRootCoinNums:  autRootCoinNums[3],
+		AUTBalances:              autBalances[0],
+		AUTSpendableBalances:     autBalances[1],
+		AUTImmatureBalances:      autBalances[2],
+		AUTUnconfirmedBalances:   autBalances[3],
 	}
-	marshal, err := json.Marshal(res)
-	if err != nil {
-		return nil, err
-	}
-	return string(marshal), nil
+	return res, nil
 }
 
 // getDetailedUtxos is a temporary command for convenience of test.
@@ -427,7 +455,10 @@ func getInfo(icmd interface{}, w *wallet.Wallet, chainClient *chain.RPCClient) (
 	}
 	// TODO(abe):need add the update number into result struct
 	//bal, err := w.CalculateBalance(1)  // switch to calculateBalanceAbe
-	bal, err := w.CalculateBalance(1)
+	balances, autRootCoinNums, autBalances, err := w.CalculateBalance(1)
+	if err != nil {
+		return nil, err
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -435,7 +466,9 @@ func getInfo(icmd interface{}, w *wallet.Wallet, chainClient *chain.RPCClient) (
 	// TODO(davec): This should probably have a database version as opposed
 	// to using the manager version.
 	info.WalletVersion = int32(waddrmgr.LatestMgrVersion)
-	info.Balance = bal[1].ToABE()
+	info.Balance = balances[1].ToABE()
+	info.AUTBalances = autBalances[0]
+	info.AUTRootCoins = autRootCoinNums[0]
 	info.PaytxFee = float64(txrules.DefaultRelayFeePerKb)
 	// We don't set the following since they don't make much sense in the
 	// wallet architecture:
@@ -917,6 +950,50 @@ func listSpentAndMinedAbe(icmd interface{}, w *wallet.Wallet) (interface{}, erro
 	return segmentationTXOSet(res, *cmd.Min, *cmd.Max), nil
 }
 
+func listAUTCoins(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.ListAUTCoinsCmd)
+	if w.Manager.GetCryptoScheme() != abecryptoxparam.CryptoSchemePQRingCTX {
+		return nil, fmt.Errorf("currently ONLY pseudonym-address abewalletmlp support AUT")
+	}
+
+	rootCoinOnly := cmd.RootCoinOnly != nil && *cmd.RootCoinOnly
+	autIdentifier := ""
+	if cmd.AUTIdentifier != nil {
+		autIdentifier = *cmd.AUTIdentifier
+	}
+	autCoins, utxos, err := w.FetchAUTCoins(autIdentifier, rootCoinOnly)
+	if err != nil {
+		return nil, err
+	}
+
+	type tt struct {
+		TxOutput      string `json:"TxOutput"`
+		AUTIdentifier string
+		IsAUTRootCoin bool
+		AUTCoinValue  uint64
+		AddrKey       []byte
+		Spent         bool
+		UTXOHash      string
+	}
+	res := make([]*tt, len(autCoins))
+	for i := 0; i < len(autCoins); i++ {
+		res[i] = &tt{
+			TxOutput:      autCoins[i].TxOutput.String(),
+			AUTIdentifier: string(autCoins[i].AUTIdentifier),
+			IsAUTRootCoin: autCoins[i].IsAUTRootCoin,
+			AUTCoinValue:  autCoins[i].AUTCoinValue,
+			AddrKey:       autCoins[i].AddrKey,
+			Spent:         autCoins[i].Spent,
+		}
+
+		if utxos[i] != nil {
+			res[i].UTXOHash = utxos[i].Hash().String()
+		}
+	}
+
+	return res, nil
+}
+
 func rangeSpendableUTXOAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.RangeSpendableUTXOAbeCmd)
 	specified := false
@@ -1185,8 +1262,8 @@ func checkValidAddress(addr []byte, chainParams *chaincfg.Params) error {
 	return nil
 }
 
-func makeOutputDescsForPairs(w *wallet.Wallet, pairs []abejson.Pair, chainParams *chaincfg.Params) ([]*abecrypto.AbeTxOutputDesc, error) {
-	outputDescs := make([]*abecrypto.AbeTxOutputDesc, 0, len(pairs))
+func makeOutputDescsForPairs(w *wallet.Wallet, pairs []abejson.Pair, chainParams *chaincfg.Params) ([]*abecryptox.AbeTxOutputDesc, error) {
+	outputDescs := make([]*abecryptox.AbeTxOutputDesc, 0, len(pairs))
 	for i := 0; i < len(pairs); i++ {
 		addr, err := hex.DecodeString(pairs[i].Address)
 		if err != nil {
@@ -1198,15 +1275,15 @@ func makeOutputDescsForPairs(w *wallet.Wallet, pairs []abejson.Pair, chainParams
 		}
 		targetAmount := uint64(pairs[i].Amount)
 		addr = addr[1 : len(addr)-32]
-		outputDesc := abecrypto.NewAbeTxOutDesc(addr, targetAmount)
+		outputDesc := abecryptox.NewAbeTxOutDesc(addr, targetAmount)
 
 		outputDescs = append(outputDescs, outputDesc)
 	}
 	return outputDescs, nil
 }
 
-func makeOutputDescs(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) ([]*abecrypto.AbeTxOutputDesc, error) {
-	outputDescs := make([]*abecrypto.AbeTxOutputDesc, 0, len(pairs))
+func makeOutputDescs(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainParams *chaincfg.Params) ([]*abecryptox.AbeTxOutputDesc, error) {
+	outputDescs := make([]*abecryptox.AbeTxOutputDesc, 0, len(pairs))
 	for addrStr, amt := range pairs {
 		//payeeManager, err := w.FetchPayeeManager(name)
 		//if payeeManager == nil {
@@ -1224,7 +1301,7 @@ func makeOutputDescs(w *wallet.Wallet, pairs map[string]abeutil.Amount, chainPar
 		// TODO: check the net ID and the check hash
 		// discard the heading net ID and tailing hash in address
 		addr = addr[1 : len(addr)-32]
-		outputDesc := abecrypto.NewAbeTxOutDesc(addr, targetAmount)
+		outputDesc := abecryptox.NewAbeTxOutDesc(addr, targetAmount)
 
 		outputDescs = append(outputDescs, outputDesc)
 	}
@@ -1292,7 +1369,7 @@ func sendAddressAbe(w *wallet.Wallet, amounts []abejson.Pair,
 		return "", err
 	}
 	var requestHash *chainhash.Hash
-	if w.RecordRequestFlag {
+	if w.RecordRequestFlag && len(utxoSpecified) != 0 {
 		requestContentBuff := &bytes.Buffer{}
 		for i := 0; i < len(outputDescs); i++ {
 			requestContentBuff.WriteString(amounts[i].Address)
@@ -1315,6 +1392,47 @@ func sendAddressAbe(w *wallet.Wallet, amounts []abejson.Pair,
 		}
 	}
 	tx, err := w.SendOutputs(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, "", requestHash) // TODO(abe): what's label?
+	if err != nil {
+		if err == txrules.ErrAmountNegative {
+			return "", ErrNeedPositiveAmount
+		}
+		if waddrmgr.IsError(err, waddrmgr.ErrLocked) {
+			return "", &ErrWalletUnlockNeeded
+		}
+		switch err.(type) {
+		case abejson.RPCError:
+			return "", err
+		}
+
+		return "", &abejson.RPCError{
+			Code:    abejson.ErrRPCInternal.Code,
+			Message: err.Error(),
+		}
+	}
+	txHashStr := tx.Tx.TxHash().String()
+	log.Infof("Successfully sent transaction %v", txHashStr)
+	res := txHashStr
+	if w.Manager.GetCryptoScheme() == abecryptoxparam.CryptoSchemePQRingCT {
+		addressNum, err := w.AddressMaxSequenceNumber()
+		if err != nil {
+			res = txHashStr
+		} else {
+			res = txHashStr + fmt.Sprintf("\nCurrent max No. of address is %d", addressNum)
+		}
+	}
+	return res, nil
+}
+
+func sendAddressAbeAUT(w *wallet.Wallet, autTransaction aut.Transaction, amounts []abejson.Pair,
+	minconf int32, feePerKbSpecified abeutil.Amount,
+	autIssueTokenThreshold uint8, autIssueUpdateThreshold uint8, utxoSpecified []string) (string, error) {
+
+	outputDescs, err := makeOutputDescsForPairs(w, amounts, w.ChainParams())
+	if err != nil {
+		return "", err
+	}
+	tx, err := w.SendOutputsAUT(autTransaction, outputDescs, minconf, feePerKbSpecified,
+		autIssueTokenThreshold, autIssueUpdateThreshold, utxoSpecified)
 	if err != nil {
 		if err == txrules.ErrAmountNegative {
 			return "", ErrNeedPositiveAmount
@@ -1473,18 +1591,13 @@ func exportAddressKeyRandSeed(icmd interface{}, w *wallet.Wallet) (interface{}, 
 	return res, nil
 }
 
-func exportRange(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
-	cmd := icmd.(*abejson.ExportRangeCmd)
-	res, err := w.ExportRange(cmd.Start, cmd.End)
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
-}
-
 func generateAddressAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.GenerateAddressCmd)
 	number := *cmd.Num
+
+	if w.Manager.IsLocked() {
+		return nil, errors.New("wallet is locked")
+	}
 
 	var err error
 	numberOrder := make([]uint64, number)
@@ -1538,6 +1651,7 @@ func listFreeAddress(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	}
 	return res, nil
 }
+
 func sendToAddressesAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
 	cmd := icmd.(*abejson.SendToAddressAbeCmd)
 
@@ -1591,6 +1705,243 @@ func sendToAddressesAbe(icmd interface{}, w *wallet.Wallet) (interface{}, error)
 	}
 
 	return sendAddressAbe(w, cmd.Amounts, minConf, feeSatPerKb, feeSpecified, utxoSpecified)
+}
+
+func registerAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.RegisterAUTTransactionCmd)
+	// according command to  build the output
+	if w.Manager.GetCryptoScheme() != abecryptoxparam.CryptoSchemePQRingCTX {
+		return nil, fmt.Errorf("currently ONLY pseudonym-address abewalletmlp support AUT")
+	}
+
+	if len(cmd.AUTIdentifier) != aut.IdentifierLength {
+		return nil, fmt.Errorf("the length of identifier is expected %d, but got %d", aut.IdentifierLength, len(cmd.AUTIdentifier))
+	}
+	if len(cmd.AUTSymbol) > aut.MaxSymbolLength {
+		return nil, fmt.Errorf("the length of symbol is expected no more than %d, but got %d", aut.MaxSymbolLength, len(cmd.AUTSymbol))
+	}
+
+	// unique issuer token check
+	existIssuerToken := map[string]struct{}{}
+	issuerTokens := make([][]byte, 0, len(cmd.IssuerTokens))
+	for i := 0; i < len(cmd.IssuerTokens); i++ {
+		if _, ok := existIssuerToken[cmd.IssuerTokens[i]]; !ok {
+			existIssuerToken[cmd.IssuerTokens[i]] = struct{}{}
+		}
+		instanceAddress, err := hex.DecodeString(cmd.IssuerTokens[i])
+		if err != nil {
+			return nil, fmt.Errorf("%d-th issuer token can not be decoded", i)
+		}
+		err = checkValidAddress(instanceAddress, w.ChainParams())
+		if err != nil {
+			return nil, err
+		}
+		cryptoAddress := instanceAddress[1 : len(instanceAddress)-32]
+		issuerTokens = append(issuerTokens, cryptoAddress)
+	}
+	if len(existIssuerToken) != len(cmd.IssuerTokens) {
+		return nil, errors.New("issuer token can not contain duplicate")
+	}
+	if int(cmd.IssuerTokenThreshold) > len(cmd.IssuerTokens) {
+		return nil, fmt.Errorf("the issue threshold should not exceed declared issuer tokens %d", len(cmd.IssuerTokens))
+	}
+	if int(cmd.IssuerUpdateThreshold) > len(cmd.IssuerTokens) {
+		return nil, fmt.Errorf("the update threshold should not exceed declared issuer tokens %d", len(cmd.IssuerTokens))
+	}
+	if len(cmd.UnitName) > aut.MaxUnitLength {
+		return nil, fmt.Errorf("the unit name is expected to no more than %d, but got %d", aut.MaxUnitLength, len(cmd.UnitName))
+	}
+	if len(cmd.MinUnitName) > aut.MaxUnitLength {
+		return nil, fmt.Errorf("the minimum unit name is expected to no more than %d, but got %d", aut.MaxMinUnitLength, len(cmd.MinUnitName))
+	}
+
+	outputs := make([]abejson.Pair, 0, (cmd.IssuerTimes+1)*len(cmd.IssuerTokens))
+	for i := 0; i < len(cmd.IssuerTokens); i++ {
+		for j := 0; j < cmd.IssuerTimes+1; j++ { // additional one for re-registration
+			outputs = append(outputs, abejson.Pair{
+				Address: cmd.IssuerTokens[i],
+				Amount:  1,
+			})
+		}
+	}
+
+	autTransaction := &aut.RegistrationTx{
+		AutIdentifier:         []byte(cmd.AUTIdentifier),
+		AutSymbol:             []byte(cmd.AUTSymbol),
+		IssuerTokens:          issuerTokens, // will be populated later
+		ExpireHeight:          cmd.ExpireHeight,
+		IssueTokensThreshold:  cmd.IssuerTokenThreshold,
+		IssuerUpdateThreshold: cmd.IssuerUpdateThreshold,
+		OutAutRootCoinNum:     uint8(len(outputs)),
+		AutMemo:               []byte{},
+		PlannedTotalAmount:    cmd.PlannedTotalAmount,
+		UnitName:              []byte(cmd.UnitName),
+		MinUnitName:           []byte(cmd.MinUnitName),
+		UnitScale:             cmd.UnitScale,
+	}
+	return sendAddressAbeAUT(w, autTransaction, outputs, 0, txrules.DefaultRelayFeePerKb, 0, 0, nil)
+}
+
+func mintAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.MintAUTTransactionCmd)
+	if w.Manager.GetCryptoScheme() != abecryptoxparam.CryptoSchemePQRingCTX {
+		return nil, fmt.Errorf("currently ONLY pseudonym-address abewalletmlp support AUT")
+	}
+
+	// according command to  build the output
+	if len(cmd.AUTIdentifier) != aut.IdentifierLength {
+		return nil, fmt.Errorf("the length of identifier is expected %d, but got %d", aut.IdentifierLength, len(cmd.AUTIdentifier))
+	}
+	// unique issuer token check
+	outputs := make([]abejson.Pair, 0)
+	txoValues := make([]uint64, 0, len(cmd.Outputs))
+	for i := 0; i < len(cmd.Outputs); i++ {
+		outputs = append(outputs, abejson.Pair{
+			Address: cmd.Outputs[i].Address,
+			Amount:  float64(1),
+		})
+		txoValues = append(txoValues, cmd.Outputs[i].Value)
+	}
+
+	autTransaction := &aut.MintTx{
+		AutIdentifier:    []byte(cmd.AUTIdentifier),
+		InAutRootCoinNum: 0, // will be populated later
+		OutAutCoinNum:    uint8(len(cmd.Outputs)),
+		TxoAUTValues:     txoValues,
+		Memo:             []byte{},
+	}
+	return sendAddressAbeAUT(w, autTransaction, outputs, 0, txrules.DefaultRelayFeePerKb, cmd.AUTIssueThreshold, 0, nil)
+}
+
+func transferAUT(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.TransferAUTTransactionCmd)
+	// according command to  build the output
+	if w.Manager.GetCryptoScheme() != abecryptoxparam.CryptoSchemePQRingCTX {
+		return nil, fmt.Errorf("currently ONLY pseudonym-address abewalletmlp support AUT")
+	}
+
+	if len(cmd.AUTIdentifier) != aut.IdentifierLength {
+		return nil, fmt.Errorf("the length of identifier is expected %d, but got %d", aut.IdentifierLength, len(cmd.AUTIdentifier))
+	}
+	outputs := make([]abejson.Pair, 0, len(cmd.Outputs)+1)
+	txoValues := make([]uint64, 0, len(cmd.Outputs)+1)
+	for i := 0; i < len(cmd.Outputs); i++ {
+		outputs = append(outputs, abejson.Pair{
+			Address: cmd.Outputs[i].Address,
+			Amount:  float64(1),
+		})
+		txoValues = append(txoValues, cmd.Outputs[i].Value)
+	}
+	outputs = append(outputs, abejson.Pair{
+		Address: cmd.AUTChangeAddress,
+		Amount:  float64(1),
+	})
+	txoValues = append(txoValues, 0)
+	autTransaction := &aut.TransferTx{
+		AutIdentifier: []byte(cmd.AUTIdentifier),
+		InAutCoinNum:  0, // will be populated later
+		OutAutCoinNum: uint8(len(cmd.Outputs)),
+		TxoAUTValues:  txoValues,
+		Memo:          []byte{},
+	}
+	return sendAddressAbeAUT(w, autTransaction, outputs, 0, txrules.DefaultRelayFeePerKb, 0, 0, nil)
+}
+
+func reRegisterAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.ReRegisterAUTTransactionCmd)
+	// according command to  build the output
+	if w.Manager.GetCryptoScheme() != abecryptoxparam.CryptoSchemePQRingCTX {
+		return nil, fmt.Errorf("currently ONLY pseudonym-address abewalletmlp support AUT")
+	}
+
+	if len(cmd.AUTIdentifier) != aut.IdentifierLength {
+		return nil, fmt.Errorf("the length of identifier is expected %d, but got %d", aut.IdentifierLength, len(cmd.AUTIdentifier))
+	}
+	if len(cmd.AUTSymbol) > aut.MaxSymbolLength {
+		return nil, fmt.Errorf("the length of symbol is expected no more than %d, but got %d", aut.MaxSymbolLength, len(cmd.AUTSymbol))
+	}
+	// unique issuer token check
+	existIssuerToken := map[string]struct{}{}
+	issuerTokens := make([][]byte, 0, len(cmd.IssuerTokens))
+	for i := 0; i < len(cmd.IssuerTokens); i++ {
+		if _, ok := existIssuerToken[cmd.IssuerTokens[i]]; !ok {
+			existIssuerToken[cmd.IssuerTokens[i]] = struct{}{}
+		}
+		instanceAddress, err := hex.DecodeString(cmd.IssuerTokens[i])
+		if err != nil {
+			return nil, fmt.Errorf("%d-th issuer token can not be decoded", i)
+		}
+		err = checkValidAddress(instanceAddress, w.ChainParams())
+		if err != nil {
+			return nil, err
+		}
+		cryptoAddress := instanceAddress[1 : len(instanceAddress)-32]
+		issuerTokens = append(issuerTokens, cryptoAddress)
+	}
+	if len(existIssuerToken) != len(cmd.IssuerTokens) {
+		return nil, errors.New("issuer token can not contain duplicate")
+	}
+	if int(cmd.IssuerTokenThreshold) > len(cmd.IssuerTokens) {
+		return nil, fmt.Errorf("the issue threshold should not exceed declared issuer tokens %d", len(cmd.IssuerTokens))
+	}
+	if int(cmd.IssuerUpdateThreshold) > len(cmd.IssuerTokens) {
+		return nil, fmt.Errorf("the update threshold should not exceed declared issuer tokens %d", len(cmd.IssuerTokens))
+	}
+	outputs := make([]abejson.Pair, 0, (cmd.IssuerTimes+1)*len(cmd.IssuerTokens))
+	for i := 0; i < len(cmd.IssuerTokens); i++ {
+		for j := 0; j < cmd.IssuerTimes+1; j++ { // addition one for re-registration
+			outputs = append(outputs, abejson.Pair{
+				Address: cmd.IssuerTokens[i],
+				Amount:  1,
+			})
+		}
+	}
+
+	autTransaction := &aut.ReRegistrationTx{
+		AutIdentifier:         []byte(cmd.AUTIdentifier),
+		AutSymbol:             []byte(cmd.AUTSymbol),
+		IssuerTokens:          issuerTokens,
+		ExpireHeight:          cmd.ExpireHeight,
+		IssuerUpdateThreshold: cmd.IssuerTokenThreshold,
+		IssueTokensThreshold:  cmd.IssuerUpdateThreshold,
+		InAutRootCoinNum:      0, // will be populated
+		OutAutRootCoinNum:     uint8(len(outputs)),
+		Memo:                  []byte{},
+		PlannedTotalAmount:    cmd.PlannedTotalAmount,
+		UnitScale:             cmd.UnitScale,
+	}
+	return sendAddressAbeAUT(w, autTransaction, outputs, 0, txrules.DefaultRelayFeePerKb, 0, cmd.AUTIssuerUpdateThreshold, nil)
+}
+
+func burnAUTTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.BurnAUTTransactionCmd)
+	if w.Manager.GetCryptoScheme() != abecryptoxparam.CryptoSchemePQRingCTX {
+		return nil, fmt.Errorf("currently ONLY pseudonym-address abewalletmlp support AUT")
+	}
+
+	utxosSpecified := strings.Split(cmd.UTXOSpescified, ",")
+	if len(utxosSpecified) == 0 {
+		return nil, errors.New("specified utxos must more than one")
+	}
+
+	if len(cmd.AUTIdentifier) != aut.IdentifierLength {
+		return nil, fmt.Errorf("the length of identifier is expected %d, but got %d", aut.IdentifierLength, len(cmd.AUTIdentifier))
+	}
+
+	existUTXO := map[string]struct{}{}
+	for i := 0; i < len(utxosSpecified); i++ {
+		if _, ok := existUTXO[utxosSpecified[i]]; ok {
+			return nil, errors.New("specified utxos must be unique to each other")
+		}
+		existUTXO[utxosSpecified[i]] = struct{}{}
+	}
+
+	autTransaction := &aut.BurnTx{
+		AutIdentifier: []byte(cmd.AUTIdentifier),
+		InAutCoinNum:  0, // will be populated
+		Memo:          []byte{},
+	}
+	return sendAddressAbeAUT(w, autTransaction, nil, 0, txrules.DefaultRelayFeePerKb, 0, 0, utxosSpecified)
 }
 
 // sendToAddress handles a sendtoaddress RPC request by creating a new
@@ -2089,4 +2440,14 @@ func segmentationTXOSet(txo []utxo, min float64, max float64) [][]utxo {
 		sort.Sort(&t)
 	}
 	return segmentations
+}
+
+// TODO(abe): this function can be reused for abelian
+func getAddrBalance(icmd interface{}, w *wallet.Wallet) (interface{}, error) {
+	cmd := icmd.(*abejson.GetAddrBalanceCmd)
+	if cmd.Start < 0 || cmd.End < 0 {
+		return nil, nil
+	}
+	res, err := w.GetAddrBalance(cmd.Start, cmd.End)
+	return res, err
 }

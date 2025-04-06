@@ -34,6 +34,10 @@ var versions = []migration.Version{
 		Number:    9,
 		Migration: populateIdxAddrBucket,
 	},
+	{
+		Number:    10,
+		Migration: populatePrivacyLevel,
+	},
 }
 
 // getLatestVersion returns the version number of the latest database version.
@@ -325,5 +329,20 @@ func populateIdxAddrBucket(addrMgr walletdb.ReadWriteBucket) error {
 		str := "failed to store seed status"
 		return managerError(ErrDatabase, str, err)
 	}
+	return nil
+}
+
+func populatePrivacyLevel(addrMgr walletdb.ReadWriteBucket) error {
+	mainBucket := addrMgr.NestedReadWriteBucket(mainBucketName)
+
+	if err := mainBucket.Put(cryptoSchemeName, []byte{0}); err != nil {
+		str := "failed to populate crypto scheme"
+		return managerError(ErrDatabase, str, err)
+	}
+	if err := mainBucket.Put(privacyLevelName, []byte{0}); err != nil {
+		str := "failed to populate privacy flag"
+		return managerError(ErrDatabase, str, err)
+	}
+
 	return nil
 }

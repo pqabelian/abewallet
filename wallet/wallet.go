@@ -6,10 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/abesuite/abec/abecrypto"
-	"github.com/abesuite/abec/abecrypto/abecryptoparam"
+	"github.com/abesuite/abec/abecryptox"
+	"github.com/abesuite/abec/abecryptox/abecryptoxkey"
+	"github.com/abesuite/abec/abecryptox/abecryptoxparam"
 	"github.com/abesuite/abec/abejson"
+	"github.com/abesuite/abec/abelog"
 	"github.com/abesuite/abec/abeutil"
+	"github.com/abesuite/abec/aut"
 	"github.com/abesuite/abec/chaincfg"
 	"github.com/abesuite/abec/chainhash"
 	"github.com/abesuite/abec/wire"
@@ -126,7 +129,8 @@ type Wallet struct {
 	// call the rescan RPC.
 
 	// Channel for transaction creation requests.
-	createTxRequests chan createTxRequest
+	createTxRequests    chan createTxRequest
+	createTxAUTRequests chan createTxAUTRequest
 
 	// Channels for the manager locker.
 	unlockRequests     chan unlockRequest
@@ -157,8 +161,7 @@ type Wallet struct {
 	quitMu  sync.Mutex
 
 	// Information for syncing.
-	SyncFrom                 int32
-	changeWithInitialAddress bool
+	SyncFrom int32
 }
 
 // Start starts the goroutines necessary to manage a wallet.
@@ -344,7 +347,7 @@ func (w *Wallet) SetChainSynced(synced bool) {
 }
 
 func (w *Wallet) SetChangeWithZeroAddr(changeWithZeroAddr bool) {
-	w.changeWithInitialAddress = changeWithZeroAddr
+	w.Manager.SetChangeWithZeroAddr(changeWithZeroAddr)
 }
 
 // activeData returns the currently-active receiving addresses and all unspent
@@ -648,7 +651,7 @@ func locateBirthdayBlock(chainClient chainConn,
 
 type (
 	createTxRequest struct {
-		txOutDescs        []*abecrypto.AbeTxOutputDesc
+		txOutDescs        []*abecryptox.AbeTxOutputDesc
 		minconf           int32
 		feePerKbSpecified abeutil.Amount
 		feeSpecified      abeutil.Amount
@@ -657,6 +660,21 @@ type (
 		resp              chan createTxResponse
 	}
 	createTxResponse struct {
+		tx  *txauthor.AuthoredTxAbe
+		err error
+	}
+
+	createTxAUTRequest struct {
+		autTransaction          aut.Transaction
+		txOutDescs              []*abecryptox.AbeTxOutputDesc
+		minconf                 int32
+		feePerKbSpecified       abeutil.Amount
+		autIssueTokenThreshold  uint8
+		autIssueUpdateThreshold uint8
+		resp                    chan createTxAUTResponse
+		utxoSpecified           []string
+	}
+	createTxAUTResponse struct {
 		tx  *txauthor.AuthoredTxAbe
 		err error
 	}
@@ -683,9 +701,22 @@ out:
 				txr.resp <- createTxResponse{nil, err}
 				continue
 			}
-			tx, err := w.txPqringCTToOutputs(txr.txOutDescs, txr.minconf, txr.feePerKbSpecified, txr.feeSpecified, txr.utxoSpecified, txr.dryRun)
+
+			tx, err := w.txPqringCTToOutputsMLP(txr.txOutDescs, txr.minconf, txr.feePerKbSpecified, txr.feeSpecified, txr.utxoSpecified, txr.dryRun)
+
 			heldUnlock.release()
 			txr.resp <- createTxResponse{tx, err}
+		case txr := <-w.createTxAUTRequests:
+			heldUnlock, err := w.holdUnlock()
+			if err != nil {
+				txr.resp <- createTxAUTResponse{nil, err}
+				continue
+			}
+
+			tx, err := w.txPqringCTToOutputsMLPAUT(txr.autTransaction, txr.txOutDescs, txr.minconf, txr.feePerKbSpecified, txr.autIssueTokenThreshold, txr.autIssueUpdateThreshold, txr.utxoSpecified)
+
+			heldUnlock.release()
+			txr.resp <- createTxAUTResponse{tx, err}
 		case <-quit:
 			break out
 		}
@@ -702,7 +733,7 @@ out:
 //
 // NOTE: The dryRun argument can be set true to create a tx that doesn't alter
 // the database. A tx created with this set to true SHOULD NOT be broadcasted.
-func (w *Wallet) CreateSimpleTx(outputDescs []*abecrypto.AbeTxOutputDesc, minconf int32,
+func (w *Wallet) CreateSimpleTx(outputDescs []*abecryptox.AbeTxOutputDesc, minconf int32,
 	feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount, utxoSpecified []string, dryRun bool) (*txauthor.AuthoredTxAbe, error) {
 
 	req := createTxRequest{
@@ -715,6 +746,24 @@ func (w *Wallet) CreateSimpleTx(outputDescs []*abecrypto.AbeTxOutputDesc, mincon
 		resp:              make(chan createTxResponse),
 	}
 	w.createTxRequests <- req
+	resp := <-req.resp
+	return resp.tx, resp.err
+}
+
+func (w *Wallet) CreateSimpleTxAUT(autTransaction aut.Transaction, outputDescs []*abecryptox.AbeTxOutputDesc, minconf int32,
+	feePerKbSpecified abeutil.Amount, autIssueTokenThreshold uint8, autIssueUpdateThreshold uint8, utxoSpecified []string) (*txauthor.AuthoredTxAbe, error) {
+
+	req := createTxAUTRequest{
+		autTransaction:          autTransaction,
+		txOutDescs:              outputDescs,
+		minconf:                 minconf,
+		feePerKbSpecified:       feePerKbSpecified,
+		autIssueTokenThreshold:  autIssueTokenThreshold,
+		autIssueUpdateThreshold: autIssueUpdateThreshold,
+		resp:                    make(chan createTxAUTResponse),
+		utxoSpecified:           utxoSpecified,
+	}
+	w.createTxAUTRequests <- req
 	resp := <-req.resp
 	return resp.tx, resp.err
 }
@@ -959,16 +1008,30 @@ func (w *Wallet) ChangePassphrases(publicOld, publicNew, privateOld,
 // the balance will be calculated based on how many how many blocks
 // include a UTXO.
 
-func (w *Wallet) CalculateBalance(confirms int32) ([]abeutil.Amount, error) {
+func (w *Wallet) CalculateBalance(confirms int32) ([]abeutil.Amount, []map[string]uint64, []map[string]uint64, error) {
 	var balances []abeutil.Amount
+	var autRootCoinNums, autBalances []map[string]uint64
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 		var err error
 		blk := w.Manager.SyncedTo()
 		balances, err = w.TxStore.Balance(txmgrNs, confirms, blk.Height)
-		return err
+		if err != nil {
+			return err
+		}
+
+		autRootCoinNums, err = w.TxStore.AUTRootCoinNum(txmgrNs, confirms, blk.Height)
+		if err != nil {
+			return err
+		}
+		autBalances, err = w.TxStore.AUTBalance(txmgrNs, confirms, blk.Height)
+		if err != nil {
+			return err
+		}
+
+		return nil
 	})
-	return balances, err
+	return balances, autRootCoinNums, autBalances, err
 }
 
 func (w *Wallet) FetchUnmatruedUTXOSet() ([]wtxmgr.UnspentUTXO, error) {
@@ -1015,6 +1078,19 @@ func (w *Wallet) FetchSpentAndConfirmedTXOSet() ([]wtxmgr.SpentConfirmedTXO, err
 	})
 	return utxos, err
 }
+
+func (w *Wallet) FetchAUTCoins(autIdentifier string, isRootCoin bool) ([]*wtxmgr.AUTCoin, []*wtxmgr.UnspentUTXO, error) {
+	var coins []*wtxmgr.AUTCoin
+	var utxos []*wtxmgr.UnspentUTXO
+	var err error
+	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		coins, utxos, err = w.TxStore.UnspentOutputsAUT(txmgrNs, []byte(autIdentifier), isRootCoin)
+		return err
+	})
+	return coins, utxos, err
+}
+
 func (w *Wallet) FetchConfirmedTxHashs() ([]*chainhash.Hash, error) {
 	var txHashs []*chainhash.Hash
 	var err error
@@ -1431,6 +1507,7 @@ func (w *Wallet) resendUnminedTx() {
 				log.Errorf("Unable to delete unconfirmed transactions %s which is "+
 					"resended: %v", tx.TxHash(), err)
 			}
+			continue
 		}
 		log.Debugf("Successfully rebroadcast unconfirmed transaction %v",
 			tx.TxHash())
@@ -1450,44 +1527,25 @@ func (w *Wallet) AddressMaxSequenceNumber() (uint64, error) {
 	var err error
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		addressNum, err = waddrmgr.FetchSeedStatus(addrmgrNs)
+		addressNum, err = w.Manager.FetchSeedStatus(addrmgrNs)
 		return err
 	})
 	return addressNum, err
 }
 
 func (w *Wallet) AddressRange(start uint64, end uint64) (res map[uint64]string, err error) {
-	addrKeys := make(map[uint64][]byte, end-start)
-	addresses := make(map[uint64][]byte, end-start)
-	res = make(map[uint64]string, end-start)
+	var addresses map[uint64][]byte
 	var addressMaxNum uint64
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-
-		addressMaxNum, err = waddrmgr.FetchSeedStatus(addrmgrNs)
-		if err != nil {
-			return err
-		}
-
-		addrKeys, err = waddrmgr.FetchAddressKeys(addrmgrNs, start, end)
-		if err != nil {
-			return err
-		}
-		for i := start; i < end && i <= addressMaxNum; i++ {
-			serializedAddressEnc, _, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKeys[i])
-			if err != nil {
-				return err
-			}
-			addresses[i], _, _, _, err = w.Manager.DecryptAddressKey(serializedAddressEnc, nil, nil, nil)
-			if err != nil {
-				return err
-			}
-		}
+		addressMaxNum, addresses, err = w.Manager.AddressRange(addrmgrNs, start, end)
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
+
+	res = make(map[uint64]string, end-start)
 	for i := start; i < end; i++ {
 		if i <= addressMaxNum {
 			res[i] = w.Export(addresses[i])
@@ -1502,30 +1560,12 @@ func (w *Wallet) ExportAddressKeyRandSeed(start uint64, end uint64) (interface{}
 	if err != nil {
 		return nil, err
 	}
+	defer heldUnlock.release()
+
 	randSeeds := make(map[uint64][]byte, end-start)
-	var addressMaxNum uint64
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
 		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-
-		seedEnc, err := w.Manager.FetchSeedEnc(addrmgrNs)
-		if err != nil {
-			return err
-		}
-		seed, err := w.Manager.Decrypt(waddrmgr.CKTSeed, seedEnc)
-		if err != nil {
-			return err
-		}
-
-		addressMaxNum, err = waddrmgr.FetchSeedStatus(addrmgrNs)
-		if err != nil {
-			return err
-		}
-		for i := start; i < end && i <= addressMaxNum; i++ {
-			randSeeds[i], err = w.Manager.GenerateCryptoSeed(seed, i)
-			if err != nil {
-				return err
-			}
-		}
+		randSeeds, err = w.Manager.ExportRandSeeds(addrmgrNs, start, end)
 		return err
 	})
 	if err != nil {
@@ -1534,88 +1574,14 @@ func (w *Wallet) ExportAddressKeyRandSeed(start uint64, end uint64) (interface{}
 	res := make(map[uint64]map[string]string, end-start)
 	for i := start; i < end; i++ {
 		res[i] = map[string]string{}
-		if i <= addressMaxNum {
-			res[i]["randseed"] = hex.EncodeToString(append([]byte{0, 0, 0, 0}, randSeeds[i]...))
+		if len(randSeeds) != 0 {
+			res[i]["randseed"] = hex.EncodeToString(append(abecryptoxparam.SerializeCryptoScheme(w.Manager.GetCryptoScheme()), randSeeds[i]...))
 			res[i]["No"] = strconv.Itoa(int(i))
 		} else {
 			res[i]["randseed"] = ""
 			res[i]["No"] = strconv.Itoa(int(i))
 		}
 	}
-	heldUnlock.release()
-	return res, nil
-}
-
-func (w *Wallet) ExportRange(start uint64, end uint64) (interface{}, error) {
-	heldUnlock, err := w.holdUnlock()
-	if err != nil {
-		return nil, err
-	}
-	addrKeys := make(map[uint64][]byte, end-start)
-	cryptoSeeds := make(map[uint64][]byte, end-start)
-	addresses := make(map[uint64][]byte, end-start)
-	asksps := make(map[uint64][]byte, end-start)
-	asksns := make(map[uint64][]byte, end-start)
-	vsks := make(map[uint64][]byte, end-start)
-	var addressMaxNum uint64
-	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-
-		seedEnc, err := w.Manager.FetchSeedEnc(addrmgrNs)
-		if err != nil {
-			return err
-		}
-		seed, err := w.Manager.Decrypt(waddrmgr.CKTSeed, seedEnc)
-		if err != nil {
-			return err
-		}
-
-		addressMaxNum, err = waddrmgr.FetchSeedStatus(addrmgrNs)
-		if err != nil {
-			return err
-		}
-
-		addrKeys, err = waddrmgr.FetchAddressKeys(addrmgrNs, start, end)
-		if err != nil {
-			return err
-		}
-		for i := start; i < end && i <= addressMaxNum; i++ {
-			cryptoSeeds[i], err = w.Manager.GenerateCryptoSeed(seed, i)
-			if err != nil {
-				return err
-			}
-			serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKeys[i])
-			if err != nil {
-				return err
-			}
-			addresses[i], asksps[i], asksns[i], vsks[i], err = w.Manager.DecryptAddressKey(serializedAddressEnc, serializedAskspEnc, serializedAsksnEnc, serializedVskEnc)
-			if err != nil {
-				return err
-			}
-		}
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	res := make(map[uint64]map[string]string, end-start)
-	for i := start; i < end; i++ {
-		res[i] = map[string]string{}
-		if i <= addressMaxNum {
-			res[i]["cryptoseed"] = w.Export(cryptoSeeds[i])
-			res[i]["address"] = w.Export(addresses[i])
-			res[i]["asksp"] = w.Export(asksps[i])
-			res[i]["asksn"] = w.Export(asksns[i])
-			res[i]["vsk"] = w.Export(vsks[i])
-		} else {
-			res[i]["cryptoseed"] = ""
-			res[i]["address"] = ""
-			res[i]["asksp"] = ""
-			res[i]["asksn"] = ""
-			res[i]["vsk"] = ""
-		}
-	}
-	heldUnlock.release()
 	return res, nil
 }
 
@@ -1639,11 +1605,11 @@ func (w *Wallet) ListFreeAddresses() (res map[uint64][]byte, err error) {
 
 		res = make(map[uint64][]byte, len(addrKeys))
 		for idx, addrKey := range addrKeys {
-			serializedAddressEnc, _, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKey)
+			serializedAddressEnc, _, _, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKey)
 			if err != nil {
 				return err
 			}
-			res[idx], _, _, _, err = w.Manager.DecryptAddressKey(serializedAddressEnc, nil, nil, nil)
+			res[idx], _, _, _, _, err = w.Manager.DecryptAddressKey(serializedAddressEnc, nil, nil, nil, nil)
 			if err != nil {
 				return err
 			}
@@ -1663,35 +1629,9 @@ func (w *Wallet) FetchChangeAddress(markUsed bool) (uint64, []byte, error) {
 	var address []byte
 	var err error
 	err = walletdb.View(w.db, func(tx walletdb.ReadTx) error {
-		var addrKey []byte
 		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
-		if w.changeWithInitialAddress {
-			addrKeys, err := waddrmgr.FetchAddressKeys(addrmgrNs, 0, 1)
-			if err != nil {
-				return err
-			}
-			addrKey = addrKeys[0]
-			sequenceNumber = 0
-		} else {
-			sequenceNumber, addrKey, err = w.Manager.FetchNextFreeAddressKey(addrmgrNs)
-			if err != nil {
-				return err
-			}
-			if addrKey == nil {
-				return errors.New("no free address")
-			}
-		}
-		serializedAddressEnc, _, _, _, _, err := w.Manager.FetchAddressKeyEncByAddressKey(addrmgrNs, addrKey)
-		if err != nil {
-			return err
-		}
-
-		address, _, _, _, err = w.Manager.DecryptAddressKey(serializedAddressEnc, nil, nil, nil)
-		if err != nil {
-			return err
-		}
-
-		return nil
+		sequenceNumber, address, err = w.Manager.FetchChangeAddress(addrmgrNs)
+		return err
 	})
 	if err != nil {
 		return 0, nil, err
@@ -1711,7 +1651,7 @@ func (w *Wallet) FetchChangeAddress(markUsed bool) (uint64, []byte, error) {
 // NewAddressKey returns a new address for a wallet.
 func (w *Wallet) NewAddressKey(markUsed bool) ([]byte, uint64, []byte, error) {
 	var numberOrder uint64
-	var addr []byte
+	var cryptoAddress []byte
 	var netID []byte
 	err := walletdb.Update(w.db, func(tx walletdb.ReadWriteTx) error {
 		var err error
@@ -1720,53 +1660,10 @@ func (w *Wallet) NewAddressKey(markUsed bool) ([]byte, uint64, []byte, error) {
 		if err != nil {
 			return err
 		}
-		seedEnc, err := w.Manager.FetchSeedEnc(addrmgrNs)
-		if err != nil {
-			return err
-		}
-		seed, err := w.Manager.Decrypt(waddrmgr.CKTSeed, seedEnc)
-		if err != nil {
-			return err
-		}
-		var serializedASksp, serializedASksn, serializedVSk []byte
-		numberOrder, addr, serializedASksp, serializedASksn, serializedVSk, err = w.Manager.GenerateAddressKeys(addrmgrNs, seed)
-		if err != nil {
-			return err
-		}
-		addressSecretKeySpEnc, err :=
-			w.Manager.Encrypt(waddrmgr.CKTPrivate, serializedASksp)
-		if err != nil {
-			return err
-		}
-		addressSecretKeySnEnc, err :=
-			w.Manager.Encrypt(waddrmgr.CKTPublic, serializedASksn)
-		if err != nil {
-			return err
-		}
-		addressKeyEnc, err :=
-			w.Manager.Encrypt(waddrmgr.CKTPublic, addr)
-		if err != nil {
-			return err
-		}
-		valueSecretKeyEnc, err :=
-			w.Manager.Encrypt(waddrmgr.CKTPublic, serializedVSk)
-		if err != nil {
-			return err
-		}
 
-		addKey := chainhash.DoubleHashB(addr[4 : 4+abecryptoparam.PQRingCTPP.AddressPublicKeySerializeSize()])
-
-		err = w.Manager.PutAddressKeysEnc(addrmgrNs, numberOrder, addKey[:], valueSecretKeyEnc,
-			addressSecretKeySpEnc, addressSecretKeySnEnc, addressKeyEnc)
+		numberOrder, cryptoAddress, _, _, _, _, err = w.Manager.GenerateAddressKeys(addrmgrNs, markUsed)
 		if err != nil {
 			return err
-		}
-
-		if markUsed {
-			err = w.Manager.MarkAddrUsed(addrmgrNs, numberOrder)
-			if err != nil {
-				return err
-			}
 		}
 
 		return err
@@ -1774,7 +1671,32 @@ func (w *Wallet) NewAddressKey(markUsed bool) ([]byte, uint64, []byte, error) {
 	if err != nil {
 		return nil, 0, nil, err
 	}
-	return netID, numberOrder, addr, nil
+	return netID, numberOrder, cryptoAddress, nil
+}
+
+func (w *Wallet) GetAddrBalance(start uint64, end uint64) (interface{}, error) {
+	var res interface{}
+	err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+		var err error
+		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
+		if start == end {
+			res, err = w.TxStore.GetTxoCountOverview(txmgrNs)
+		} else {
+			addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+			var addrKeys map[uint64][]byte
+			addrKeys, err = waddrmgr.FetchAddressKeys(addrmgrNs, start, end)
+			if err != nil {
+				return err
+			}
+
+			res, err = w.TxStore.GetAddrTxoStatistic(txmgrNs, addrKeys, start, end)
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 // newChangeAddress returns a new change address for the wallet.
@@ -1814,7 +1736,7 @@ func confirms(txHeight, curHeight int32) int32 {
 // SendOutputs creates and sends payment transactions. It returns the
 // transaction upon success.
 
-func (w *Wallet) SendOutputs(outputDescs []*abecrypto.AbeTxOutputDesc,
+func (w *Wallet) SendOutputs(outputDescs []*abecryptox.AbeTxOutputDesc,
 	minconf int32, feePerKbSpecified abeutil.Amount, feeSpecified abeutil.Amount,
 	utxoSpecified []string, label string, requestHash *chainhash.Hash) (*txauthor.AuthoredTxAbe, error) {
 	// Ensure the outputs to be created adhere to the network's consensus
@@ -1834,7 +1756,7 @@ func (w *Wallet) SendOutputs(outputDescs []*abecrypto.AbeTxOutputDesc,
 	// been confirmed.
 	createdTx, err := w.CreateSimpleTx(outputDescs, minconf, feePerKbSpecified, feeSpecified, utxoSpecified, false)
 	if err != nil {
-		if w.RecordRequestFlag {
+		if w.RecordRequestFlag && len(utxoSpecified) != 0 {
 			log.Errorf("can not create a transaction for request hash %s with specified utxo %s", requestHash, utxoSpecified)
 		}
 		return nil, err
@@ -1842,6 +1764,63 @@ func (w *Wallet) SendOutputs(outputDescs []*abecrypto.AbeTxOutputDesc,
 
 	// it means that the transaction is created successful
 	txHash, err := w.reliablyPublishTransaction(createdTx.Tx, label, requestHash)
+	if err != nil {
+		// the wallet would fetch the transaction
+		// due to error double spending
+		// And then insert the transaction into database
+		// But current do nothing? TODO 202207
+		if _, ok := err.(*ErrDoubleSpend); ok {
+			// do nothing
+		}
+		return nil, err
+	}
+
+	for i := 0; i < len(createdTx.Tx.TxOuts); i++ {
+		if log.Level() == abelog.LevelTrace {
+			log.Tracef("tx output [%d] = %x\n", i, createdTx.Tx.TxOuts[i].TxoScript)
+		} else if log.Level() == abelog.LevelDebug {
+			log.Debugf("tx output [%d] = %x\n", i, createdTx.Tx.TxOuts[i].TxoScript)
+		} else {
+			printedLength := len(createdTx.Tx.TxOuts[i].TxoScript)
+			if printedLength > 32 {
+				printedLength = 32
+			}
+			log.Infof("tx output [%d] = %x\n", i, createdTx.Tx.TxOuts[i].TxoScript[:printedLength])
+		}
+	}
+	// Sanity check on the returned tx hash.
+	// something error ?
+	if *txHash != createdTx.Tx.TxHash() {
+		return nil, errors.New("tx hash mismatch")
+	}
+
+	return createdTx, nil
+}
+
+func (w *Wallet) SendOutputsAUT(autTransaction aut.Transaction, outputDescs []*abecryptox.AbeTxOutputDesc,
+	minconf int32, feePerKbSpecified abeutil.Amount, autIssueTokenThreshold uint8, autIssueUpdateThreshold uint8, utxoSpecified []string) (*txauthor.AuthoredTxAbe, error) {
+	// Ensure the outputs to be created adhere to the network's consensus
+	// rules.
+	for _, txOutDesc := range outputDescs {
+		err := txrules.CheckOutputDescAbe(
+			txOutDesc, txrules.DefaultRelayFeePerKb,
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Create the transaction and broadcast it to the network. The
+	// transaction will be added to the database in order to ensure that we
+	// continue to re-broadcast the transaction upon restarts until it has
+	// been confirmed.
+	createdTx, err := w.CreateSimpleTxAUT(autTransaction, outputDescs, minconf, feePerKbSpecified, autIssueTokenThreshold, autIssueUpdateThreshold, utxoSpecified)
+	if err != nil {
+		return nil, err
+	}
+
+	// it means that the transaction is created successful
+	txHash, err := w.reliablyPublishTransaction(createdTx.Tx, "", nil)
 	if err != nil {
 		// the wallet would fetch the transaction
 		// due to error double spending
@@ -1943,7 +1922,6 @@ func (w *Wallet) reliablyPublishTransaction(tx *wire.MsgTxAbe,
 	if err != nil {
 		return nil, err
 	}
-	log.Infof("insert transaction %s into unmined bucket", tx.TxHash())
 	// add the transaction into unmined bucket
 	err = walletdb.Update(w.db, func(dbTx walletdb.ReadWriteTx) error {
 		if err := w.addRelevantTx(dbTx, txRec, nil); err != nil {
@@ -1951,11 +1929,8 @@ func (w *Wallet) reliablyPublishTransaction(tx *wire.MsgTxAbe,
 			return err
 		}
 
-		if w.RecordRequestFlag {
-			if requestHash == nil {
-				log.Errorf("request hash is nil but the record request flag is enabled")
-				return errors.New("request hash is nil but the record request flag is enabled")
-			}
+		log.Infof("insert transaction %s into unmined bucket", tx.TxHash())
+		if w.RecordRequestFlag && requestHash != nil {
 			txmgrNs := dbTx.ReadWriteBucket(wtxmgrNamespaceKey)
 			err = w.TxStore.PutRequestHashAndTxHash(txmgrNs, requestHash.String(), hash.String())
 			if err != nil {
@@ -2182,28 +2157,8 @@ func (w *Wallet) GetTxHashRequestHash(requestHash string) (res map[string]interf
 // recommended length is generated.
 
 // TODO(abe):
-func Create(db walletdb.DB, pubPass, privPass, seed []byte, end uint64,
-	params *chaincfg.Params, birthday time.Time) error {
-
-	return create(
-		db, pubPass, privPass, seed, end, params, birthday, false,
-	)
-}
-
-// CreateWatchingOnly creates an new watch-only wallet, writing it to
-// an empty database. No seed can be provided as this wallet will be
-// watching only.  Likewise no private passphrase may be provided
-// either.
-func CreateWatchingOnly(db walletdb.DB, pubPass []byte,
-	params *chaincfg.Params, birthday time.Time) error {
-
-	return create(
-		db, pubPass, nil, nil, 0, params, birthday, true,
-	)
-}
-
-func create(db walletdb.DB, pubPass, privPass, seed []byte, end uint64,
-	params *chaincfg.Params, birthday time.Time, isWatchingOnly bool) error {
+func Create(db walletdb.DB, cryptoScheme abecryptoxparam.CryptoScheme, privacyLevel abecryptoxkey.PrivacyLevel,
+	pubPass, privPass, seed []byte, end uint64, params *chaincfg.Params, birthday time.Time, isWatchingOnly bool) error {
 	// TODO: the following snippet is not run?
 	if !isWatchingOnly {
 		// If a seed was provided, ensure that it is of valid length. Otherwise,
@@ -2233,7 +2188,7 @@ func create(db walletdb.DB, pubPass, privPass, seed []byte, end uint64,
 		}
 
 		err = waddrmgr.Create(
-			addrmgrNs, seed, pubPass, privPass, end, params, nil, birthday,
+			cryptoScheme, privacyLevel, addrmgrNs, seed, pubPass, privPass, end, params, nil, birthday,
 		)
 		if err != nil {
 			return err
@@ -2301,6 +2256,7 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 		resendUnminedTxFlag: atomic.Value{},
 		recoveryWindow:      recoveryWindow,
 		createTxRequests:    make(chan createTxRequest),
+		createTxAUTRequests: make(chan createTxAUTRequest),
 		unlockRequests:      make(chan unlockRequest),
 		lockRequests:        make(chan struct{}),
 		holdUnlockRequests:  make(chan chan heldUnlock),

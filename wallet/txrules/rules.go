@@ -6,6 +6,7 @@ package txrules
 import (
 	"errors"
 	"github.com/abesuite/abec/abecrypto"
+	"github.com/abesuite/abec/abecryptox"
 	"github.com/abesuite/abec/abeutil"
 	"github.com/abesuite/abec/txscript"
 	"github.com/abesuite/abec/wire"
@@ -102,8 +103,8 @@ func CheckOutput(output *wire.TxOut, relayFeePerKb abeutil.Amount) error {
 	return nil
 }
 
-func CheckOutputDescAbe(outputDesc *abecrypto.AbeTxOutputDesc, relayFeePerKb abeutil.Amount) error {
-	value := outputDesc.GetValue()
+func CheckOutputDescAbe(outputDesc *abecryptox.AbeTxOutputDesc, relayFeePerKb abeutil.Amount) error {
+	value := outputDesc.Value()
 
 	if value < 0 {
 		return ErrAmountNegative
@@ -112,7 +113,7 @@ func CheckOutputDescAbe(outputDesc *abecrypto.AbeTxOutputDesc, relayFeePerKb abe
 		return ErrAmountExceedsMax
 	}
 
-	if IsDustOutputAbe(outputDesc, relayFeePerKb) {
+	if IsDustOutputAbe(nil, relayFeePerKb) {
 		return ErrOutputIsDust
 	}
 	return nil
